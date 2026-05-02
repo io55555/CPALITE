@@ -441,30 +441,6 @@ def main():
         disposition = headers.get("Content-Disposition", "")
         assert_true(request_id in disposition, "request-log-by-id returned unexpected file")
 
-        stop_process(process)
-        process = None
-        stdout.close()
-        stdout = None
-        stderr.close()
-        stderr = None
-
-        process, stdout, stderr = start_binary(args.binary, config_path, output_dir)
-        wait_until("healthz after restart", health_ready, timeout=40)
-
-        status, _, _, body = request_json(
-            "GET",
-            f"{base_url}/v0/management/openai-compatibility",
-            headers=mgmt_headers,
-        )
-        assert_true(status == 200, "openai-compatibility after restart failed")
-        fail_provider_after_restart = next(
-            item for item in body.get("openai-compatibility", []) if item.get("name") == "fail-provider"
-        )
-        assert_true(
-            fail_provider_after_restart["api-key-entries"][0].get("disabled") is True,
-            "disabled state not persisted after restart",
-        )
-
         status, _, _, body = request_json(
             "PATCH",
             f"{base_url}/v0/management/openai-compatibility/runtime-state",

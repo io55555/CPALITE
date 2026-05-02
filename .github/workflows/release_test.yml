@@ -171,7 +171,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smoke-${{ steps.versions.outputs.cli_version }}
-          path: smoke-output/*
+          if-no-files-found: warn
+          path: smoke-output/**
 
       - name: Build CLIProxyAPI release archives
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
