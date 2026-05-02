@@ -4,19 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       cli_version:
-        description: "CLIProxyAPI 官方版本号，例如 v6.0.0"
+        description: "CLIProxyAPI upstream version, for example v6.10.1"
         required: true
         type: string
       manager_version:
-        description: "CPA-Manager 版本号，可留空"
+        description: "CPA-Manager version, optional"
         required: false
         type: string
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
-  build-and-release:
+  build-test-release:
     runs-on: ubuntu-latest
     env:
       CLI_VERSION: ${{ inputs.cli_version }}
@@ -41,13 +42,69 @@ jobs:
           fi
           echo "cli_version=${cli_version}" >> "$GITHUB_OUTPUT"
           echo "manager_version=${manager_version}" >> "$GITHUB_OUTPUT"
+          echo "block_tag=autoblock-${cli_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing release
+        id: release_check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.versions.outputs.cli_version }}"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${version}"
+          status="$(curl -s -o /tmp/release-check.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}")"
+          if [ "${status}" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check failure block tag
+        id: block_check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.versions.outputs.block_tag }}"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}"
+          status="$(curl -s -o /tmp/block-tag-check.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}")"
+          if [ "${status}" = "200" ]; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop if release already exists
+        if: steps.release_check.outputs.exists == 'true'
+        shell: bash
+        run: |
+          echo "Release ${{ steps.versions.outputs.cli_version }} already exists, skip."
+          exit 0
+
+      - name: Stop if version is blocked
+        if: github.event_name != 'workflow_dispatch' && steps.block_check.outputs.blocked == 'true'
+        shell: bash
+        run: |
+          echo "Version ${{ steps.versions.outputs.cli_version }} is blocked by autoblock tag."
+          echo "Run workflow_dispatch manually after fixing the code to retry."
+          exit 0
 
       - name: Setup Node.js
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Build CPA-Manager
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         working-directory: src000/CPA-Manager
         env:
           VERSION: ${{ steps.versions.outputs.cli_version }}
@@ -56,20 +113,67 @@ jobs:
           npm run build
 
       - name: Setup Go
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         uses: actions/setup-go@v4
         with:
           go-version: "1.26.0"
 
+      - name: Setup Python
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Prepare model catalog
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         working-directory: src000/CLIProxyAPI
+        shell: bash
         run: |
+          set -euo pipefail
           git init -q .tmp-models
           git -C .tmp-models remote add origin https://github.com/router-for-me/models.git
           git -C .tmp-models fetch --depth 1 origin main
           git -C .tmp-models show FETCH_HEAD:models.json > internal/registry/models/models.json
           rm -rf .tmp-models
 
-      - name: Build CLIProxyAPI archives
+      - name: Build smoke binary
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
+        working-directory: src000/CLIProxyAPI
+        shell: bash
+        env:
+          VERSION: ${{ steps.versions.outputs.cli_version }}
+          COMMIT: ${{ github.sha }}
+          BUILD_DATE: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-smoke
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build \
+            -trimpath \
+            -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \
+            -o dist-smoke/cli-proxy-api \
+            ./cmd/server
+
+      - name: Run smoke test
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-output
+          python3 scripts/release_smoke_test.py \
+            --binary src000/CLIProxyAPI/dist-smoke/cli-proxy-api \
+            --management-html src000/CPA-Manager/dist/index.html \
+            --output-dir smoke-output
+
+      - name: Upload smoke logs
+        if: always() && steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ steps.versions.outputs.cli_version }}
+          path: smoke-output/*
+
+      - name: Build CLIProxyAPI release archives
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         working-directory: src000/CLIProxyAPI
         shell: bash
         env:
@@ -116,31 +220,87 @@ jobs:
           done
 
       - name: Collect release assets
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release-assets
           cp src000/CPA-Manager/dist/index.html release-assets/management.html
-          cp src000/CLIProxyAPI/dist/*.tar.gz release-assets/
+          cp src000/CLIProxyAPI/dist/*.tar.gz release-assets/ || true
+          cp src000/CLIProxyAPI/dist/*.zip release-assets/ || true
           ls -lh release-assets
 
-      - name: Upload artifacts
+      - name: Upload release bundle
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         uses: actions/upload-artifact@v4
         with:
           name: release-test-${{ steps.versions.outputs.cli_version }}
           path: release-assets/*
 
-      - name: Create prerelease
+      - name: Clear failure block tag
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.versions.outputs.block_tag }}"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}"
+          status="$(curl -s -o /tmp/block-tag-delete.json -w '%{http_code}' \
+            -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}")"
+          if [ "${status}" != "204" ] && [ "${status}" != "404" ]; then
+            echo "delete block tag failed: ${status}"
+            cat /tmp/block-tag-delete.json || true
+            exit 1
+          fi
+
+      - name: Create release
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.versions.outputs.cli_version }}
           name: ${{ steps.versions.outputs.cli_version }}
           target_commitish: ${{ github.sha }}
           draft: false
-          prerelease: true
+          prerelease: false
           files: release-assets/*
           body: |
-            CLIProxyAPI 版本：${{ steps.versions.outputs.cli_version }}
-            CPA-Manager 版本：${{ steps.versions.outputs.manager_version }}
+            CLIProxyAPI version: ${{ steps.versions.outputs.cli_version }}
+            CPA-Manager version: ${{ steps.versions.outputs.manager_version }}
 
-            该版本由 `release_test.yml` 手动触发构建，用于补丁编译与功能验证。
+            Built by `release_test.yml`.
+            Released only after build and smoke test both passed.
+
+      - name: Mark blocked version on failure
+        if: failure() && github.event_name != 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.versions.outputs.block_tag }}"
+          sha="${GITHUB_SHA}"
+          ref_api="https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs"
+          payload="$(jq -n --arg ref "refs/tags/${tag}" --arg sha "${sha}" '{ref:$ref, sha:$sha}')"
+          status="$(curl -s -o /tmp/block-tag.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${ref_api}" \
+            -d "${payload}")"
+          if [ "${status}" = "422" ]; then
+            update_api="https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}"
+            update_payload="$(jq -n --arg sha "${sha}" '{sha:$sha, force:true}')"
+            curl -s \
+              -X PATCH \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${update_api}" \
+              -d "${update_payload}" > /tmp/block-tag-update.json
+          elif [ "${status}" -ge 300 ]; then
+            cat /tmp/block-tag.json || true
+            exit 1
+          fi
