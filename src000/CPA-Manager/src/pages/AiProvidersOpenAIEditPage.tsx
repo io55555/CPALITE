@@ -116,6 +116,21 @@ function StatusIdleIcon() {
   );
 }
 
+function RuntimeErrorBadge() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <circle cx="9" cy="9" r="8" fill="var(--danger-color, #c65746)" />
+      <path
+        d="M9 4.5V9.5M9 13H9.01"
+        stroke="white"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function StatusIcon({ status }: { status: KeyTestStatus['status'] }) {
   switch (status) {
     case 'loading':
@@ -646,9 +661,13 @@ export function AiProvidersOpenAIEditPage() {
                         ariaLabel="切换密钥启停状态"
                         disabled={saving || disableControls || isTestingKeys || runtimeBusyIndex === index}
                         className={styles.keyRuntimeToggle}
-                        labelClassName={styles.keyRuntimeToggleLabel}
-                        label={<span className={styles.keyRuntimeLabel}>{runtimeText}</span>}
                       />
+                      <span className={styles.keyRuntimeLabel}>{runtimeText}</span>
+                      {runtimeHint ? (
+                        <span className={styles.keyRuntimeErrorBadge} title={runtimeHint}>
+                          <RuntimeErrorBadge />
+                        </span>
+                      ) : null}
                       {hasDetail ? (
                         <Button
                           variant="ghost"
@@ -660,11 +679,6 @@ export function AiProvidersOpenAIEditPage() {
                         </Button>
                       ) : null}
                     </div>
-                    {runtimeHint ? (
-                      <div className={styles.keyRuntimeHint} title={runtimeHint}>
-                        {runtimeHint}
-                      </div>
-                    ) : null}
                     <div className={styles.keyActionButtons}>
                       <Button
                         variant="secondary"

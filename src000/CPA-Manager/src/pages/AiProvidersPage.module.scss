@@ -1293,13 +1293,13 @@ $openai-toolbar-control-height: 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: $spacing-xs;
   min-width: 0;
 }
 
 .keyRuntimeToggle {
-  min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 .keyRuntimeToggleLabel {
@@ -1311,15 +1311,23 @@ $openai-toolbar-control-height: 36px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
 }
 
-.keyRuntimeHint {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.keyRuntimeErrorBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  cursor: help;
+
+  svg {
+    display: block;
+  }
 }
 
 .keyActionButtons {
@@ -1327,6 +1335,14 @@ $openai-toolbar-control-height: 36px;
   align-items: center;
   gap: $spacing-xs;
   flex-wrap: wrap;
+}
+
+.keyRuntimeRow > :first-child {
+  flex-shrink: 0;
+}
+
+.keyRuntimeRow > :last-child {
+  margin-left: auto;
 }
 
 .addKeyButton {

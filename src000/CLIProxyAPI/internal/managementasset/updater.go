@@ -96,6 +96,10 @@ func runAutoUpdater(ctx context.Context) {
 
 		configPath, _ := schedulerConfigPath.Load().(string)
 		staticDir := StaticDir(configPath)
+		if shouldPreferBundledManagementHTML(staticDir, cfg.RemoteManagement.PanelGitHubRepository) {
+			log.Debug("management asset auto-updater skipped: keeping bundled local panel for default repository")
+			return
+		}
 		EnsureLatestManagementHTML(ctx, staticDir, cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository)
 	}
 
@@ -215,6 +219,10 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 				log.WithError(errStat).Debug("failed to stat local management asset")
 			}
 		}
+		if !localFileMissing && shouldPreferBundledManagementHTML(staticDir, panelRepository) {
+			log.Debug("management asset sync skipped: keeping bundled local panel for default repository")
+			return nil, nil
+		}
 
 		if errMkdirAll := os.MkdirAll(staticDir, 0o755); errMkdirAll != nil {
 			log.WithError(errMkdirAll).Warn("failed to prepare static directory for management asset")
@@ -278,6 +286,19 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 	})
 
 	_, err := os.Stat(localPath)
+	return err == nil
+}
+
+func shouldPreferBundledManagementHTML(staticDir, panelRepository string) bool {
+	panelRepository = strings.TrimSpace(panelRepository)
+	if panelRepository == "" || !strings.EqualFold(panelRepository, config.DefaultPanelGitHubRepository) {
+		return false
+	}
+	staticDir = strings.TrimSpace(staticDir)
+	if staticDir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(staticDir, managementAssetName))
 	return err == nil
 }
 
