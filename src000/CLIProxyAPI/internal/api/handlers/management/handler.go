@@ -38,6 +38,8 @@ type Handler struct {
 	cfg                 *config.Config
 	configFilePath      string
 	mu                  sync.Mutex
+	openAICompatStateMu sync.Mutex
+	openAICompatStateSig string
 	attemptsMu          sync.Mutex
 	failedAttempts      map[string]*attemptInfo // keyed by client IP
 	authManager         *coreauth.Manager
@@ -66,6 +68,8 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 		envSecret:           envSecret,
 	}
 	h.startAttemptCleanup()
+	h.startOpenAICompatRuntimeStateSync()
+	h.applyOpenAICompatRuntimeState()
 	return h
 }
 
@@ -112,6 +116,7 @@ func (h *Handler) SetConfig(cfg *config.Config) {
 	h.mu.Lock()
 	h.cfg = cfg
 	h.mu.Unlock()
+	h.applyOpenAICompatRuntimeState()
 }
 
 // SetAuthManager updates the auth manager reference used by management endpoints.
@@ -122,6 +127,7 @@ func (h *Handler) SetAuthManager(manager *coreauth.Manager) {
 	h.mu.Lock()
 	h.authManager = manager
 	h.mu.Unlock()
+	h.applyOpenAICompatRuntimeState()
 }
 
 // SetUsageStatistics allows replacing the usage statistics reference.

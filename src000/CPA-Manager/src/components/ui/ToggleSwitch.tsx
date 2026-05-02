@@ -8,6 +8,8 @@ interface ToggleSwitchProps {
   ariaLabel?: string;
   disabled?: boolean;
   labelPosition?: 'left' | 'right';
+  className?: string;
+  labelClassName?: string;
 }
 
 export function ToggleSwitch({
@@ -16,22 +18,26 @@ export function ToggleSwitch({
   label,
   ariaLabel,
   disabled = false,
-  labelPosition = 'right'
+  labelPosition = 'right',
+  className,
+  labelClassName
 }: ToggleSwitchProps) {
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     onChange(event.target.checked);
   };
 
-  const className = [
+  const rootClassName = [
     styles.root,
     labelPosition === 'left' ? styles.labelLeft : '',
     disabled ? styles.disabled : '',
+    className ?? '',
   ]
     .filter(Boolean)
     .join(' ');
+  const resolvedLabelClassName = [styles.label, labelClassName ?? ''].filter(Boolean).join(' ');
 
   return (
-    <label className={className}>
+    <label className={rootClassName}>
       <input
         type="checkbox"
         checked={checked}
@@ -42,7 +48,7 @@ export function ToggleSwitch({
       <span className={styles.track}>
         <span className={styles.thumb} />
       </span>
-      {label && <span className={styles.label}>{label}</span>}
+      {label && <span className={resolvedLabelClassName}>{label}</span>}
     </label>
   );
 }

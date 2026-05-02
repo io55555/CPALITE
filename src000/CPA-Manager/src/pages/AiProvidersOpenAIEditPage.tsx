@@ -29,6 +29,40 @@ const getErrorMessage = (err: unknown) => {
   return '';
 };
 
+const normalizeRuntimeText = (entry: ApiKeyEntry) => {
+  if (entry.disabled) return '\u5df2\u505c\u7528';
+  const status = String(entry.status || '').trim().toLowerCase();
+  const message = String(entry.statusMessage || '').trim().toLowerCase();
+  if (status === 'disabled' || message === 'manual_disable') return '\u5df2\u505c\u7528';
+  if (message === 'manual_freeze') return '\u5df2\u51bb\u7ed3';
+  if (status === 'error' || entry.lastError || entry.statusMessage) return '\u72b6\u6001\u5f02\u5e38';
+  return '\u5df2\u542f\u7528';
+};
+
+const normalizeRuntimeHint = (entry: ApiKeyEntry) => {
+  const raw = String(entry.lastError || entry.statusMessage || '').trim();
+  if (!raw) return '';
+  if (raw === 'manual_disable') return '\u624b\u52a8\u505c\u7528';
+  if (raw === 'manual_freeze') return '\u624b\u52a8\u51bb\u7ed3';
+  if (raw === 'active') return '\u5df2\u542f\u7528';
+  return raw;
+};
+
+const buildRuntimeDetailText = (entry?: ApiKeyEntry, index = 0) => {
+  if (!entry) return '';
+  return [
+    `Key #${index + 1}`,
+    `AuthIndex: ${entry.authIndex || '-'}`,
+    `\u72b6\u6001: ${normalizeRuntimeText(entry)}`,
+    `\u8fd0\u884c\u65f6\u72b6\u6001: ${entry.status || '-'}`,
+    `\u72b6\u6001\u8bf4\u660e: ${entry.statusMessage || '-'}`,
+    `\u4ee3\u7406: ${entry.proxyUrl?.trim() || '(\u672a\u5355\u72ec\u8bbe\u7f6e)'}`,
+    '',
+    '[\u6700\u8fd1\u9519\u8bef]',
+    entry.lastError || '\u65e0',
+  ].join('\n');
+};
+
 // Status icon components
 function StatusLoadingIcon() {
   return (
@@ -242,7 +276,15 @@ export function AiProvidersOpenAIEditPage() {
         setForm((prev) => ({
           ...prev,
           apiKeyEntries: prev.apiKeyEntries.map((entry, index) =>
-            index === keyIndex ? { ...entry, disabled, status: disabled ? 'disabled' : 'active' } : entry
+            index === keyIndex
+              ? {
+                  ...entry,
+                  disabled,
+                  status: disabled ? 'disabled' : 'active',
+                  statusMessage: disabled ? 'manual_disable' : '',
+                  lastError: disabled ? entry.lastError : '',
+                }
+              : entry
           ),
         }));
         showNotification(disabled ? '已停用该密钥' : '已启用该密钥', 'success');
@@ -520,6 +562,8 @@ export function AiProvidersOpenAIEditPage() {
       setTestMessage('');
     };
 
+    const buildRuntimeDetail = (index: number) => buildRuntimeDetailText(list[index], index);
+
     return (
       <div className={styles.keyEntriesList}>
         <div className={styles.keyEntriesToolbar}>
@@ -550,9 +594,10 @@ export function AiProvidersOpenAIEditPage() {
           {list.map((entry, index) => {
             const keyStatus = keyTestStatuses[index]?.status ?? 'idle';
             const canTestKey = Boolean(entry.apiKey?.trim()) && hasConfiguredModels;
-            const runtimeText = entry.disabled
-              ? '已停用'
-              : entry.statusMessage || entry.status || '已启用';
+            const runtimeText = normalizeRuntimeText(entry);
+            const runtimeHint = normalizeRuntimeHint(entry);
+            const detailText = keyErrorDetails[index] || buildRuntimeDetail(index);
+            const hasDetail = Boolean(detailText && (keyErrorDetails[index] || entry.lastError || entry.statusMessage));
 
             return (
               <div key={index} className={styles.keyTableRow}>
@@ -593,40 +638,53 @@ export function AiProvidersOpenAIEditPage() {
 
                 {/* 操作按钮 */}
                 <div className={styles.keyTableColAction}>
-                  <ToggleSwitch
-                    checked={!entry.disabled}
-                    onChange={(value) => void updateKeyRuntimeDisabled(index, !value)}
-                    ariaLabel="切换密钥启停状态"
-                    disabled={saving || disableControls || isTestingKeys || runtimeBusyIndex === index}
-                    label={<span className={styles.sectionHint}>{runtimeText}</span>}
-                  />
-                  {keyErrorDetails[index] ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDetailIndex(index)}
-                      disabled={saving || disableControls || isTestingKeys}
-                    >
-                      详情
-                    </Button>
-                  ) : null}
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void testSingleKey(index)}
-                    disabled={saving || disableControls || isTestingKeys || !canTestKey}
-                    loading={keyStatus === 'loading'}
-                  >
-                    {t('ai_providers.openai_test_single_action')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeEntry(index)}
-                    disabled={saving || disableControls || isTestingKeys || list.length <= 1}
-                  >
-                    {t('common.delete')}
-                  </Button>
+                  <div className={styles.keyActionStack}>
+                    <div className={styles.keyRuntimeRow}>
+                      <ToggleSwitch
+                        checked={!entry.disabled}
+                        onChange={(value) => void updateKeyRuntimeDisabled(index, !value)}
+                        ariaLabel="切换密钥启停状态"
+                        disabled={saving || disableControls || isTestingKeys || runtimeBusyIndex === index}
+                        className={styles.keyRuntimeToggle}
+                        labelClassName={styles.keyRuntimeToggleLabel}
+                        label={<span className={styles.keyRuntimeLabel}>{runtimeText}</span>}
+                      />
+                      {hasDetail ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDetailIndex(index)}
+                          disabled={saving || disableControls || isTestingKeys}
+                        >
+                          详情
+                        </Button>
+                      ) : null}
+                    </div>
+                    {runtimeHint ? (
+                      <div className={styles.keyRuntimeHint} title={runtimeHint}>
+                        {runtimeHint}
+                      </div>
+                    ) : null}
+                    <div className={styles.keyActionButtons}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void testSingleKey(index)}
+                        disabled={saving || disableControls || isTestingKeys || !canTestKey}
+                        loading={keyStatus === 'loading'}
+                      >
+                        {t('ai_providers.openai_test_single_action')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeEntry(index)}
+                        disabled={saving || disableControls || isTestingKeys || list.length <= 1}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
@@ -844,7 +902,9 @@ export function AiProvidersOpenAIEditPage() {
         className={styles.monitorModal}
       >
         <pre className={styles.rawLog} style={{ maxHeight: '65vh', overflow: 'auto' }}>
-          {detailIndex !== null ? keyErrorDetails[detailIndex] || '没有可显示的错误详情。' : ''}
+          {detailIndex !== null
+            ? keyErrorDetails[detailIndex] || buildRuntimeDetailText(form.apiKeyEntries[detailIndex], detailIndex) || '没有可显示的错误详情。'
+            : ''}
         </pre>
       </Modal>
     </SecondaryScreenShell>

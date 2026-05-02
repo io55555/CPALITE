@@ -1201,9 +1201,9 @@ $openai-toolbar-control-height: 36px;
 // 表头
 .keyTableHeader {
   display: grid;
-  grid-template-columns: 46px 56px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
+  grid-template-columns: 46px 56px minmax(240px, 1.35fr) minmax(220px, 1.15fr) minmax(320px, 1.4fr);
   gap: $spacing-sm;
-  min-width: 760px;
+  min-width: 980px;
   padding: 10px $spacing-md;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
@@ -1220,9 +1220,9 @@ $openai-toolbar-control-height: 36px;
 // 数据行
 .keyTableRow {
   display: grid;
-  grid-template-columns: 46px 56px minmax(220px, 1.4fr) minmax(200px, 1.1fr) 180px;
+  grid-template-columns: 46px 56px minmax(240px, 1.35fr) minmax(220px, 1.15fr) minmax(320px, 1.4fr);
   gap: $spacing-sm;
-  min-width: 760px;
+  min-width: 980px;
   padding: 10px $spacing-md;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -1267,11 +1267,9 @@ $openai-toolbar-control-height: 36px;
 
 .keyTableColAction {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: $spacing-xs;
-  flex-shrink: 0;
-  white-space: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-width: 0;
 }
 
 .keyTableInput {
@@ -1279,7 +1277,56 @@ $openai-toolbar-control-height: 36px;
   padding: 8px 10px;
   font-size: 14px;
   min-height: 38px;
-  text-align: center;
+  text-align: left;
+}
+
+.keyActionStack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.keyRuntimeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-xs;
+  min-width: 0;
+}
+
+.keyRuntimeToggle {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.keyRuntimeToggleLabel {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.keyRuntimeLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.keyRuntimeHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keyActionButtons {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
 }
 
 .addKeyButton {
