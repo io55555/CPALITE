@@ -1,0 +1,133 @@
+name: release-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: "CLIProxyAPI 官方版本号，例如 v6.0.0"
+        required: true
+        type: string
+      manager_version:
+        description: "CPA-Manager 版本号，可留空"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    env:
+      CLI_VERSION: ${{ inputs.cli_version }}
+      MANAGER_VERSION_INPUT: ${{ inputs.manager_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli_version="$(printf '%s' "${CLI_VERSION}" | xargs)"
+          if [ -z "${cli_version}" ]; then
+            echo "cli_version is required" >&2
+            exit 1
+          fi
+          manager_version="$(printf '%s' "${MANAGER_VERSION_INPUT}" | xargs || true)"
+          if [ -z "${manager_version}" ]; then
+            manager_version="manual-$(git rev-parse --short HEAD)"
+          fi
+          echo "cli_version=${cli_version}" >> "$GITHUB_OUTPUT"
+          echo "manager_version=${manager_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build CPA-Manager
+        working-directory: src000/CPA-Manager
+        env:
+          VERSION: ${{ steps.versions.outputs.cli_version }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26.0"
+
+      - name: Prepare model catalog
+        working-directory: src000/CLIProxyAPI
+        run: |
+          git init -q .tmp-models
+          git -C .tmp-models remote add origin https://github.com/router-for-me/models.git
+          git -C .tmp-models fetch --depth 1 origin main
+          git -C .tmp-models show FETCH_HEAD:models.json > internal/registry/models/models.json
+          rm -rf .tmp-models
+
+      - name: Build CLIProxyAPI archives
+        working-directory: src000/CLIProxyAPI
+        shell: bash
+        env:
+          VERSION: ${{ steps.versions.outputs.cli_version }}
+          COMMIT: ${{ github.sha }}
+          BUILD_DATE: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          combos=(
+            "linux amd64 x86_64"
+            "linux arm64 aarch64"
+            "darwin amd64 x86_64"
+            "darwin arm64 aarch64"
+          )
+          for combo in "${combos[@]}"; do
+            set -- $combo
+            goos="$1"
+            goarch="$2"
+            suffix="$3"
+            outdir="dist/CLIProxyAPI_${VERSION}_${goos}_${suffix}"
+            binname="cli-proxy-api"
+            mkdir -p "${outdir}"
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
+              go build \
+              -trimpath \
+              -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" \
+              -o "${outdir}/${binname}" \
+              ./cmd/server
+            cp LICENSE README.md README_CN.md config.example.yaml "${outdir}/"
+            tar -C dist -czf "dist/CLIProxyAPI_${VERSION}_${goos}_${suffix}.tar.gz" "CLIProxyAPI_${VERSION}_${goos}_${suffix}"
+            rm -rf "${outdir}"
+          done
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp src000/CPA-Manager/dist/index.html release-assets/management.html
+          cp src000/CLIProxyAPI/dist/*.tar.gz release-assets/
+          ls -lh release-assets
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-test-${{ steps.versions.outputs.cli_version }}
+          path: release-assets/*
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.versions.outputs.cli_version }}
+          name: ${{ steps.versions.outputs.cli_version }}
+          draft: true
+          files: release-assets/*
+          body: |
+            CLIProxyAPI 版本：${{ steps.versions.outputs.cli_version }}
+            CPA-Manager 版本：${{ steps.versions.outputs.manager_version }}
+
+            该版本由 `release_test.yml` 手动触发构建，用于补丁编译与功能验证。
