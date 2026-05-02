@@ -728,6 +728,105 @@ func TestManagerExecute_OpenAICompatAliasPoolBlockedAuthDoesNotConsumeRetryBudge
 	}
 }
 
+func TestManagerMarkResult_OpenAICompatStatusRuleDisableWithJSONCode(t *testing.T) {
+	cfg := &internalconfig.Config{
+		OpenAICompatibility: []internalconfig.OpenAICompatibility{{
+			Name: "groq",
+			StatusRules: []internalconfig.OpenAICompatStatusRule{{
+				Name:     "组织被封禁后停用",
+				Status:   http.StatusBadRequest,
+				JSONCode: "organization_restricted",
+				Action:   "disable",
+			}},
+		}},
+	}
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(cfg)
+	auth := &Auth{
+		ID:       "groq-auth",
+		Provider: "groq",
+		Status:   StatusActive,
+		Attributes: map[string]string{
+			"api_key":      "gsk_test_12345678",
+			"compat_name":  "groq",
+			"provider_key": "groq",
+		},
+	}
+	if _, err := m.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	m.MarkResult(context.Background(), Result{
+		AuthID:   auth.ID,
+		Provider: auth.Provider,
+		Model:    "llama-3.1-8b-instant",
+		Success:  false,
+		Error: &Error{
+			HTTPStatus: http.StatusBadRequest,
+			Message:    `{"error":{"message":"Organization has been restricted.","type":"invalid_request_error","code":"organization_restricted"}}`,
+		},
+	})
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Disabled || updated.Status != StatusDisabled {
+		t.Fatalf("auth disabled=%v status=%q, want true/%q", updated.Disabled, updated.Status, StatusDisabled)
+	}
+	if updated.StatusMessage != "组织被封禁后停用" {
+		t.Fatalf("status message = %q, want %q", updated.StatusMessage, "组织被封禁后停用")
+	}
+}
+
+func TestManagerMarkResult_OpenAICompatStatusRuleDisableWithWrappedJSONBody(t *testing.T) {
+	cfg := &internalconfig.Config{
+		OpenAICompatibility: []internalconfig.OpenAICompatibility{{
+			Name: "groq",
+			StatusRules: []internalconfig.OpenAICompatStatusRule{{
+				Name:     "组织被封禁后停用",
+				Status:   http.StatusBadRequest,
+				JSONCode: "organization_restricted",
+				Action:   "disable",
+			}},
+		}},
+	}
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(cfg)
+	auth := &Auth{
+		ID:       "groq-auth-wrapped",
+		Provider: "groq",
+		Status:   StatusActive,
+		Attributes: map[string]string{
+			"api_key":      "gsk_test_87654321",
+			"compat_name":  "groq",
+			"provider_key": "groq",
+		},
+	}
+	if _, err := m.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	m.MarkResult(context.Background(), Result{
+		AuthID:   auth.ID,
+		Provider: auth.Provider,
+		Model:    "llama-3.1-8b-instant",
+		Success:  false,
+		Error: &Error{
+			HTTPStatus: http.StatusBadRequest,
+			Message:    `upstream error: {"error":{"message":"Organization has been restricted.","type":"invalid_request_error","code":"organization_restricted"}}`,
+		},
+	})
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Disabled || updated.Status != StatusDisabled {
+		t.Fatalf("auth disabled=%v status=%q, want true/%q", updated.Disabled, updated.Status, StatusDisabled)
+	}
+}
+
 func TestManagerExecuteStream_OpenAICompatAliasPoolStopsOnInvalidBootstrap(t *testing.T) {
 	alias := "claude-opus-4.66"
 	invalidErr := &Error{HTTPStatus: http.StatusBadRequest, Message: "invalid_request_error: malformed payload"}

@@ -2066,6 +2066,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					ruleMatched := false
 					if action, matched := matchOpenAICompatStatusRule(m.runtimeConfigValue(), auth, statusCode, errorBodyFromResult(result.Error)); matched {
 						ruleMatched = true
+						logOpenAICompatRuleHit(ctx, auth, statusCode, action.label, result.Error)
 						if action.disable {
 							auth.Disabled = true
 							auth.Status = StatusDisabled
@@ -3567,6 +3568,39 @@ func errorBodyFromResult(err *Error) string {
 		return ""
 	}
 	return strings.TrimSpace(err.Message)
+}
+
+func logOpenAICompatRuleHit(ctx context.Context, auth *Auth, statusCode int, label string, resultErr *Error) {
+	if auth == nil {
+		return
+	}
+	authType, authValue := auth.AccountInfo()
+	entry := logEntryWithRequestID(ctx).WithFields(log.Fields{
+		"provider":     strings.TrimSpace(auth.Provider),
+		"auth_id":      strings.TrimSpace(auth.ID),
+		"auth_index":   strings.TrimSpace(auth.Index),
+		"compat_name":  authCompatName(auth),
+		"provider_key": authCompatProviderKey(auth),
+		"auth_type":    authType,
+		"auth_value":   maskOpenAICompatLogValue(authValue),
+		"status_code":  statusCode,
+		"status_rule":  strings.TrimSpace(label),
+	})
+	if resultErr != nil && strings.TrimSpace(resultErr.Message) != "" {
+		entry = entry.WithField("error_body", strings.TrimSpace(resultErr.Message))
+	}
+	entry.Warn("openai compatibility status rule matched")
+}
+
+func maskOpenAICompatLogValue(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) <= 8 {
+		return trimmed
+	}
+	return trimmed[:4] + "***" + trimmed[len(trimmed)-4:]
 }
 
 // roundTripperContextKey is an unexported context key type to avoid collisions.

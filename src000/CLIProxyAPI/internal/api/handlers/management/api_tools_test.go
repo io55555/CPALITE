@@ -3,9 +3,11 @@ package management
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
 )
@@ -154,6 +156,63 @@ func TestAPICallTransportAPIKeyAuthFallsBackToConfigProxyURL(t *testing.T) {
 				t.Fatalf("proxy URL = %v, want %s", proxyURL, tc.wantProxy)
 			}
 		})
+	}
+}
+
+func TestOpenAICompatibilityWithAuthIndexIncludesRuntimeDisabledState(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		OpenAICompatibility: []config.OpenAICompatibility{{
+			Name:    "groq",
+			BaseURL: "https://api.groq.com/openai/v1",
+			APIKeyEntries: []config.OpenAICompatibilityAPIKey{{
+				APIKey:   "gsk_test_12345678",
+				ProxyURL: "socks5://127.0.0.1:25000",
+			}},
+		}},
+	}
+	manager := coreauth.NewManager(nil, nil, nil)
+	id, _ := synthesizer.NewStableIDGenerator().Next(
+		"openai-compatibility:groq",
+		"gsk_test_12345678",
+		"https://api.groq.com/openai/v1",
+		"socks5://127.0.0.1:25000",
+	)
+	auth := &coreauth.Auth{
+		ID:       id,
+		Provider: "groq",
+		Disabled: true,
+		Status:   coreauth.StatusDisabled,
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_test_12345678",
+		},
+	}
+	auth.StatusMessage = "组织被封禁后停用"
+	auth.LastError = &coreauth.Error{Message: `{"error":{"code":"organization_restricted"}}`}
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(cfg, manager)
+	got := h.openAICompatibilityWithAuthIndex()
+	if len(got) != 1 || len(got[0].APIKeyEntries) != 1 {
+		t.Fatalf("unexpected provider payload: %#v", got)
+	}
+	entry := got[0].APIKeyEntries[0]
+	if !entry.Disabled || entry.Status != string(coreauth.StatusDisabled) {
+		t.Fatalf("entry disabled=%v status=%q, want true/%q", entry.Disabled, entry.Status, coreauth.StatusDisabled)
+	}
+	if entry.StatusMessage != "组织被封禁后停用" {
+		t.Fatalf("status message = %q, want %q", entry.StatusMessage, "组织被封禁后停用")
+	}
+	if !strings.Contains(entry.LastError, "organization_restricted") {
+		t.Fatalf("last error = %q, want organization_restricted", entry.LastError)
+	}
+	if strings.TrimSpace(entry.AuthIndex) == "" {
+		t.Fatal("expected auth-index to be populated")
 	}
 }
 

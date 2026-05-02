@@ -257,7 +257,7 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "${api}")"
-          if [ "${status}" != "204" ] && [ "${status}" != "404" ]; then
+          if [ "${status}" != "204" ] && [ "${status}" != "404" ] && [ "${status}" != "422" ]; then
             echo "delete block tag failed: ${status}"
             cat /tmp/block-tag-delete.json || true
             exit 1

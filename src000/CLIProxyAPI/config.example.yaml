@@ -278,6 +278,23 @@ nonstream-keepalive-interval: 0
 #         json-path: "error.message"
 #         json-contains: "rate limit"
 #         action: "freeze-30m"
+#       # 下面是 json-path + json-equals 的完整写法示例：
+#       - name: "400 + error.code=organization_restricted -> 停用"
+#         status: 400
+#         json-path: "error.code"
+#         json-equals: "organization_restricted"
+#         action: "disable"
+#       # 这条用于匹配：
+#       # HTTP 400
+#       # {"error":{"message":"Organization has been restricted. Please reach out to support if you believe this was in error.","type":"invalid_request_error","code":"organization_restricted"}}
+#       - name: "401 + code=wrong_api_key -> 停用"
+#         status: 401
+#         json-path: "code"
+#         json-equals: "wrong_api_key"
+#         action: "disable"
+#       # 这条用于匹配：
+#       # HTTP 401
+#       # {"message":"Wrong API Key","type":"invalid_request_error","param":"api_key","code":"wrong_api_key"}
 #     api-key-entries:
 #       - api-key: "sk-or-v1-...b780"
 #         proxy-url: "socks5://proxy.example.com:1080" # 可选：单 key 代理，优先级高于全局 proxy-url

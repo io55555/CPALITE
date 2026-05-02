@@ -69,7 +69,8 @@ func matchOpenAICompatRuleBody(rule internalconfig.OpenAICompatStatusRule, body 
 		return true
 	}
 
-	result := gjson.GetBytes(bodyBytes, jsonPath)
+	jsonBytes := extractOpenAICompatJSONBody(bodyBytes)
+	result := gjson.GetBytes(jsonBytes, jsonPath)
 	if !result.Exists() {
 		return false
 	}
@@ -81,6 +82,33 @@ func matchOpenAICompatRuleBody(rule internalconfig.OpenAICompatStatusRule, body 
 		return false
 	}
 	return true
+}
+
+func extractOpenAICompatJSONBody(body []byte) []byte {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return body
+	}
+	if gjson.Valid(trimmed) {
+		return []byte(trimmed)
+	}
+	start := strings.IndexByte(trimmed, '{')
+	end := strings.LastIndexByte(trimmed, '}')
+	if start >= 0 && end > start {
+		candidate := strings.TrimSpace(trimmed[start : end+1])
+		if gjson.Valid(candidate) {
+			return []byte(candidate)
+		}
+	}
+	start = strings.IndexByte(trimmed, '[')
+	end = strings.LastIndexByte(trimmed, ']')
+	if start >= 0 && end > start {
+		candidate := strings.TrimSpace(trimmed[start : end+1])
+		if gjson.Valid(candidate) {
+			return []byte(candidate)
+		}
+	}
+	return []byte(trimmed)
 }
 
 func parseOpenAICompatRuleAction(raw string) openAICompatRuleAction {
