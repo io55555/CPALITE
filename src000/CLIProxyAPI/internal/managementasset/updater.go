@@ -307,7 +307,7 @@ func resolveReleaseURL(repo string) string {
 	}
 
 	parsed, err := url.Parse(repo)
-	if err != nil || parsed.Host == "" {
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return defaultManagementReleaseURL
 	}
 
@@ -329,7 +329,7 @@ func resolveReleaseURL(repo string) string {
 		}
 	}
 
-	return defaultManagementReleaseURL
+	return parsed.String()
 }
 
 func fetchLatestAsset(ctx context.Context, client *http.Client, releaseURL string) (*releaseAsset, string, error) {

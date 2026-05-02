@@ -12,6 +12,7 @@ Desktop.ini
 *.tmp
 ai.txt
 build.txt
+buildlog/
 
 # Python
 __pycache__/

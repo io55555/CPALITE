@@ -102,6 +102,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          package-manager-cache: false
 
       - name: Build CPA-Manager
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
