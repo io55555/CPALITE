@@ -458,7 +458,7 @@ def main():
             assert_true(status2 == 200, "reload after enable failed")
             provider = next((item for item in body2.get("openai-compatibility", []) if item.get("name") == "fail-provider"), None)
             assert_true(provider is not None, "fail-provider missing after enable")
-            assert_true(provider["api-key-entries"][0].get("disabled") is False, "runtime enable did not take effect")
+            assert_true(provider["api-key-entries"][0].get("disabled", False) is False, "runtime enable did not take effect")
             return True
 
         wait_until("runtime-state enable", fail_enabled, timeout=15)

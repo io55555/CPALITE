@@ -172,7 +172,11 @@ jobs:
         with:
           name: smoke-${{ steps.versions.outputs.cli_version }}
           if-no-files-found: warn
-          path: smoke-output/**
+          path: |
+            smoke-output/cpa.stdout.log
+            smoke-output/cpa.stderr.log
+            smoke-output/smoke-summary.json
+            smoke-output/**/config.yaml
 
       - name: Build CLIProxyAPI release archives
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
