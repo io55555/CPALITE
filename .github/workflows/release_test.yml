@@ -84,6 +84,8 @@ jobs:
             "linux arm64 aarch64"
             "darwin amd64 x86_64"
             "darwin arm64 aarch64"
+            "windows amd64 x86_64"
+            "windows arm64 aarch64"
           )
           for combo in "${combos[@]}"; do
             set -- $combo
@@ -92,6 +94,11 @@ jobs:
             suffix="$3"
             outdir="dist/CLIProxyAPI_${VERSION}_${goos}_${suffix}"
             binname="cli-proxy-api"
+            archive_path="dist/CLIProxyAPI_${VERSION}_${goos}_${suffix}.tar.gz"
+            if [ "${goos}" = "windows" ]; then
+              binname="cli-proxy-api.exe"
+              archive_path="dist/CLIProxyAPI_${VERSION}_${goos}_${suffix}.zip"
+            fi
             mkdir -p "${outdir}"
             CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
               go build \
@@ -100,7 +107,11 @@ jobs:
               -o "${outdir}/${binname}" \
               ./cmd/server
             cp LICENSE README.md README_CN.md config.example.yaml "${outdir}/"
-            tar -C dist -czf "dist/CLIProxyAPI_${VERSION}_${goos}_${suffix}.tar.gz" "CLIProxyAPI_${VERSION}_${goos}_${suffix}"
+            if [ "${goos}" = "windows" ]; then
+              (cd dist && zip -qr "$(basename "${archive_path}")" "CLIProxyAPI_${VERSION}_${goos}_${suffix}")
+            else
+              tar -C dist -czf "${archive_path}" "CLIProxyAPI_${VERSION}_${goos}_${suffix}"
+            fi
             rm -rf "${outdir}"
           done
 
@@ -119,12 +130,14 @@ jobs:
           name: release-test-${{ steps.versions.outputs.cli_version }}
           path: release-assets/*
 
-      - name: Create draft release
+      - name: Create prerelease
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.versions.outputs.cli_version }}
           name: ${{ steps.versions.outputs.cli_version }}
-          draft: true
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: true
           files: release-assets/*
           body: |
             CLIProxyAPI 版本：${{ steps.versions.outputs.cli_version }}
