@@ -9,6 +9,8 @@ import { parseTimestampMs } from '@/utils/timestamp';
 
 type StatusError = { status?: number };
 type AuthFileStatusResponse = { status: string; disabled: boolean };
+type AuthFileRuntimeStateAction = 'resume' | 'clear' | 'disable' | 'enable';
+type AuthFileRuntimeStateResponse = { status: string; auth_index: string; action: AuthFileRuntimeStateAction };
 type AuthFileEntry = AuthFilesResponse['files'][number];
 export type AuthFileFieldsPatch = {
   prefix?: string;
@@ -410,6 +412,12 @@ export const authFilesApi = {
 
   patchFields: (name: string, fields: AuthFileFieldsPatch) =>
     apiClient.patch('/auth-files/fields', { name, ...fields }),
+
+  patchRuntimeState: (authIndex: string, action: AuthFileRuntimeStateAction = 'resume') =>
+    apiClient.patch<AuthFileRuntimeStateResponse>('/auth-files/runtime-state', {
+      auth_index: authIndex,
+      action,
+    }),
 
   uploadFiles: async (files: File[]): Promise<AuthFileBatchUploadResult> => {
     const requestedNames = files.map((file) => file.name);

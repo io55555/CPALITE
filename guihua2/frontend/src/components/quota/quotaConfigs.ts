@@ -416,6 +416,9 @@ const buildCodexQuotaWindows = (payload: CodexUsagePayload, t: TFunction): Codex
   return windows;
 };
 
+export const codexQuotaHasAvailableCapacity = (windows: CodexQuotaWindow[]): boolean =>
+  windows.some((window) => window.usedPercent === null || window.usedPercent < 100);
+
 const fetchCodexQuota = async (
   file: AuthFileItem,
   t: TFunction

@@ -137,8 +137,30 @@ export const getAuthFileStatusMessage = (file: AuthFileItem): string => {
   return String(raw).trim();
 };
 
+const getAuthFileLastErrorMessage = (file: AuthFileItem): string => {
+  const raw = file['last_error'] ?? file.lastError;
+  if (typeof raw === 'string') return raw.trim();
+  if (raw == null) return '';
+  return String(raw).trim();
+};
+
+const hasQuotaIssue = (file: AuthFileItem): boolean => {
+  const quota = file.quota;
+  if (!quota || typeof quota !== 'object') return false;
+  return Boolean(
+    quota.exceeded ||
+      (typeof quota.reason === 'string' && quota.reason.trim()) ||
+      (typeof quota.next_recover_at === 'string' && quota.next_recover_at.trim()) ||
+      (typeof quota.backoff_level === 'number' && quota.backoff_level > 0)
+  );
+};
+
 export const hasAuthFileStatusMessage = (file: AuthFileItem): boolean =>
-  getAuthFileStatusMessage(file).length > 0;
+  getAuthFileStatusMessage(file).length > 0 ||
+  getAuthFileLastErrorMessage(file).length > 0 ||
+  file.unavailable === true ||
+  hasQuotaIssue(file) ||
+  (typeof file.nextRetryAfter === 'string' && file.nextRetryAfter.trim().length > 0);
 
 export const getTypeLabel = (t: TFunction, type: string): string => {
   const key = `auth_files.filter_${type}`;

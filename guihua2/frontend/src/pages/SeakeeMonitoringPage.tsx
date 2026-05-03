@@ -30,8 +30,10 @@ export function SeakeeMonitoringPage() {
       <Card>
         <div className={styles.opsHeader}>
           <div>
-            <h1 className={styles.opsTitle}>\u8bf7\u6c42\u76d1\u63a7seakee</h1>
-            <p className={styles.hint}>\u4fdd\u7559 seakee v1.0.4 \u98ce\u683c\u7684\u8bf7\u6c42\u4e8b\u4ef6\u76d1\u63a7\u89c6\u56fe\uff0c\u7528\u4e8e\u6309\u6a21\u578b\u3001\u6765\u6e90\u3001\u8ba4\u8bc1\u7d22\u5f15\u7b5b\u9009\u8bf7\u6c42\u660e\u7ec6\u3002</p>
+            <h1 className={styles.opsTitle}>请求监控seakee</h1>
+            <p className={styles.hint}>
+              保留 seakee v1.0.4 风格的请求事件明细视图，并增强显示首字延迟、生成时间、TPS、思考强度和缓存命中。
+            </p>
             {error ? <p className={styles.hint}>{error}</p> : null}
           </div>
         </div>

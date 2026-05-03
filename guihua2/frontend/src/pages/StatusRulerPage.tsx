@@ -105,9 +105,7 @@ export function StatusRulerPage() {
           <Input
             label="响应体关键字"
             value={form.body_contains || ''}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, body_contains: event.target.value }))
-            }
+            onChange={(event) => setForm((prev) => ({ ...prev, body_contains: event.target.value }))}
           />
           <Select
             value={form.action}

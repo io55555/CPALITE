@@ -5,9 +5,11 @@ import {
   ANTIGRAVITY_CONFIG,
   CLAUDE_CONFIG,
   CODEX_CONFIG,
+  codexQuotaHasAvailableCapacity,
   GEMINI_CLI_CONFIG,
   KIMI_CONFIG
 } from '@/components/quota';
+import { authFilesApi } from '@/services/api/authFiles';
 import { useNotificationStore, useQuotaStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
 import { getStatusFromError } from '@/utils/quota';
@@ -82,6 +84,13 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
         ...prev,
         [file.name]: config.buildSuccessState(data)
       }));
+      if (quotaType === 'codex') {
+        const authIndex = String(file['auth_index'] ?? file.authIndex ?? '').trim();
+        const windows = (data as { windows?: Parameters<typeof codexQuotaHasAvailableCapacity>[0] }).windows ?? [];
+        if (authIndex && codexQuotaHasAvailableCapacity(windows)) {
+          await authFilesApi.patchRuntimeState(authIndex, 'resume');
+        }
+      }
       showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('common.unknown_error');

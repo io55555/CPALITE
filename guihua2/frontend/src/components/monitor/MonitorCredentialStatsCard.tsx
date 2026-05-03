@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { CODEX_CONFIG } from '@/components/quota';
+import { CODEX_CONFIG, codexQuotaHasAvailableCapacity } from '@/components/quota';
+import { authFilesApi } from '@/services/api/authFiles';
 import { useQuotaStore } from '@/stores';
 import type { CodexQuotaState } from '@/types';
 import type { AuthFileItem as AuthFileMeta } from '@/types/authFile';
@@ -270,6 +271,10 @@ export function MonitorCredentialStatsCard({
           ...prev,
           [quotaKey]: CODEX_CONFIG.buildSuccessState(data)
         }));
+        const authIndex = normalizeAuthIndex(authFile['auth_index'] ?? authFile.authIndex);
+        if (authIndex && codexQuotaHasAvailableCapacity(data.windows)) {
+          await authFilesApi.patchRuntimeState(authIndex, 'resume');
+        }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : t('common.unknown_error');
         const status =

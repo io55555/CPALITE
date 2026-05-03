@@ -9,12 +9,14 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { triggerHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useNotificationStore, useQuotaStore, useThemeStore } from '@/stores';
+import { authFilesApi } from '@/services/api/authFiles';
 import type { AuthFileItem, ResolvedTheme } from '@/types';
 import { getStatusFromError } from '@/utils/quota';
 import { QuotaCard } from './QuotaCard';
 import type { QuotaStatusState } from './QuotaCard';
 import { useQuotaLoader } from './useQuotaLoader';
 import type { QuotaConfig } from './quotaConfigs';
+import { codexQuotaHasAvailableCapacity } from './quotaConfigs';
 import { useGridColumns } from './useGridColumns';
 import { IconRefreshCw } from '@/components/ui/icons';
 import styles from '@/pages/QuotaPage.module.scss';
@@ -220,6 +222,13 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
           ...prev,
           [file.name]: config.buildSuccessState(data)
         }));
+        if (config.type === 'codex') {
+          const authIndex = String(file['auth_index'] ?? file.authIndex ?? '').trim();
+          const windows = (data as { windows?: Parameters<typeof codexQuotaHasAvailableCapacity>[0] }).windows ?? [];
+          if (authIndex && codexQuotaHasAvailableCapacity(windows)) {
+            await authFilesApi.patchRuntimeState(authIndex, 'resume');
+          }
+        }
         showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : t('common.unknown_error');

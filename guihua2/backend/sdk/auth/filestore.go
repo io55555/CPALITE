@@ -18,6 +18,23 @@ import (
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 )
 
+const authRuntimeStateFileName = "auth-runtime-state.json"
+
+type persistedAuthRuntimeStateFile struct {
+	Entries map[string]persistedAuthRuntimeState `json:"entries"`
+}
+
+type persistedAuthRuntimeState struct {
+	Disabled       bool                 `json:"disabled,omitempty"`
+	Unavailable    bool                 `json:"unavailable,omitempty"`
+	Status         cliproxyauth.Status  `json:"status,omitempty"`
+	StatusMessage  string               `json:"status_message,omitempty"`
+	LastError      *cliproxyauth.Error  `json:"last_error,omitempty"`
+	Quota          cliproxyauth.QuotaState `json:"quota,omitempty"`
+	NextRetryAfter time.Time            `json:"next_retry_after,omitempty"`
+	UpdatedAt      time.Time            `json:"updated_at,omitempty"`
+}
+
 // FileTokenStore persists token records and auth metadata using the filesystem as backing storage.
 type FileTokenStore struct {
 	mu      sync.Mutex
@@ -54,6 +71,9 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 
 	if auth.Disabled {
 		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			if err = s.persistRuntimeState(auth); err != nil {
+				return "", err
+			}
 			return "", nil
 		}
 	}
@@ -86,6 +106,9 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 		}
 		if existing, errRead := os.ReadFile(path); errRead == nil {
 			if jsonEqual(existing, raw) {
+				if err = s.persistRuntimeStateLocked(auth); err != nil {
+					return "", err
+				}
 				return path, nil
 			}
 			file, errOpen := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
@@ -117,6 +140,10 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 
 	if strings.TrimSpace(auth.FileName) == "" {
 		auth.FileName = auth.ID
+	}
+
+	if err = s.persistRuntimeStateLocked(auth); err != nil {
+		return "", err
 	}
 
 	return path, nil
@@ -151,6 +178,7 @@ func (s *FileTokenStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error)
 	if err != nil {
 		return nil, err
 	}
+	s.applyRuntimeState(entries)
 	return entries, nil
 }
 
@@ -167,6 +195,9 @@ func (s *FileTokenStore) Delete(ctx context.Context, id string) error {
 	if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("auth filestore: delete failed: %w", err)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = s.updateRuntimeStateLocked(id, nil)
 	return nil
 }
 
@@ -256,6 +287,198 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 	}
 	cliproxyauth.ApplyCustomHeadersFromMetadata(auth)
 	return auth, nil
+}
+
+func (s *FileTokenStore) applyRuntimeState(entries []*cliproxyauth.Auth) {
+	if len(entries) == 0 {
+		return
+	}
+	stateFile, err := s.readRuntimeStateFile()
+	if err != nil || len(stateFile.Entries) == 0 {
+		return
+	}
+	for _, auth := range entries {
+		if auth == nil || isOpenAICompatAuth(auth) {
+			continue
+		}
+		state, ok := stateFile.Entries[strings.TrimSpace(auth.ID)]
+		if !ok {
+			continue
+		}
+		auth.Disabled = state.Disabled
+		auth.Unavailable = state.Unavailable
+		auth.Status = state.Status
+		if auth.Status == "" {
+			if auth.Disabled {
+				auth.Status = cliproxyauth.StatusDisabled
+			} else {
+				auth.Status = cliproxyauth.StatusActive
+			}
+		}
+		auth.StatusMessage = strings.TrimSpace(state.StatusMessage)
+		auth.Quota = state.Quota
+		auth.NextRetryAfter = state.NextRetryAfter
+		if state.LastError != nil {
+			auth.LastError = &cliproxyauth.Error{
+				Code:       state.LastError.Code,
+				Message:    state.LastError.Message,
+				Retryable:  state.LastError.Retryable,
+				HTTPStatus: state.LastError.HTTPStatus,
+			}
+		} else {
+			auth.LastError = nil
+		}
+		if !state.UpdatedAt.IsZero() {
+			auth.UpdatedAt = state.UpdatedAt.UTC()
+		}
+	}
+}
+
+func (s *FileTokenStore) persistRuntimeState(auth *cliproxyauth.Auth) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persistRuntimeStateLocked(auth)
+}
+
+func (s *FileTokenStore) persistRuntimeStateLocked(auth *cliproxyauth.Auth) error {
+	if auth == nil || isOpenAICompatAuth(auth) {
+		return nil
+	}
+	state := runtimeStateForAuth(auth)
+	return s.updateRuntimeStateLocked(auth.ID, state)
+}
+
+func (s *FileTokenStore) updateRuntimeStateLocked(authID string, state *persistedAuthRuntimeState) error {
+	authID = strings.TrimSpace(authID)
+	if authID == "" {
+		return nil
+	}
+	stateFile, err := s.readRuntimeStateFileLocked()
+	if err != nil {
+		return err
+	}
+	if stateFile.Entries == nil {
+		stateFile.Entries = make(map[string]persistedAuthRuntimeState)
+	}
+	if state == nil {
+		delete(stateFile.Entries, authID)
+	} else {
+		stateFile.Entries[authID] = *state
+	}
+	return s.writeRuntimeStateFileLocked(stateFile)
+}
+
+func (s *FileTokenStore) readRuntimeStateFile() (*persistedAuthRuntimeStateFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readRuntimeStateFileLocked()
+}
+
+func (s *FileTokenStore) readRuntimeStateFileLocked() (*persistedAuthRuntimeStateFile, error) {
+	path, err := s.runtimeStatePath()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &persistedAuthRuntimeStateFile{Entries: map[string]persistedAuthRuntimeState{}}, nil
+		}
+		return nil, fmt.Errorf("auth filestore: read runtime state failed: %w", err)
+	}
+	var stateFile persistedAuthRuntimeStateFile
+	if err := json.Unmarshal(raw, &stateFile); err != nil {
+		return nil, fmt.Errorf("auth filestore: decode runtime state failed: %w", err)
+	}
+	if stateFile.Entries == nil {
+		stateFile.Entries = map[string]persistedAuthRuntimeState{}
+	}
+	return &stateFile, nil
+}
+
+func (s *FileTokenStore) writeRuntimeStateFileLocked(stateFile *persistedAuthRuntimeStateFile) error {
+	path, err := s.runtimeStatePath()
+	if err != nil {
+		return err
+	}
+	if stateFile == nil || len(stateFile.Entries) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("auth filestore: remove runtime state failed: %w", err)
+		}
+		return nil
+	}
+	raw, err := json.MarshalIndent(stateFile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("auth filestore: encode runtime state failed: %w", err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return fmt.Errorf("auth filestore: write runtime state failed: %w", err)
+	}
+	return nil
+}
+
+func (s *FileTokenStore) runtimeStatePath() (string, error) {
+	dir := s.baseDirSnapshot()
+	if dir == "" {
+		return "", fmt.Errorf("auth filestore: directory not configured")
+	}
+	return filepath.Join(dir, authRuntimeStateFileName), nil
+}
+
+func runtimeStateForAuth(auth *cliproxyauth.Auth) *persistedAuthRuntimeState {
+	if auth == nil {
+		return nil
+	}
+	status := auth.Status
+	if status == "" {
+		status = cliproxyauth.StatusActive
+	}
+	statusMessage := strings.TrimSpace(auth.StatusMessage)
+	lastError := cloneRuntimeError(auth.LastError)
+	if !auth.Disabled &&
+		!auth.Unavailable &&
+		status == cliproxyauth.StatusActive &&
+		statusMessage == "" &&
+		lastError == nil &&
+		!auth.Quota.Exceeded &&
+		strings.TrimSpace(auth.Quota.Reason) == "" &&
+		auth.Quota.NextRecoverAt.IsZero() &&
+		auth.Quota.BackoffLevel == 0 &&
+		auth.NextRetryAfter.IsZero() {
+		return nil
+	}
+	return &persistedAuthRuntimeState{
+		Disabled:       auth.Disabled,
+		Unavailable:    auth.Unavailable,
+		Status:         status,
+		StatusMessage:  statusMessage,
+		LastError:      lastError,
+		Quota:          auth.Quota,
+		NextRetryAfter: auth.NextRetryAfter,
+		UpdatedAt:      auth.UpdatedAt.UTC(),
+	}
+}
+
+func cloneRuntimeError(err *cliproxyauth.Error) *cliproxyauth.Error {
+	if err == nil {
+		return nil
+	}
+	return &cliproxyauth.Error{
+		Code:       err.Code,
+		Message:    err.Message,
+		Retryable:  err.Retryable,
+		HTTPStatus: err.HTTPStatus,
+	}
+}
+
+func isOpenAICompatAuth(auth *cliproxyauth.Auth) bool {
+	if auth == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(auth.Provider), "openai-compatibility") {
+		return true
+	}
+	return auth.Attributes != nil && strings.TrimSpace(auth.Attributes["compat_name"]) != ""
 }
 
 func (s *FileTokenStore) idFor(path, baseDir string) string {

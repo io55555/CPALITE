@@ -362,7 +362,7 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	}
 	auth.EnsureIndex()
 	runtimeOnly := isRuntimeOnlyAuth(auth)
-	if runtimeOnly && (auth.Disabled || auth.Status == coreauth.StatusDisabled) {
+	if runtimeOnly && (auth.Disabled || auth.Status == coreauth.StatusDisabled) && !hasAuthRuntimeIssue(auth) {
 		return nil
 	}
 	path := strings.TrimSpace(authAttribute(auth, "path"))
@@ -388,9 +388,16 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		"source":         "memory",
 		"size":           int64(0),
 	}
+	if auth.LastError != nil {
+		entry["last_error"] = auth.LastError.Message
+		entry["last_error_object"] = auth.LastError
+	}
 	entry["success"] = auth.Success
 	entry["failed"] = auth.Failed
 	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
+	if auth.Quota.Exceeded || auth.Quota.Reason != "" || !auth.Quota.NextRecoverAt.IsZero() || auth.Quota.BackoffLevel != 0 {
+		entry["quota"] = auth.Quota
+	}
 	if email := authEmail(auth); email != "" {
 		entry["email"] = email
 	}
@@ -423,7 +430,7 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 			entry["modtime"] = info.ModTime()
 		} else if os.IsNotExist(err) {
 			// Hide credentials removed from disk but still lingering in memory.
-			if !runtimeOnly && (auth.Disabled || auth.Status == coreauth.StatusDisabled || strings.EqualFold(strings.TrimSpace(auth.StatusMessage), "removed via management api")) {
+			if !runtimeOnly && !hasAuthRuntimeIssue(auth) && (auth.Disabled || auth.Status == coreauth.StatusDisabled || strings.EqualFold(strings.TrimSpace(auth.StatusMessage), "removed via management api")) {
 				return nil
 			}
 			entry["source"] = "memory"
@@ -540,6 +547,28 @@ func isRuntimeOnlyAuth(auth *coreauth.Auth) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(auth.Attributes["runtime_only"]), "true")
+}
+
+func hasAuthRuntimeIssue(auth *coreauth.Auth) bool {
+	if auth == nil {
+		return false
+	}
+	if strings.TrimSpace(auth.StatusMessage) != "" {
+		return true
+	}
+	if auth.LastError != nil && strings.TrimSpace(auth.LastError.Message) != "" {
+		return true
+	}
+	if auth.Unavailable {
+		return true
+	}
+	if auth.Quota.Exceeded || strings.TrimSpace(auth.Quota.Reason) != "" || !auth.Quota.NextRecoverAt.IsZero() {
+		return true
+	}
+	if !auth.NextRetryAfter.IsZero() {
+		return true
+	}
+	return false
 }
 
 func isUnsafeAuthFileName(name string) bool {
@@ -1119,6 +1148,73 @@ func (h *Handler) PatchAuthFileStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "disabled": *req.Disabled})
+}
+
+// PatchAuthFileRuntimeState updates transient runtime error/cooldown/manual status for a credential.
+func (h *Handler) PatchAuthFileRuntimeState(c *gin.Context) {
+	if h.authManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
+		return
+	}
+
+	var req struct {
+		AuthIndex string `json:"auth_index"`
+		Action    string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		action = "resume"
+	}
+	if action != "resume" && action != "clear" && action != "disable" && action != "enable" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported action"})
+		return
+	}
+
+	auth := h.findAuthByIndex(req.AuthIndex)
+	if auth == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "auth not found"})
+		return
+	}
+
+	switch action {
+	case "disable":
+		auth.Disabled = true
+		auth.Unavailable = true
+		auth.Status = coreauth.StatusDisabled
+		auth.StatusMessage = "disabled via management"
+		auth.UpdatedAt = time.Now().UTC()
+	case "enable":
+		auth.Disabled = false
+		auth.Unavailable = false
+		auth.Status = coreauth.StatusActive
+		auth.StatusMessage = ""
+		auth.LastError = nil
+		auth.Quota = coreauth.QuotaState{}
+		auth.NextRetryAfter = time.Time{}
+		auth.UpdatedAt = time.Now().UTC()
+	default:
+		auth.Unavailable = false
+		if !auth.Disabled {
+			auth.Status = coreauth.StatusActive
+		}
+		auth.StatusMessage = ""
+		auth.LastError = nil
+		auth.Quota = coreauth.QuotaState{}
+		auth.NextRetryAfter = time.Time{}
+		auth.UpdatedAt = time.Now().UTC()
+	}
+
+	if _, err := h.authManager.Update(c.Request.Context(), auth); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update auth: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "auth_index": strings.TrimSpace(auth.Index), "action": action})
 }
 
 // PatchAuthFileFields updates editable fields (prefix, proxy_url, headers, priority, note) of an auth file.

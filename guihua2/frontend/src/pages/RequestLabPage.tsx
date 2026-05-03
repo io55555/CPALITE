@@ -14,6 +14,17 @@ const defaultSettings: CaptureSettings = {
   max_body_bytes: 65536,
 };
 
+const formatStatus = (item: CaptureRecord) => item.status_code || item.upstream_status_code || 0;
+
+const renderPacketBlock = (title: string, summary: Array<string | number>, body: string) => (
+  <Card title={title}>
+    <div className={styles.codeBlock}>{summary.filter(Boolean).join('\n') || '(empty)'}</div>
+    <div className={styles.codeBlock} style={{ marginTop: 12 }}>
+      {body || '(empty)'}
+    </div>
+  </Card>
+);
+
 export function RequestLabPage() {
   const { showNotification } = useNotificationStore();
   const [settings, setSettings] = useState<CaptureSettings>(defaultSettings);
@@ -58,7 +69,7 @@ export function RequestLabPage() {
       const resp = await captureApi.get(id);
       setSelected(resp.item);
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : '加载详情失败', 'error');
+      showNotification(error instanceof Error ? error.message : '加载抓包详情失败', 'error');
     }
   };
 
@@ -157,7 +168,7 @@ export function RequestLabPage() {
           </Button>
         </div>
         <p className={styles.hint}>
-          抓包数据持久化到 sqlite，并按配置的保留天数与包体上限截断，避免长期运行时内存和磁盘无界增长。
+          抓包数据会持久化到 sqlite，并按保留天数和包体大小自动截断，避免长期运行时内存和磁盘无界增长。
         </p>
       </Card>
 
@@ -167,7 +178,8 @@ export function RequestLabPage() {
             <tr>
               <th>时间</th>
               <th>状态</th>
-              <th>请求</th>
+              <th>下游请求</th>
+              <th>上游目标</th>
               <th>供应商</th>
               <th>认证</th>
               <th>Token / Key</th>
@@ -179,11 +191,12 @@ export function RequestLabPage() {
               <tr key={item.id}>
                 <td>{item.created_at}</td>
                 <td className={item.success ? styles.statusGood : styles.statusBad}>
-                  {item.status_code || item.upstream_status_code || 0}
+                  {formatStatus(item)}
                 </td>
                 <td>
                   {item.method} {item.path}
                 </td>
+                <td>{item.upstream_request_url || '-'}</td>
                 <td>{item.provider || item.access_provider || '-'}</td>
                 <td>{item.auth_index || item.auth_id || '-'}</td>
                 <td>{item.token || item.api_key || '-'}</td>
@@ -198,44 +211,48 @@ export function RequestLabPage() {
         </table>
       </Card>
 
-      <Modal open={selected !== null} title="抓包详情" onClose={() => setSelected(null)} width={900}>
+      <Modal open={selected !== null} title="抓包详情" onClose={() => setSelected(null)} width={1100}>
         {selected && (
           <div className={styles.grid}>
-            <Card title="下游请求">
-              <div className={styles.codeBlock}>
-                {selected.request_headers || '(no request headers)'}
-              </div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
-                {selected.request_body || '(no request body)'}
-              </div>
-            </Card>
-            <Card title="上游请求">
-              <div className={styles.codeBlock}>
-                {selected.upstream_request_url || '(no upstream url)'}
-              </div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
-                {selected.upstream_request_headers || '(no upstream request headers)'}
-              </div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
-                {selected.upstream_request_body || '(no upstream request body)'}
-              </div>
-            </Card>
-            <Card title="上游响应">
-              <div className={styles.codeBlock}>
-                {selected.upstream_response_headers || '(no upstream response headers)'}
-              </div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
-                {selected.upstream_response_body || selected.error_text || '(no upstream response body)'}
-              </div>
-            </Card>
-            <Card title="下游响应">
-              <div className={styles.codeBlock}>
-                {selected.response_headers || '(no downstream response headers)'}
-              </div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
-                {selected.response_body || '(no downstream response body)'}
-              </div>
-            </Card>
+            {renderPacketBlock(
+              '下游请求',
+              [
+                `时间: ${selected.created_at}`,
+                `请求: ${selected.method} ${selected.path}`,
+                `状态码: ${selected.status_code || 0}`,
+              ],
+              [selected.request_headers, '', selected.request_body].filter(Boolean).join('\n')
+            )}
+            {renderPacketBlock(
+              '上游请求',
+              [
+                `目标: ${selected.upstream_request_url || '-'}`,
+                `认证: ${selected.auth_index || selected.auth_id || '-'}`,
+                `代理: ${selected.proxy_url || '-'}`,
+              ],
+              [selected.upstream_request_headers, '', selected.upstream_request_body]
+                .filter(Boolean)
+                .join('\n')
+            )}
+            {renderPacketBlock(
+              '上游响应',
+              [
+                `上游状态码: ${selected.upstream_status_code || 0}`,
+                `成功: ${selected.success ? '是' : '否'}`,
+                selected.error_text ? `错误: ${selected.error_text}` : '',
+              ],
+              [selected.upstream_response_headers, '', selected.upstream_response_body || selected.error_text]
+                .filter(Boolean)
+                .join('\n')
+            )}
+            {renderPacketBlock(
+              '下游响应',
+              [
+                `下游状态码: ${selected.status_code || 0}`,
+                `耗时: ${selected.duration_ms} ms`,
+              ],
+              [selected.response_headers, '', selected.response_body].filter(Boolean).join('\n')
+            )}
           </div>
         )}
       </Modal>

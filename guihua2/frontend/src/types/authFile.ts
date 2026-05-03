@@ -30,6 +30,20 @@ export interface AuthFileItem {
   unavailable?: boolean;
   status?: string;
   statusMessage?: string;
+  lastError?: string;
+  lastErrorObject?: {
+    code?: string;
+    message?: string;
+    retryable?: boolean;
+    http_status?: number;
+  };
+  nextRetryAfter?: string;
+  quota?: {
+    exceeded?: boolean;
+    reason?: string;
+    next_recover_at?: string;
+    backoff_level?: number;
+  };
   lastRefresh?: string | number;
   modified?: number;
   success?: unknown;
