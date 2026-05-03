@@ -245,6 +245,7 @@ func (h *Handler) openAICompatibilityWithAuthIndex() []openAICompatibilityWithAu
 	if h == nil {
 		return nil
 	}
+	h.ensureOpenAICompatRuntimeStateApplied()
 	liveStateByID := h.liveAuthStateByID()
 
 	h.mu.Lock()

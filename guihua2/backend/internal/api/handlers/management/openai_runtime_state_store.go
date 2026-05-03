@@ -240,6 +240,18 @@ func (h *Handler) startOpenAICompatRuntimeStateSync() {
 	}()
 }
 
+func (h *Handler) ensureOpenAICompatRuntimeStateApplied() {
+	if h == nil {
+		return
+	}
+	h.openAICompatStateMu.Lock()
+	shouldApply := !h.openAICompatStateApplied
+	h.openAICompatStateMu.Unlock()
+	if shouldApply {
+		h.applyOpenAICompatRuntimeState()
+	}
+}
+
 func collectOpenAICompatRuntimeStateEntries(manager *coreauth.Manager) []openAICompatRuntimeStateEntry {
 	if manager == nil {
 		return nil

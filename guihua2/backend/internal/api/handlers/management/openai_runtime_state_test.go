@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 )
 
@@ -191,5 +192,82 @@ func TestOpenAICompatRuntimeStateWaitsForMatchingAuthBeforeApplying(t *testing.T
 	}
 	if !got.Disabled || got.Status != coreauth.StatusDisabled {
 		t.Fatalf("reloaded auth disabled=%v status=%q, want true/%q", got.Disabled, got.Status, coreauth.StatusDisabled)
+	}
+}
+
+func TestOpenAICompatibilityWithAuthIndexTriggersPendingRuntimeStateApply(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	configPath := filepath.Join(workDir, "config.yaml")
+	cfg := &config.Config{
+		OpenAICompatibility: []config.OpenAICompatibility{
+			{
+				Name:    "groq",
+				BaseURL: "https://example.invalid/v1",
+				APIKeyEntries: []config.OpenAICompatibilityAPIKey{
+					{APIKey: "gsk_pending", ProxyURL: "direct"},
+				},
+			},
+		},
+	}
+
+	sourceManager := coreauth.NewManager(nil, nil, nil)
+	sourceAuth := &coreauth.Auth{
+		ID:         "openai-compatibility:groq:pending",
+		Provider:   "groq",
+		Status:     coreauth.StatusDisabled,
+		Disabled:   true,
+		Unavailable: true,
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_pending",
+		},
+	}
+	if _, err := sourceManager.Register(context.Background(), sourceAuth); err != nil {
+		t.Fatalf("register source auth: %v", err)
+	}
+	sourceHandler := NewHandler(cfg, configPath, sourceManager)
+	if err := sourceHandler.persistOpenAICompatRuntimeState(); err != nil {
+		t.Fatalf("persist runtime state: %v", err)
+	}
+
+	reloadedManager := coreauth.NewManager(nil, nil, nil)
+	idGen := synthesizer.NewStableIDGenerator()
+	authID, _ := idGen.Next("openai-compatibility:groq", "gsk_pending", "https://example.invalid/v1", "direct")
+	reloadedAuth := &coreauth.Auth{
+		ID:       authID,
+		Provider: "groq",
+		Status:   coreauth.StatusActive,
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_pending",
+		},
+	}
+	if _, err := reloadedManager.Register(context.Background(), reloadedAuth); err != nil {
+		t.Fatalf("register reloaded auth: %v", err)
+	}
+
+	reloadedHandler := NewHandler(cfg, configPath, reloadedManager)
+	reloadedHandler.openAICompatStateMu.Lock()
+	reloadedHandler.openAICompatStateApplied = false
+	reloadedHandler.openAICompatStateMu.Unlock()
+
+	gotProviders := reloadedHandler.openAICompatibilityWithAuthIndex()
+	if len(gotProviders) != 1 || len(gotProviders[0].APIKeyEntries) != 1 {
+		t.Fatalf("unexpected providers payload: %#v", gotProviders)
+	}
+	if !gotProviders[0].APIKeyEntries[0].Disabled {
+		t.Fatalf("expected disabled state in response, got %#v", gotProviders[0].APIKeyEntries[0])
+	}
+
+	gotAuth, ok := reloadedManager.GetByID(authID)
+	if !ok || gotAuth == nil {
+		t.Fatalf("expected reloaded auth")
+	}
+	if !gotAuth.Disabled || gotAuth.Status != coreauth.StatusDisabled {
+		t.Fatalf("reloaded auth disabled=%v status=%q, want true/%q", gotAuth.Disabled, gotAuth.Status, coreauth.StatusDisabled)
 	}
 }
