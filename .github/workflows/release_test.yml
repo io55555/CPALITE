@@ -83,11 +83,35 @@ jobs:
           fi
 
       - name: Stop if release already exists
-        if: steps.release_check.outputs.exists == 'true'
+        if: github.event_name != 'workflow_dispatch' && steps.release_check.outputs.exists == 'true'
         shell: bash
         run: |
           echo "Release ${{ steps.versions.outputs.cli_version }} already exists, skip."
           exit 0
+
+      - name: Delete existing release for manual rebuild
+        if: github.event_name == 'workflow_dispatch' && steps.release_check.outputs.exists == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.versions.outputs.cli_version }}"
+          release_api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${version}"
+          release_json="$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${release_api}")"
+          release_id="$(printf '%s' "${release_json}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")"
+          curl -fsSL -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}" >/dev/null
+          curl -fsSL -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/tags/${version}" >/dev/null
+          echo "Deleted existing release/tag for ${version}; continuing with rebuild."
 
       - name: Stop if version is blocked
         if: github.event_name != 'workflow_dispatch' && steps.block_check.outputs.blocked == 'true'

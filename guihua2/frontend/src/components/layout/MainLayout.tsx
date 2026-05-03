@@ -409,7 +409,14 @@ export function MainLayout() {
   const getRouteOrder = (pathname: string) => {
     const trimmedPath =
       pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
-    const normalizedPath = trimmedPath === '/dashboard' ? '/' : trimmedPath;
+    const normalizedPath =
+      trimmedPath === '/dashboard'
+        ? '/'
+        : trimmedPath === '/monitoring'
+          ? '/monitor'
+          : trimmedPath === '/status-ruler'
+            ? '/rules'
+            : trimmedPath;
 
     const aiProvidersIndex = navOrder.indexOf('/ai-providers');
     if (aiProvidersIndex !== -1) {

@@ -417,6 +417,49 @@ def main():
 
         wait_until("status-rules disable", fail_disabled, timeout=20)
 
+        runtime_state_path = work_dir / "openai-compat-runtime-state.json"
+
+        def runtime_state_disabled_written():
+            assert_true(runtime_state_path.exists(), "runtime state file not created")
+            payload = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+            entries = payload.get("entries", [])
+            assert_true(len(entries) == 1, f"unexpected runtime state entries: {entries}")
+            entry = entries[0]
+            assert_true(entry.get("auth_index") == fail_auth_index, f"runtime state auth_index mismatch: {entry}")
+            assert_true(entry.get("disabled") is True, f"runtime disabled state mismatch: {entry}")
+            return True
+
+        wait_until("runtime-state disabled file write", runtime_state_disabled_written, timeout=15)
+
+        stop_process(process)
+        process = None
+        if stdout:
+            stdout.close()
+            stdout = None
+        if stderr:
+            stderr.close()
+            stderr = None
+
+        process, stdout, stderr = start_binary(args.binary, config_path, output_dir)
+        wait_until("healthz after restart", health_ready, timeout=40)
+
+        status, _, _, body = request_json(
+            "GET",
+            f"{base_url}/v0/management/openai-compatibility",
+            headers=mgmt_headers,
+        )
+        assert_true(status == 200, f"read openai-compatibility after restart failed: {status}")
+        fail_provider_after_restart = next(
+            (item for item in body.get("openai-compatibility", []) if item.get("name") == "fail-provider"),
+            None,
+        )
+        assert_true(fail_provider_after_restart is not None, "fail-provider missing after restart")
+        fail_key_after_restart = fail_provider_after_restart["api-key-entries"][0]
+        assert_true(
+            fail_key_after_restart.get("disabled") is True,
+            f"disabled runtime state not restored after restart: {fail_key_after_restart}",
+        )
+
         def logs_ready():
             logs = [
                 item
@@ -462,6 +505,16 @@ def main():
             return True
 
         wait_until("runtime-state enable", fail_enabled, timeout=15)
+
+        def runtime_state_written():
+            if not runtime_state_path.exists():
+                return True
+            payload = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+            entries = payload.get("entries", [])
+            assert_true(len(entries) == 0, f"unexpected runtime state entries after enable: {entries}")
+            return True
+
+        wait_until("runtime-state file write", runtime_state_written, timeout=15)
 
         summary = {
             "status": "ok",
