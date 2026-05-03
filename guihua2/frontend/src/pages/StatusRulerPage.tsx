@@ -72,22 +72,42 @@ export function StatusRulerPage() {
     <div className={styles.page}>
       <Card
         title="状态规则"
-        extra={<Button size="sm" onClick={() => void load()} loading={loading}>刷新</Button>}
+        extra={
+          <Button size="sm" onClick={() => void load()} loading={loading}>
+            刷新
+          </Button>
+        }
       >
         <div className={styles.ruleForm}>
-          <Input label="规则名称" value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} />
-          <Input label="供应商" value={form.provider || ''} onChange={(event) => setForm((prev) => ({ ...prev, provider: event.target.value }))} />
-          <Input label="认证索引" value={form.auth_index || ''} onChange={(event) => setForm((prev) => ({ ...prev, auth_index: event.target.value }))} />
+          <Input
+            label="规则名称"
+            value={form.name}
+            onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+          />
+          <Input
+            label="供应商"
+            value={form.provider || ''}
+            onChange={(event) => setForm((prev) => ({ ...prev, provider: event.target.value }))}
+          />
+          <Input
+            label="认证索引"
+            value={form.auth_index || ''}
+            onChange={(event) => setForm((prev) => ({ ...prev, auth_index: event.target.value }))}
+          />
           <Input
             label="状态码"
             type="number"
             value={String(form.status_code || 0)}
-            onChange={(event) => setForm((prev) => ({ ...prev, status_code: Number(event.target.value) || 0 }))}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, status_code: Number(event.target.value) || 0 }))
+            }
           />
           <Input
-            label="响应包含文本"
+            label="响应体关键字"
             value={form.body_contains || ''}
-            onChange={(event) => setForm((prev) => ({ ...prev, body_contains: event.target.value }))}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, body_contains: event.target.value }))
+            }
           />
           <Select
             value={form.action}
@@ -104,7 +124,12 @@ export function StatusRulerPage() {
             label="冷却秒数"
             type="number"
             value={String(form.cooldown_seconds || 0)}
-            onChange={(event) => setForm((prev) => ({ ...prev, cooldown_seconds: Number(event.target.value) || 0 }))}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...prev,
+                cooldown_seconds: Number(event.target.value) || 0,
+              }))
+            }
           />
           <ToggleSwitch
             checked={Boolean(form.enabled)}
@@ -114,8 +139,12 @@ export function StatusRulerPage() {
           />
         </div>
         <div className={styles.actions} style={{ marginTop: 12 }}>
-          <Button size="sm" onClick={() => void saveRule()}>保存规则</Button>
-          <Button size="sm" variant="secondary" onClick={() => setForm(emptyRule)}>重置表单</Button>
+          <Button size="sm" onClick={() => void saveRule()}>
+            保存规则
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setForm(emptyRule)}>
+            重置表单
+          </Button>
         </div>
       </Card>
 
@@ -134,12 +163,19 @@ export function StatusRulerPage() {
             {rules.map((rule) => (
               <tr key={rule.id}>
                 <td>{rule.name}</td>
-                <td>{rule.provider || '*'} / {rule.auth_index || '*'} / {rule.status_code || '*'} / {rule.body_contains || '*'}</td>
+                <td>
+                  {rule.provider || '*'} / {rule.auth_index || '*'} / {rule.status_code || '*'} /{' '}
+                  {rule.body_contains || '*'}
+                </td>
                 <td>{rule.action}</td>
                 <td>{rule.enabled ? '是' : '否'}</td>
                 <td className={styles.actions}>
-                  <Button size="sm" variant="secondary" onClick={() => setForm(rule)}>编辑</Button>
-                  <Button size="sm" variant="danger" onClick={() => void deleteRule(rule.id)}>删除</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setForm(rule)}>
+                    编辑
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={() => void deleteRule(rule.id)}>
+                    删除
+                  </Button>
                 </td>
               </tr>
             ))}

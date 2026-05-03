@@ -33,7 +33,7 @@ export function RequestLabPage() {
       setSettings(settingsResp.settings);
       setItems(listResp.items);
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : '请求监控加载失败', 'error');
+      showNotification(error instanceof Error ? error.message : '抓包记录加载失败', 'error');
     } finally {
       setLoading(false);
     }
@@ -42,10 +42,6 @@ export function RequestLabPage() {
   useEffect(() => {
     void load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const refresh = async () => {
-    await load();
-  };
 
   const saveSettings = async (next: CaptureSettings) => {
     try {
@@ -79,7 +75,10 @@ export function RequestLabPage() {
 
   const exportAll = async () => {
     try {
-      const response = await captureApi.exportText({ q: query || undefined, failed_only: failedOnly });
+      const response = await captureApi.exportText({
+        q: query || undefined,
+        failed_only: failedOnly,
+      });
       const raw = typeof response.data === 'string' ? response.data : '';
       const blob = new Blob([raw], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -99,7 +98,7 @@ export function RequestLabPage() {
         <div className={styles.toolbar}>
           <div className={styles.toolbarGrow}>
             <Input
-              label="筛选"
+              label="筛选关键字"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -108,11 +107,17 @@ export function RequestLabPage() {
             checked={failedOnly}
             onChange={setFailedOnly}
             label="仅错误请求"
-            ariaLabel="仅显示错误请求"
+            ariaLabel="仅错误请求"
           />
-          <Button size="sm" onClick={() => void refresh()} loading={loading}>刷新</Button>
-          <Button size="sm" variant="secondary" onClick={() => void exportAll()}>导出 TXT</Button>
-          <Button size="sm" variant="danger" onClick={() => void clearAll()}>清空全部</Button>
+          <Button size="sm" onClick={() => void load()} loading={loading}>
+            刷新
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => void exportAll()}>
+            导出 TXT
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => void clearAll()}>
+            清空全部
+          </Button>
         </div>
         <div className={styles.toolbar}>
           <ToggleSwitch
@@ -127,7 +132,10 @@ export function RequestLabPage() {
               type="number"
               value={String(settings.retention_days)}
               onChange={(event) =>
-                setSettings((prev) => ({ ...prev, retention_days: Number(event.target.value) || 0 }))
+                setSettings((prev) => ({
+                  ...prev,
+                  retention_days: Number(event.target.value) || 0,
+                }))
               }
             />
           </div>
@@ -137,14 +145,19 @@ export function RequestLabPage() {
               type="number"
               value={String(settings.max_body_bytes)}
               onChange={(event) =>
-                setSettings((prev) => ({ ...prev, max_body_bytes: Number(event.target.value) || 0 }))
+                setSettings((prev) => ({
+                  ...prev,
+                  max_body_bytes: Number(event.target.value) || 0,
+                }))
               }
             />
           </div>
-          <Button size="sm" variant="secondary" onClick={() => void saveSettings(settings)}>保存设置</Button>
+          <Button size="sm" variant="secondary" onClick={() => void saveSettings(settings)}>
+            保存设置
+          </Button>
         </div>
         <p className={styles.hint}>
-          长期运行场景下，抓包数据会持久化到 sqlite，并按配置的包体字节上限截断，避免内存和磁盘无限增长。
+          抓包数据持久化到 sqlite，并按配置的保留天数与包体上限截断，避免长期运行时内存和磁盘无界增长。
         </p>
       </Card>
 
@@ -168,12 +181,16 @@ export function RequestLabPage() {
                 <td className={item.success ? styles.statusGood : styles.statusBad}>
                   {item.status_code || item.upstream_status_code || 0}
                 </td>
-                <td>{item.method} {item.path}</td>
+                <td>
+                  {item.method} {item.path}
+                </td>
                 <td>{item.provider || item.access_provider || '-'}</td>
                 <td>{item.auth_index || item.auth_id || '-'}</td>
                 <td>{item.token || item.api_key || '-'}</td>
                 <td>
-                  <Button size="sm" variant="secondary" onClick={() => void openDetail(item.id)}>详情</Button>
+                  <Button size="sm" variant="secondary" onClick={() => void openDetail(item.id)}>
+                    详情
+                  </Button>
                 </td>
               </tr>
             ))}
@@ -181,30 +198,43 @@ export function RequestLabPage() {
         </table>
       </Card>
 
-      <Modal
-        open={selected !== null}
-        title="抓包详情"
-        onClose={() => setSelected(null)}
-        width={900}
-      >
+      <Modal open={selected !== null} title="抓包详情" onClose={() => setSelected(null)} width={900}>
         {selected && (
           <div className={styles.grid}>
             <Card title="下游请求">
-              <div className={styles.codeBlock}>{selected.request_headers || '(no request headers)'}</div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.request_body || '(no request body)'}</div>
+              <div className={styles.codeBlock}>
+                {selected.request_headers || '(no request headers)'}
+              </div>
+              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
+                {selected.request_body || '(no request body)'}
+              </div>
             </Card>
             <Card title="上游请求">
-              <div className={styles.codeBlock}>{selected.upstream_request_url || '(no upstream url)'}</div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.upstream_request_headers || '(no upstream request headers)'}</div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.upstream_request_body || '(no upstream request body)'}</div>
+              <div className={styles.codeBlock}>
+                {selected.upstream_request_url || '(no upstream url)'}
+              </div>
+              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
+                {selected.upstream_request_headers || '(no upstream request headers)'}
+              </div>
+              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
+                {selected.upstream_request_body || '(no upstream request body)'}
+              </div>
             </Card>
             <Card title="上游响应">
-              <div className={styles.codeBlock}>{selected.upstream_response_headers || '(no upstream response headers)'}</div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.upstream_response_body || selected.error_text || '(no upstream response body)'}</div>
+              <div className={styles.codeBlock}>
+                {selected.upstream_response_headers || '(no upstream response headers)'}
+              </div>
+              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
+                {selected.upstream_response_body || selected.error_text || '(no upstream response body)'}
+              </div>
             </Card>
             <Card title="下游响应">
-              <div className={styles.codeBlock}>{selected.response_headers || '(no downstream response headers)'}</div>
-              <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.response_body || '(no downstream response body)'}</div>
+              <div className={styles.codeBlock}>
+                {selected.response_headers || '(no downstream response headers)'}
+              </div>
+              <div className={styles.codeBlock} style={{ marginTop: 12 }}>
+                {selected.response_body || '(no downstream response body)'}
+              </div>
             </Card>
           </div>
         )}

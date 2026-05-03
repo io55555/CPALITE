@@ -18,6 +18,7 @@ import { OAuthPage } from '@/pages/OAuthPage';
 import { QuotaPage } from '@/pages/QuotaPage';
 import { MonitoringCenterPage } from '@/pages/MonitoringCenterPage';
 import { MonitoringOpsPage } from '@/pages/MonitoringOpsPage';
+import { SeakeeMonitoringPage } from '@/pages/SeakeeMonitoringPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SystemPage } from '@/pages/SystemPage';
@@ -74,11 +75,13 @@ const mainRoutes = [
   { path: '/oauth', element: <OAuthPage /> },
   { path: '/quota', element: <QuotaPage /> },
   { path: '/monitor', element: <MonitoringCenterPage /> },
-  { path: '/monitoring', element: <MonitoringOpsPage /> },
-  { path: '/request-lab', element: <Navigate to="/monitoring?tab=capture" replace /> },
-  { path: '/status-ruler', element: <Navigate to="/monitoring?tab=rules" replace /> },
-  { path: '/rules', element: <Navigate to="/monitoring?tab=rules" replace /> },
-  { path: '/breaker', element: <Navigate to="/monitoring?tab=breaker" replace /> },
+  { path: '/monitoring-seakee', element: <SeakeeMonitoringPage /> },
+  { path: '/debugsetandip', element: <MonitoringOpsPage /> },
+  { path: '/monitoring', element: <Navigate to="/debugsetandip?tab=capture" replace /> },
+  { path: '/request-lab', element: <Navigate to="/debugsetandip?tab=capture" replace /> },
+  { path: '/status-ruler', element: <Navigate to="/debugsetandip?tab=rules" replace /> },
+  { path: '/rules', element: <Navigate to="/debugsetandip?tab=rules" replace /> },
+  { path: '/breaker', element: <Navigate to="/debugsetandip?tab=breaker" replace /> },
   { path: '/config', element: <ConfigPage /> },
   { path: '/logs', element: <LogsPage /> },
   { path: '/system', element: <SystemPage /> },

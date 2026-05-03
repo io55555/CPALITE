@@ -394,7 +394,8 @@ export function MainLayout() {
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
     { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },
     { path: '/monitor', label: t('nav.monitoring_center'), icon: sidebarIcons.monitoring },
-    { path: '/monitoring', label: '请求监控', icon: sidebarIcons.monitoring },
+    { path: '/monitoring-seakee', label: '\u8bf7\u6c42\u76d1\u63a7seakee', icon: sidebarIcons.monitoring },
+    { path: '/debugsetandip', label: '\u6293\u5305/\u8fc7\u6ee4/IP\u7194\u65ad', icon: sidebarIcons.monitoring },
     ...(config?.loggingToFile
       ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }]
       : []),
@@ -407,8 +408,8 @@ export function MainLayout() {
     const normalizedPath =
       trimmedPath === '/dashboard'
         ? '/'
-        : trimmedPath === '/request-lab' || trimmedPath === '/rules' || trimmedPath === '/breaker' || trimmedPath === '/status-ruler'
-          ? '/monitoring'
+        : trimmedPath === '/request-lab' || trimmedPath === '/rules' || trimmedPath === '/breaker' || trimmedPath === '/status-ruler' || trimmedPath === '/monitoring'
+          ? '/debugsetandip'
           : trimmedPath;
 
     const aiProvidersIndex = navOrder.indexOf('/ai-providers');

@@ -42,8 +42,12 @@ export function BreakerPage() {
         title="IP / 代理熔断"
         extra={
           <div className={styles.actions}>
-            <Button size="sm" onClick={() => void load()} loading={loading}>刷新</Button>
-            <Button size="sm" variant="secondary" onClick={() => void reset()}>全部重置</Button>
+            <Button size="sm" onClick={() => void load()} loading={loading}>
+              刷新
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void reset()}>
+              全部重置
+            </Button>
           </div>
         }
       >
@@ -68,13 +72,20 @@ export function BreakerPage() {
                 <td>{item.scope}</td>
                 <td>{item.key}</td>
                 <td className={item.status === 'closed' ? styles.statusGood : styles.statusBad}>
-                  {item.status}{item.probe_in_flight ? ' / probe' : ''}
+                  {item.status}
+                  {item.probe_in_flight ? ' / probe' : ''}
                 </td>
                 <td>{item.failure_count}</td>
                 <td>{item.cooldown_until || '-'}</td>
                 <td>{item.last_error || '-'}</td>
                 <td>
-                  <Button size="sm" variant="secondary" onClick={() => void reset(item.scope, item.key)}>重置</Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void reset(item.scope, item.key)}
+                  >
+                    重置
+                  </Button>
                 </td>
               </tr>
             ))}

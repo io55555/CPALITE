@@ -5,9 +5,11 @@ package cliproxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -392,6 +394,110 @@ func shouldPreserveOpenAICompatRuntimeState(existing, next *coreauth.Auth) bool 
 	return existingCompat && nextCompat
 }
 
+type openAICompatRuntimeStateFile struct {
+	Entries []openAICompatRuntimeStateEntry `json:"entries"`
+}
+
+type openAICompatRuntimeStateEntry struct {
+	AuthID         string          `json:"auth_id"`
+	AuthIndex      string          `json:"auth_index,omitempty"`
+	Disabled       bool            `json:"disabled,omitempty"`
+	Unavailable    bool            `json:"unavailable,omitempty"`
+	Status         string          `json:"status,omitempty"`
+	StatusMessage  string          `json:"status_message,omitempty"`
+	NextRetryAfter time.Time       `json:"next_retry_after,omitempty"`
+	LastError      *coreauth.Error `json:"last_error,omitempty"`
+}
+
+func (s *Service) applyOpenAICompatRuntimeStateFromDisk() {
+	if s == nil || s.coreManager == nil || strings.TrimSpace(s.configPath) == "" {
+		return
+	}
+
+	path := filepath.Join(filepath.Dir(s.configPath), "openai-compat-runtime-state.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+
+	var stateFile openAICompatRuntimeStateFile
+	if err := json.Unmarshal(raw, &stateFile); err != nil {
+		log.Warnf("failed to decode openai compat runtime state: %v", err)
+		return
+	}
+	if len(stateFile.Entries) == 0 {
+		return
+	}
+
+	byID := make(map[string]openAICompatRuntimeStateEntry, len(stateFile.Entries))
+	byIndex := make(map[string]openAICompatRuntimeStateEntry, len(stateFile.Entries))
+	for _, entry := range stateFile.Entries {
+		if id := strings.TrimSpace(entry.AuthID); id != "" {
+			byID[id] = entry
+		}
+		if idx := strings.TrimSpace(entry.AuthIndex); idx != "" {
+			byIndex[idx] = entry
+		}
+	}
+
+	ctx := coreauth.WithSkipPersist(context.Background())
+	applied := 0
+	for _, item := range s.coreManager.List() {
+		if item == nil {
+			continue
+		}
+		auth, ok := s.coreManager.GetByID(item.ID)
+		if !ok || auth == nil {
+			continue
+		}
+		if _, _, compat := openAICompatInfoFromAuth(auth); !compat {
+			continue
+		}
+
+		entry, ok := byID[strings.TrimSpace(auth.ID)]
+		if !ok {
+			entry, ok = byIndex[strings.TrimSpace(auth.EnsureIndex())]
+		}
+		if !ok {
+			continue
+		}
+
+		auth.Disabled = entry.Disabled
+		auth.Unavailable = entry.Unavailable
+		auth.Status = coreauth.Status(strings.TrimSpace(entry.Status))
+		if auth.Status == "" {
+			if auth.Disabled {
+				auth.Status = coreauth.StatusDisabled
+			} else {
+				auth.Status = coreauth.StatusActive
+			}
+		}
+		auth.StatusMessage = strings.TrimSpace(entry.StatusMessage)
+		auth.NextRetryAfter = entry.NextRetryAfter
+		if entry.LastError != nil {
+			auth.LastError = &coreauth.Error{
+				Code:       entry.LastError.Code,
+				Message:    entry.LastError.Message,
+				Retryable:  entry.LastError.Retryable,
+				HTTPStatus: entry.LastError.HTTPStatus,
+			}
+		} else {
+			auth.LastError = nil
+		}
+		auth.UpdatedAt = time.Now().UTC()
+
+		if _, err := s.coreManager.Update(ctx, auth); err != nil {
+			log.Warnf("failed to restore openai compat runtime state for %s: %v", auth.ID, err)
+			continue
+		}
+		applied++
+	}
+
+	if applied > 0 {
+		log.Infof("restored openai compat runtime state for %d auth(s)", applied)
+	}
+}
+
 func (s *Service) ensureExecutorsForAuth(a *coreauth.Auth) {
 	s.ensureExecutorsForAuthWithMode(a, false)
 }
@@ -548,6 +654,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if apiKeyResult == nil {
 		apiKeyResult = &APIKeyClientResult{}
 	}
+	s.applyOpenAICompatRuntimeStateFromDisk()
 
 	// legacy clients removed; no caches to refresh
 
