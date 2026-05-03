@@ -424,6 +424,12 @@ func main() {
 		log.Errorf("failed to configure log output: %v", err)
 		return
 	}
+	if cfg.UsageStatisticsEnabled {
+		usageDBPath := filepath.Join(logging.ResolveLogDirectory(cfg), "usage.db")
+		if err := usage.InitDefaultStore(usageDBPath); err != nil {
+			log.Warnf("failed to initialize usage sqlite store %q: %v", usageDBPath, err)
+		}
+	}
 
 	log.Infof("CLIProxyAPI Version: %s, Commit: %s, BuiltAt: %s", buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate)
 

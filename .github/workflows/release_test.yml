@@ -104,9 +104,9 @@ jobs:
           node-version: "20"
           package-manager-cache: false
 
-      - name: Build CPA-Manager
+      - name: Build Management Center
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
-        working-directory: src000/CPA-Manager
+        working-directory: guihua2/frontend
         env:
           VERSION: ${{ steps.versions.outputs.cli_version }}
         run: |
@@ -127,7 +127,7 @@ jobs:
 
       - name: Prepare model catalog
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
-        working-directory: src000/CLIProxyAPI
+        working-directory: guihua2/backend
         shell: bash
         run: |
           set -euo pipefail
@@ -139,7 +139,7 @@ jobs:
 
       - name: Build smoke binary
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
-        working-directory: src000/CLIProxyAPI
+        working-directory: guihua2/backend
         shell: bash
         env:
           VERSION: ${{ steps.versions.outputs.cli_version }}
@@ -162,8 +162,8 @@ jobs:
           set -euo pipefail
           mkdir -p smoke-output
           python3 scripts/release_smoke_test.py \
-            --binary src000/CLIProxyAPI/dist-smoke/cli-proxy-api \
-            --management-html src000/CPA-Manager/dist/index.html \
+            --binary guihua2/backend/dist-smoke/cli-proxy-api \
+            --management-html guihua2/frontend/dist/index.html \
             --output-dir smoke-output
 
       - name: Upload smoke logs
@@ -180,7 +180,7 @@ jobs:
 
       - name: Build CLIProxyAPI release archives
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
-        working-directory: src000/CLIProxyAPI
+        working-directory: guihua2/backend
         shell: bash
         env:
           VERSION: ${{ steps.versions.outputs.cli_version }}
@@ -231,9 +231,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp src000/CPA-Manager/dist/index.html release-assets/management.html
-          cp src000/CLIProxyAPI/dist/*.tar.gz release-assets/ || true
-          cp src000/CLIProxyAPI/dist/*.zip release-assets/ || true
+          cp guihua2/frontend/dist/index.html release-assets/management.html
+          cp guihua2/backend/dist/*.tar.gz release-assets/ || true
+          cp guihua2/backend/dist/*.zip release-assets/ || true
           ls -lh release-assets
 
       - name: Upload release bundle
