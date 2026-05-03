@@ -1224,14 +1224,14 @@ $openai-toolbar-control-height: 36px;
 }
 
 .keyTableShell {
-  overflow-x: hidden;
+  overflow-x: visible;
   border-radius: $radius-md;
 }
 
 // 表头
 .keyTableHeader {
   display: grid;
-  grid-template-columns: 46px 56px minmax(180px, 1.35fr) minmax(160px, 1fr) minmax(150px, 0.9fr);
+  grid-template-columns: 46px 56px minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(180px, auto);
   gap: $spacing-sm;
   padding: 10px $spacing-md;
   background: var(--bg-tertiary);
@@ -1249,7 +1249,7 @@ $openai-toolbar-control-height: 36px;
 // 数据行
 .keyTableRow {
   display: grid;
-  grid-template-columns: 46px 56px minmax(180px, 1.35fr) minmax(160px, 1fr) minmax(150px, 0.9fr);
+  grid-template-columns: 46px 56px minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(180px, auto);
   gap: $spacing-sm;
   padding: 10px $spacing-md;
   background: var(--bg-secondary);
@@ -1296,7 +1296,7 @@ $openai-toolbar-control-height: 36px;
 .keyTableColAction {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: $spacing-xs;
   flex-wrap: wrap;
   white-space: normal;
@@ -1308,7 +1308,7 @@ $openai-toolbar-control-height: 36px;
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1440px) {
   .keyTableHeader,
   .keyTableRow {
     grid-template-columns: 40px 48px minmax(0, 1fr);

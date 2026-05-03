@@ -22,7 +22,12 @@ type usageImportPayload struct {
 
 // GetUsageStatistics returns the in-memory request statistics snapshot.
 func (h *Handler) GetUsageStatistics(c *gin.Context) {
-	snapshot, err := usage.SnapshotRange(c.Request.Context(), usage.QueryRange{})
+	queryRange, err := parseUsageQueryRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	snapshot, err := usage.SnapshotRange(c.Request.Context(), queryRange)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load usage statistics"})
 		return
@@ -31,6 +36,36 @@ func (h *Handler) GetUsageStatistics(c *gin.Context) {
 		"usage":           snapshot,
 		"failed_requests": snapshot.FailureCount,
 	})
+}
+
+func parseUsageQueryRange(c *gin.Context) (usage.QueryRange, error) {
+	var out usage.QueryRange
+	if c == nil {
+		return out, nil
+	}
+	parse := func(name string) (*time.Time, error) {
+		raw := c.Query(name)
+		if raw == "" {
+			return nil, nil
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return nil, err
+		}
+		utc := parsed.UTC()
+		return &utc, nil
+	}
+	start, err := parse("start")
+	if err != nil {
+		return out, err
+	}
+	end, err := parse("end")
+	if err != nil {
+		return out, err
+	}
+	out.Start = start
+	out.End = end
+	return out, nil
 }
 
 // ExportUsageStatistics returns a complete usage snapshot for backup/migration.

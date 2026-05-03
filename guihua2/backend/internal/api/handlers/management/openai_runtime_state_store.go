@@ -159,8 +159,6 @@ func (h *Handler) applyOpenAICompatRuntimeState() {
 		h.openAICompatStateMu.Unlock()
 		return
 	}
-	h.rememberOpenAICompatRuntimeStateEntries(stateFile.Entries)
-
 	byID := make(map[string]openAICompatRuntimeStateEntry, len(stateFile.Entries))
 	byIndex := make(map[string]openAICompatRuntimeStateEntry, len(stateFile.Entries))
 	for _, entry := range stateFile.Entries {
@@ -205,9 +203,7 @@ func (h *Handler) applyOpenAICompatRuntimeState() {
 		}
 	}
 	if matched > 0 {
-		h.openAICompatStateMu.Lock()
-		h.openAICompatStateApplied = true
-		h.openAICompatStateMu.Unlock()
+		h.rememberOpenAICompatRuntimeStateEntries(stateFile.Entries)
 	}
 }
 

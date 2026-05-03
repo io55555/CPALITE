@@ -134,3 +134,62 @@ func TestOpenAICompatRuntimeStateOmitsActiveEntries(t *testing.T) {
 		t.Fatalf("persisted auth id=%q, want %q", stateFile.Entries[0].AuthID, disabledAuth.ID)
 	}
 }
+
+func TestOpenAICompatRuntimeStateWaitsForMatchingAuthBeforeApplying(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	configPath := filepath.Join(workDir, "config.yaml")
+	cfg := &config.Config{}
+
+	sourceManager := coreauth.NewManager(nil, nil, nil)
+	sourceAuth := &coreauth.Auth{
+		ID:         "openai-compatibility:groq:delayed",
+		Provider:   "groq",
+		Status:     coreauth.StatusDisabled,
+		Disabled:   true,
+		Unavailable: true,
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_delayed",
+		},
+	}
+	if _, err := sourceManager.Register(context.Background(), sourceAuth); err != nil {
+		t.Fatalf("register source auth: %v", err)
+	}
+	sourceHandler := NewHandler(cfg, configPath, sourceManager)
+	if err := sourceHandler.persistOpenAICompatRuntimeState(); err != nil {
+		t.Fatalf("persist runtime state: %v", err)
+	}
+
+	reloadedManager := coreauth.NewManager(nil, nil, nil)
+	reloadedHandler := NewHandler(cfg, configPath, reloadedManager)
+	if reloadedHandler.openAICompatStateApplied {
+		t.Fatal("runtime state should stay unapplied when no auth matched yet")
+	}
+
+	reloadedAuth := &coreauth.Auth{
+		ID:       sourceAuth.ID,
+		Provider: "groq",
+		Status:   coreauth.StatusActive,
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_delayed",
+		},
+	}
+	if _, err := reloadedManager.Register(context.Background(), reloadedAuth); err != nil {
+		t.Fatalf("register delayed auth: %v", err)
+	}
+
+	reloadedHandler.applyOpenAICompatRuntimeState()
+
+	got, ok := reloadedManager.GetByID(sourceAuth.ID)
+	if !ok || got == nil {
+		t.Fatalf("expected reloaded auth")
+	}
+	if !got.Disabled || got.Status != coreauth.StatusDisabled {
+		t.Fatalf("reloaded auth disabled=%v status=%q, want true/%q", got.Disabled, got.Status, coreauth.StatusDisabled)
+	}
+}
