@@ -93,6 +93,19 @@ function StatusIcon({ status }: { status: KeyTestStatus['status'] }) {
   }
 }
 
+function getRuntimeState(entry: ApiKeyEntry) {
+  if (entry.disabled || entry.status === 'disabled') {
+    return { label: '已停用', className: 'error' as const };
+  }
+  if (entry.status === 'error' || entry.lastError) {
+    return { label: '异常', className: 'warning' as const };
+  }
+  if (entry.statusMessage) {
+    return { label: '冻结中', className: 'warning' as const };
+  }
+  return { label: '启用', className: 'success' as const };
+}
+
 export function AiProvidersOpenAIEditPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -420,6 +433,7 @@ export function AiProvidersOpenAIEditPage() {
             <div className={styles.keyTableColStatus}>{t('common.status')}</div>
             <div className={styles.keyTableColKey}>{t('common.api_key')}</div>
             <div className={styles.keyTableColProxy}>{t('common.proxy_url')}</div>
+            <div className={styles.keyTableColRuntime}>运行状态</div>
             <div className={styles.keyTableColAction}>{t('common.action')}</div>
           </div>
 
@@ -427,6 +441,7 @@ export function AiProvidersOpenAIEditPage() {
           {list.map((entry, index) => {
             const keyStatus = keyTestStatuses[index]?.status ?? 'idle';
             const canTestKey = Boolean(entry.apiKey?.trim()) && hasConfiguredModels;
+            const runtimeState = getRuntimeState(entry);
 
             return (
               <div key={index} className={styles.keyTableRow}>
@@ -466,6 +481,22 @@ export function AiProvidersOpenAIEditPage() {
                 </div>
 
                 {/* 操作按钮 */}
+                <div className={styles.keyTableColRuntime}>
+                  <div className={styles.keyRuntimeBlock}>
+                    <span className={`status-badge ${runtimeState.className}`}>{runtimeState.label}</span>
+                    {entry.statusMessage && (
+                      <span className={styles.keyRuntimeMessage} title={entry.statusMessage}>
+                        {entry.statusMessage}
+                      </span>
+                    )}
+                    {entry.lastError && (
+                      <span className={styles.keyRuntimeError} title={entry.lastError}>
+                        {entry.lastError}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
                 <div className={styles.keyTableColAction}>
                   <Button
                     variant="secondary"

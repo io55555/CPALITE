@@ -17,9 +17,7 @@ import { AuthFilesOAuthModelAliasEditPage } from '@/pages/AuthFilesOAuthModelAli
 import { OAuthPage } from '@/pages/OAuthPage';
 import { QuotaPage } from '@/pages/QuotaPage';
 import { MonitoringCenterPage } from '@/pages/MonitoringCenterPage';
-import { RequestLabPage } from '@/pages/RequestLabPage';
-import { StatusRulerPage } from '@/pages/StatusRulerPage';
-import { BreakerPage } from '@/pages/BreakerPage';
+import { MonitoringOpsPage } from '@/pages/MonitoringOpsPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SystemPage } from '@/pages/SystemPage';
@@ -76,11 +74,11 @@ const mainRoutes = [
   { path: '/oauth', element: <OAuthPage /> },
   { path: '/quota', element: <QuotaPage /> },
   { path: '/monitor', element: <MonitoringCenterPage /> },
-  { path: '/monitoring', element: <MonitoringCenterPage /> },
-  { path: '/request-lab', element: <RequestLabPage /> },
-  { path: '/status-ruler', element: <StatusRulerPage /> },
-  { path: '/rules', element: <StatusRulerPage /> },
-  { path: '/breaker', element: <BreakerPage /> },
+  { path: '/monitoring', element: <MonitoringOpsPage /> },
+  { path: '/request-lab', element: <Navigate to="/monitoring?tab=capture" replace /> },
+  { path: '/status-ruler', element: <Navigate to="/monitoring?tab=rules" replace /> },
+  { path: '/rules', element: <Navigate to="/monitoring?tab=rules" replace /> },
+  { path: '/breaker', element: <Navigate to="/monitoring?tab=breaker" replace /> },
   { path: '/config', element: <ConfigPage /> },
   { path: '/logs', element: <LogsPage /> },
   { path: '/system', element: <SystemPage /> },

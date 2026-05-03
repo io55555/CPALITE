@@ -5,6 +5,7 @@ package cliproxy
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -246,7 +247,7 @@ func (b *Builder) Build() (*Service, error) {
 	coreManager.SetRoundTripperProvider(newObservabilityRoundTripperProvider(breakerMgr))
 	coreManager.SetConfig(b.cfg)
 	coreManager.SetOAuthModelAlias(b.cfg.OAuthModelAlias)
-	statusruler.ConfigureRuntime(coreManager, breakerMgr)
+	statusruler.ConfigureRuntime(coreManager, breakerMgr, filepath.Join(filepath.Dir(b.configPath), "openai-compat-runtime-state.json"))
 
 	service := &Service{
 		cfg:            b.cfg,

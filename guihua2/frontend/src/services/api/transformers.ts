@@ -120,6 +120,20 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
     headers
   };
   if (authIndex) result.authIndex = authIndex;
+  const disabled = normalizeBoolean(record?.disabled);
+  if (disabled !== undefined) result.disabled = disabled;
+  const status = record?.status;
+  if (status !== undefined && status !== null && String(status).trim()) {
+    result.status = String(status).trim();
+  }
+  const statusMessage = record?.['status-message'] ?? record?.statusMessage ?? record?.['status_message'];
+  if (statusMessage !== undefined && statusMessage !== null && String(statusMessage).trim()) {
+    result.statusMessage = String(statusMessage).trim();
+  }
+  const lastError = record?.['last-error'] ?? record?.lastError ?? record?.['last_error'];
+  if (lastError !== undefined && lastError !== null && String(lastError).trim()) {
+    result.lastError = String(lastError).trim();
+  }
   return result;
 };
 

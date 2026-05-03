@@ -69,6 +69,19 @@ const getApiKeyEntryRenderKey = (
   return authIndex ? `auth-index-${authIndex}` : `api-key-entry-${entryIndex}`;
 };
 
+const getRuntimeBadge = (entry: NonNullable<OpenAIProviderConfig['apiKeyEntries']>[number]) => {
+  if (entry.disabled || entry.status === 'disabled') {
+    return { text: '已停用', className: 'error' };
+  }
+  if (entry.status === 'error' || entry.lastError) {
+    return { text: '异常', className: 'warning' };
+  }
+  if (entry.statusMessage) {
+    return { text: '冻结中', className: 'warning' };
+  }
+  return { text: '启用', className: 'success' };
+};
+
 export function OpenAISection({
   configs,
   usageByProvider,
@@ -583,6 +596,7 @@ export function OpenAISection({
                     entry.apiKey,
                     provider.baseUrl
                   );
+                  const runtimeBadge = getRuntimeBadge(entry);
                   return (
                     <div
                       key={getApiKeyEntryRenderKey(entry, entryIndex)}
@@ -593,6 +607,9 @@ export function OpenAISection({
                       {entry.proxyUrl && (
                         <span className={styles.apiKeyEntryProxy}>{entry.proxyUrl}</span>
                       )}
+                      <span className={`status-badge ${runtimeBadge.className}`}>
+                        {runtimeBadge.text}
+                      </span>
                       <div className={styles.apiKeyEntryStats}>
                         <span
                           className={`${styles.apiKeyEntryStat} ${styles.apiKeyEntryStatSuccess}`}
@@ -605,6 +622,18 @@ export function OpenAISection({
                           <IconX size={12} /> {entryStats.failure}
                         </span>
                       </div>
+                      {(entry.statusMessage || entry.lastError) && (
+                        <div className={styles.apiKeyEntryRuntimeMeta}>
+                          {entry.statusMessage && (
+                            <span className={styles.apiKeyEntryStatusText}>{entry.statusMessage}</span>
+                          )}
+                          {entry.lastError && (
+                            <span className={styles.apiKeyEntryErrorText} title={entry.lastError}>
+                              {entry.lastError}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

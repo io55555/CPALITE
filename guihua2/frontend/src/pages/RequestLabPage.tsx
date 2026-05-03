@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -16,7 +15,6 @@ const defaultSettings: CaptureSettings = {
 };
 
 export function RequestLabPage() {
-  const { t } = useTranslation();
   const { showNotification } = useNotificationStore();
   const [settings, setSettings] = useState<CaptureSettings>(defaultSettings);
   const [items, setItems] = useState<CaptureRecord[]>([]);
@@ -35,7 +33,7 @@ export function RequestLabPage() {
       setSettings(settingsResp.settings);
       setItems(listResp.items);
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'Request Lab load failed', 'error');
+      showNotification(error instanceof Error ? error.message : '请求监控加载失败', 'error');
     } finally {
       setLoading(false);
     }
@@ -53,9 +51,9 @@ export function RequestLabPage() {
     try {
       const resp = await captureApi.updateSettings(next);
       setSettings(resp.settings);
-      showNotification('Request Lab settings updated', 'success');
+      showNotification('抓包设置已更新', 'success');
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'Failed to save settings', 'error');
+      showNotification(error instanceof Error ? error.message : '保存抓包设置失败', 'error');
     }
   };
 
@@ -64,7 +62,7 @@ export function RequestLabPage() {
       const resp = await captureApi.get(id);
       setSelected(resp.item);
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'Failed to load detail', 'error');
+      showNotification(error instanceof Error ? error.message : '加载详情失败', 'error');
     }
   };
 
@@ -73,9 +71,9 @@ export function RequestLabPage() {
       await captureApi.clear();
       setItems([]);
       setSelected(null);
-      showNotification('Capture records cleared', 'success');
+      showNotification('抓包记录已清空', 'success');
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'Failed to clear captures', 'error');
+      showNotification(error instanceof Error ? error.message : '清空抓包记录失败', 'error');
     }
   };
 
@@ -91,17 +89,17 @@ export function RequestLabPage() {
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'Failed to export captures', 'error');
+      showNotification(error instanceof Error ? error.message : '导出抓包记录失败', 'error');
     }
   };
 
   return (
     <div className={styles.page}>
-      <Card title="Request Lab">
+      <Card title="抓包 / 过滤">
         <div className={styles.toolbar}>
           <div className={styles.toolbarGrow}>
             <Input
-              label={t('common.search', { defaultValue: 'Search' })}
+              label="筛选"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -109,23 +107,23 @@ export function RequestLabPage() {
           <ToggleSwitch
             checked={failedOnly}
             onChange={setFailedOnly}
-            label="Only failed"
-            ariaLabel="Only failed requests"
+            label="仅错误请求"
+            ariaLabel="仅显示错误请求"
           />
-          <Button size="sm" onClick={() => void refresh()} loading={loading}>Refresh</Button>
-          <Button size="sm" variant="secondary" onClick={() => void exportAll()}>Export TXT</Button>
-          <Button size="sm" variant="danger" onClick={() => void clearAll()}>Clear All</Button>
+          <Button size="sm" onClick={() => void refresh()} loading={loading}>刷新</Button>
+          <Button size="sm" variant="secondary" onClick={() => void exportAll()}>导出 TXT</Button>
+          <Button size="sm" variant="danger" onClick={() => void clearAll()}>清空全部</Button>
         </div>
         <div className={styles.toolbar}>
           <ToggleSwitch
             checked={settings.enabled}
             onChange={(value) => void saveSettings({ ...settings, enabled: value })}
-            label="Enable capture"
-            ariaLabel="Enable capture"
+            label="启用抓包"
+            ariaLabel="启用抓包"
           />
           <div style={{ width: 140 }}>
             <Input
-              label="Retention days"
+              label="保留天数"
               type="number"
               value={String(settings.retention_days)}
               onChange={(event) =>
@@ -135,7 +133,7 @@ export function RequestLabPage() {
           </div>
           <div style={{ width: 160 }}>
             <Input
-              label="Body bytes"
+              label="包体字节上限"
               type="number"
               value={String(settings.max_body_bytes)}
               onChange={(event) =>
@@ -143,24 +141,24 @@ export function RequestLabPage() {
               }
             />
           </div>
-          <Button size="sm" variant="secondary" onClick={() => void saveSettings(settings)}>Save Settings</Button>
+          <Button size="sm" variant="secondary" onClick={() => void saveSettings(settings)}>保存设置</Button>
         </div>
         <p className={styles.hint}>
-          Long-running mode writes captures to sqlite and truncates payload bodies by configured byte cap.
+          长期运行场景下，抓包数据会持久化到 sqlite，并按配置的包体字节上限截断，避免内存和磁盘无限增长。
         </p>
       </Card>
 
-      <Card title={`Captured Requests (${items.length})`}>
+      <Card title={`抓包记录（${items.length}）`}>
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Status</th>
-              <th>Path</th>
-              <th>Provider</th>
-              <th>Auth</th>
-              <th>Token</th>
-              <th>Action</th>
+              <th>时间</th>
+              <th>状态</th>
+              <th>请求</th>
+              <th>供应商</th>
+              <th>认证</th>
+              <th>Token / Key</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -175,7 +173,7 @@ export function RequestLabPage() {
                 <td>{item.auth_index || item.auth_id || '-'}</td>
                 <td>{item.token || item.api_key || '-'}</td>
                 <td>
-                  <Button size="sm" variant="secondary" onClick={() => void openDetail(item.id)}>Detail</Button>
+                  <Button size="sm" variant="secondary" onClick={() => void openDetail(item.id)}>详情</Button>
                 </td>
               </tr>
             ))}
@@ -185,26 +183,26 @@ export function RequestLabPage() {
 
       <Modal
         open={selected !== null}
-        title="Capture Detail"
+        title="抓包详情"
         onClose={() => setSelected(null)}
         width={900}
       >
         {selected && (
           <div className={styles.grid}>
-            <Card title="Request">
+            <Card title="下游请求">
               <div className={styles.codeBlock}>{selected.request_headers || '(no request headers)'}</div>
               <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.request_body || '(no request body)'}</div>
             </Card>
-            <Card title="Upstream Request">
+            <Card title="上游请求">
               <div className={styles.codeBlock}>{selected.upstream_request_url || '(no upstream url)'}</div>
               <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.upstream_request_headers || '(no upstream request headers)'}</div>
               <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.upstream_request_body || '(no upstream request body)'}</div>
             </Card>
-            <Card title="Upstream Response">
+            <Card title="上游响应">
               <div className={styles.codeBlock}>{selected.upstream_response_headers || '(no upstream response headers)'}</div>
               <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.upstream_response_body || selected.error_text || '(no upstream response body)'}</div>
             </Card>
-            <Card title="Downstream Response">
+            <Card title="下游响应">
               <div className={styles.codeBlock}>{selected.response_headers || '(no downstream response headers)'}</div>
               <div className={styles.codeBlock} style={{ marginTop: 12 }}>{selected.response_body || '(no downstream response body)'}</div>
             </Card>

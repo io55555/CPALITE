@@ -675,6 +675,27 @@ $openai-toolbar-control-height: 36px;
   margin-left: auto;
 }
 
+.apiKeyEntryRuntimeMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.apiKeyEntryStatusText {
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.apiKeyEntryErrorText {
+  color: var(--danger-color);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .apiKeyEntryStat {
   display: inline-flex;
   align-items: center;
@@ -1231,7 +1252,13 @@ $openai-toolbar-control-height: 36px;
 // 表头
 .keyTableHeader {
   display: grid;
-  grid-template-columns: 46px 56px minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(180px, auto);
+  grid-template-columns:
+    46px
+    56px
+    minmax(160px, 1.2fr)
+    minmax(140px, 1fr)
+    minmax(180px, 0.95fr)
+    minmax(180px, auto);
   gap: $spacing-sm;
   padding: 10px $spacing-md;
   background: var(--bg-tertiary);
@@ -1249,7 +1276,13 @@ $openai-toolbar-control-height: 36px;
 // 数据行
 .keyTableRow {
   display: grid;
-  grid-template-columns: 46px 56px minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(180px, auto);
+  grid-template-columns:
+    46px
+    56px
+    minmax(160px, 1.2fr)
+    minmax(140px, 1fr)
+    minmax(180px, 0.95fr)
+    minmax(180px, auto);
   gap: $spacing-sm;
   padding: 10px $spacing-md;
   background: var(--bg-secondary);
@@ -1286,11 +1319,33 @@ $openai-toolbar-control-height: 36px;
 }
 
 .keyTableColKey,
-.keyTableColProxy {
+.keyTableColProxy,
+.keyTableColRuntime {
   min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.keyRuntimeBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  align-items: flex-start;
+}
+
+.keyRuntimeMessage {
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.keyRuntimeError {
+  color: var(--danger-color);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .keyTableColAction {
@@ -1315,6 +1370,7 @@ $openai-toolbar-control-height: 36px;
   }
 
   .keyTableColProxy,
+  .keyTableColRuntime,
   .keyTableColAction {
     grid-column: 3;
     justify-content: flex-start;

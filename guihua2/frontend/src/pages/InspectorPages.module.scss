@@ -4,6 +4,27 @@
   gap: 16px;
 }
 
+.opsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.opsTitle {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.opsTabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;

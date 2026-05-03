@@ -15,6 +15,10 @@ export interface ApiKeyEntry {
   proxyUrl?: string;
   headers?: Record<string, string>;
   authIndex?: string;
+  disabled?: boolean;
+  status?: string;
+  statusMessage?: string;
+  lastError?: string;
 }
 
 export interface CloakConfig {

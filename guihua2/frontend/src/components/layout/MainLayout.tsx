@@ -43,9 +43,6 @@ const sidebarIcons: Record<string, ReactNode> = {
   oauth: <IconSidebarOauth size={18} />,
   quota: <IconSidebarQuota size={18} />,
   monitoring: <IconSidebarMonitoring size={18} />,
-  requestLab: <IconSidebarMonitoring size={18} />,
-  rules: <IconSidebarMonitoring size={18} />,
-  breaker: <IconSidebarMonitoring size={18} />,
   config: <IconSidebarConfig size={18} />,
   logs: <IconSidebarLogs size={18} />,
   system: <IconSidebarSystem size={18} />,
@@ -397,9 +394,7 @@ export function MainLayout() {
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
     { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },
     { path: '/monitor', label: t('nav.monitoring_center'), icon: sidebarIcons.monitoring },
-    { path: '/request-lab', label: t('nav.request_lab', { defaultValue: 'Request Lab' }), icon: sidebarIcons.requestLab },
-    { path: '/rules', label: t('nav.status_ruler', { defaultValue: 'Status Ruler' }), icon: sidebarIcons.rules },
-    { path: '/breaker', label: t('nav.breaker', { defaultValue: 'Breaker' }), icon: sidebarIcons.breaker },
+    { path: '/monitoring', label: '请求监控', icon: sidebarIcons.monitoring },
     ...(config?.loggingToFile
       ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }]
       : []),
@@ -412,11 +407,9 @@ export function MainLayout() {
     const normalizedPath =
       trimmedPath === '/dashboard'
         ? '/'
-        : trimmedPath === '/monitoring'
-          ? '/monitor'
-          : trimmedPath === '/status-ruler'
-            ? '/rules'
-            : trimmedPath;
+        : trimmedPath === '/request-lab' || trimmedPath === '/rules' || trimmedPath === '/breaker' || trimmedPath === '/status-ruler'
+          ? '/monitoring'
+          : trimmedPath;
 
     const aiProvidersIndex = navOrder.indexOf('/ai-providers');
     if (aiProvidersIndex !== -1) {

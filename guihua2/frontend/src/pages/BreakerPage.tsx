@@ -16,7 +16,7 @@ export function BreakerPage() {
       const resp = await breakerApi.list();
       setItems(resp.items);
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'Breaker load failed', 'error');
+      showNotification(error instanceof Error ? error.message : '熔断状态加载失败', 'error');
     } finally {
       setLoading(false);
     }
@@ -30,36 +30,36 @@ export function BreakerPage() {
     try {
       await breakerApi.reset(scope, key);
       await load();
-      showNotification('Breaker state reset', 'success');
+      showNotification('熔断状态已重置', 'success');
     } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'Failed to reset breaker', 'error');
+      showNotification(error instanceof Error ? error.message : '重置熔断状态失败', 'error');
     }
   };
 
   return (
     <div className={styles.page}>
       <Card
-        title="Breaker"
+        title="IP / 代理熔断"
         extra={
           <div className={styles.actions}>
-            <Button size="sm" onClick={() => void load()} loading={loading}>Refresh</Button>
-            <Button size="sm" variant="secondary" onClick={() => void reset()}>Reset All</Button>
+            <Button size="sm" onClick={() => void load()} loading={loading}>刷新</Button>
+            <Button size="sm" variant="secondary" onClick={() => void reset()}>全部重置</Button>
           </div>
         }
       >
         <p className={styles.hint}>
-          Proxy/auth breaker uses open and half-open states to avoid concurrent retries repeatedly hitting a broken account proxy.
+          当账号级代理 IP 或认证连续故障时，熔断器会进入 open / half-open 状态，避免并发请求持续打到同一个故障账号。
         </p>
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Scope</th>
-              <th>Key</th>
-              <th>Status</th>
-              <th>Failures</th>
-              <th>Cooldown</th>
-              <th>Last Error</th>
-              <th>Action</th>
+              <th>范围</th>
+              <th>键</th>
+              <th>状态</th>
+              <th>失败次数</th>
+              <th>冷却截止</th>
+              <th>最后错误</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -74,7 +74,7 @@ export function BreakerPage() {
                 <td>{item.cooldown_until || '-'}</td>
                 <td>{item.last_error || '-'}</td>
                 <td>
-                  <Button size="sm" variant="secondary" onClick={() => void reset(item.scope, item.key)}>Reset</Button>
+                  <Button size="sm" variant="secondary" onClick={() => void reset(item.scope, item.key)}>重置</Button>
                 </td>
               </tr>
             ))}

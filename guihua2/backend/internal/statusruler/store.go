@@ -3,9 +3,11 @@ package statusruler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -43,9 +45,11 @@ type Hit struct {
 }
 
 type Runtime struct {
-	store   *Store
-	authMgr *coreauth.Manager
-	breaker *breaker.Manager
+	store            *Store
+	authMgr          *coreauth.Manager
+	breaker          *breaker.Manager
+	runtimeStatePath string
+	persistMu        *sync.Mutex
 }
 
 type Store struct {
@@ -73,12 +77,14 @@ func DefaultStore() *Store {
 	return defaultStore
 }
 
-func ConfigureRuntime(authMgr *coreauth.Manager, breakerMgr *breaker.Manager) {
+func ConfigureRuntime(authMgr *coreauth.Manager, breakerMgr *breaker.Manager, runtimeStatePath string) {
 	runtimeMu.Lock()
 	defaultRuntime = Runtime{
-		store:   DefaultStore(),
-		authMgr: authMgr,
-		breaker: breakerMgr,
+		store:            DefaultStore(),
+		authMgr:          authMgr,
+		breaker:          breakerMgr,
+		runtimeStatePath: strings.TrimSpace(runtimeStatePath),
+		persistMu:        &sync.Mutex{},
 	}
 	runtimeMu.Unlock()
 }
@@ -314,6 +320,137 @@ func applyRuleAction(ctx context.Context, runtime Runtime, auth breaker.AuthSnap
 			current.NextRetryAfter = time.Now().Add(time.Duration(rule.CooldownSeconds) * time.Second)
 		}
 		_, _ = runtime.authMgr.Update(coreauth.WithSkipPersist(ctx), current)
+		_ = runtime.persistOpenAICompatRuntimeState()
+	}
+}
+
+const openAICompatRuntimeStateFileVersion = 1
+
+type openAICompatRuntimeStateFile struct {
+	Version   int                               `json:"version"`
+	UpdatedAt time.Time                         `json:"updated_at"`
+	Entries   []openAICompatRuntimeStateEntry   `json:"entries"`
+}
+
+type openAICompatRuntimeStateEntry struct {
+	AuthID         string          `json:"auth_id"`
+	AuthIndex      string          `json:"auth_index,omitempty"`
+	Disabled       bool            `json:"disabled,omitempty"`
+	Unavailable    bool            `json:"unavailable,omitempty"`
+	Status         string          `json:"status,omitempty"`
+	StatusMessage  string          `json:"status_message,omitempty"`
+	NextRetryAfter time.Time       `json:"next_retry_after,omitempty"`
+	LastError      *coreauth.Error `json:"last_error,omitempty"`
+}
+
+func (r Runtime) persistOpenAICompatRuntimeState() error {
+	if r.authMgr == nil || strings.TrimSpace(r.runtimeStatePath) == "" || r.persistMu == nil {
+		return nil
+	}
+
+	r.persistMu.Lock()
+	defer r.persistMu.Unlock()
+
+	path := r.runtimeStatePath
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	entries := collectOpenAICompatRuntimeStateEntries(r.authMgr)
+	if len(entries) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+
+	payload, err := json.MarshalIndent(openAICompatRuntimeStateFile{
+		Version:   openAICompatRuntimeStateFileVersion,
+		UpdatedAt: time.Now().UTC(),
+		Entries:   entries,
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, payload, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func collectOpenAICompatRuntimeStateEntries(manager *coreauth.Manager) []openAICompatRuntimeStateEntry {
+	if manager == nil {
+		return nil
+	}
+
+	entries := make([]openAICompatRuntimeStateEntry, 0, 16)
+	for _, auth := range manager.List() {
+		if auth == nil || !isOpenAICompatAuth(auth) {
+			continue
+		}
+		entry := openAICompatRuntimeStateEntry{
+			AuthID:         strings.TrimSpace(auth.ID),
+			AuthIndex:      strings.TrimSpace(auth.EnsureIndex()),
+			Disabled:       auth.Disabled,
+			Unavailable:    auth.Unavailable,
+			Status:         string(auth.Status),
+			StatusMessage:  strings.TrimSpace(auth.StatusMessage),
+			NextRetryAfter: auth.NextRetryAfter,
+			LastError:      cloneRuntimeStateError(auth.LastError),
+		}
+		if isDefaultOpenAICompatRuntimeStateEntry(entry) {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].AuthID == entries[j].AuthID {
+			return entries[i].AuthIndex < entries[j].AuthIndex
+		}
+		return entries[i].AuthID < entries[j].AuthID
+	})
+	return entries
+}
+
+func isOpenAICompatAuth(auth *coreauth.Auth) bool {
+	if auth == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(auth.Provider), "openai-compatibility") {
+		return true
+	}
+	if auth.Attributes == nil {
+		return false
+	}
+	if strings.TrimSpace(auth.Attributes["compat_name"]) != "" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(auth.Attributes["provider_key"]), "openai-compatibility")
+}
+
+func isDefaultOpenAICompatRuntimeStateEntry(entry openAICompatRuntimeStateEntry) bool {
+	status := strings.ToLower(strings.TrimSpace(entry.Status))
+	statusMessage := strings.TrimSpace(entry.StatusMessage)
+	return !entry.Disabled &&
+		!entry.Unavailable &&
+		(status == "" || status == string(coreauth.StatusActive)) &&
+		statusMessage == "" &&
+		entry.NextRetryAfter.IsZero() &&
+		entry.LastError == nil
+}
+
+func cloneRuntimeStateError(src *coreauth.Error) *coreauth.Error {
+	if src == nil {
+		return nil
+	}
+	return &coreauth.Error{
+		Code:       src.Code,
+		Message:    src.Message,
+		Retryable:  src.Retryable,
+		HTTPStatus: src.HTTPStatus,
 	}
 }
 
