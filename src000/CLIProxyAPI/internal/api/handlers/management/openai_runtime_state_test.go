@@ -2,6 +2,8 @@ package management
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -69,4 +71,66 @@ func TestOpenAICompatRuntimeStatePersistsAndReloads(t *testing.T) {
 		t.Fatalf("reloaded last error = %#v", got.LastError)
 	}
 	_ = reloadedHandler
+}
+
+func TestOpenAICompatRuntimeStateOmitsActiveEntries(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	configPath := filepath.Join(workDir, "config.yaml")
+	cfg := &config.Config{}
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	activeAuth := &coreauth.Auth{
+		ID:       "openai-compatibility:groq:active",
+		Provider: "groq",
+		Status:   coreauth.StatusActive,
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_active",
+		},
+	}
+	disabledAuth := &coreauth.Auth{
+		ID:         "openai-compatibility:groq:disabled",
+		Provider:   "groq",
+		Status:     coreauth.StatusDisabled,
+		Disabled:   true,
+		Unavailable: true,
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_disabled",
+		},
+	}
+	if _, err := manager.Register(context.Background(), activeAuth); err != nil {
+		t.Fatalf("register active auth: %v", err)
+	}
+	if _, err := manager.Register(context.Background(), disabledAuth); err != nil {
+		t.Fatalf("register disabled auth: %v", err)
+	}
+
+	h := NewHandler(cfg, configPath, manager)
+	h.openAICompatStateMu.Lock()
+	h.openAICompatStateApplied = true
+	h.openAICompatStateMu.Unlock()
+	if err := h.persistOpenAICompatRuntimeState(); err != nil {
+		t.Fatalf("persist runtime state: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(workDir, openAICompatRuntimeStateFileName))
+	if err != nil {
+		t.Fatalf("read runtime state file: %v", err)
+	}
+
+	var stateFile openAICompatRuntimeStateFile
+	if err := json.Unmarshal(raw, &stateFile); err != nil {
+		t.Fatalf("unmarshal runtime state file: %v", err)
+	}
+	if len(stateFile.Entries) != 1 {
+		t.Fatalf("entries len=%d, want 1", len(stateFile.Entries))
+	}
+	if stateFile.Entries[0].AuthID != disabledAuth.ID {
+		t.Fatalf("persisted auth id=%q, want %q", stateFile.Entries[0].AuthID, disabledAuth.ID)
+	}
 }

@@ -34,6 +34,17 @@ type openAICompatRuntimeStateEntry struct {
 	LastError      *coreauth.Error `json:"last_error,omitempty"`
 }
 
+func isDefaultOpenAICompatRuntimeStateEntry(entry openAICompatRuntimeStateEntry) bool {
+	status := strings.ToLower(strings.TrimSpace(entry.Status))
+	statusMessage := strings.TrimSpace(entry.StatusMessage)
+	return !entry.Disabled &&
+		!entry.Unavailable &&
+		(status == "" || status == string(coreauth.StatusActive)) &&
+		statusMessage == "" &&
+		entry.NextRetryAfter.IsZero() &&
+		entry.LastError == nil
+}
+
 func (h *Handler) openAICompatRuntimeStatePath() string {
 	if h == nil {
 		return ""
@@ -77,11 +88,25 @@ func (h *Handler) persistOpenAICompatRuntimeState() error {
 	h.openAICompatStateMu.Lock()
 	defer h.openAICompatStateMu.Unlock()
 	entries := collectOpenAICompatRuntimeStateEntries(manager)
+	if !h.openAICompatStateApplied {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		h.openAICompatStateApplied = true
+	}
 	signature, err := marshalOpenAICompatRuntimeStateSignature(entries)
 	if err != nil {
 		return err
 	}
 	if h.openAICompatStateSig == string(signature) {
+		return nil
+	}
+
+	if len(entries) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		h.openAICompatStateSig = string(signature)
 		return nil
 	}
 
@@ -129,6 +154,9 @@ func (h *Handler) applyOpenAICompatRuntimeState() {
 		return
 	}
 	if len(stateFile.Entries) == 0 {
+		h.openAICompatStateMu.Lock()
+		h.openAICompatStateApplied = true
+		h.openAICompatStateMu.Unlock()
 		return
 	}
 	h.rememberOpenAICompatRuntimeStateEntries(stateFile.Entries)
@@ -145,6 +173,7 @@ func (h *Handler) applyOpenAICompatRuntimeState() {
 	}
 
 	ctx := coreauth.WithSkipPersist(context.Background())
+	matched := 0
 	for _, auth := range manager.List() {
 		if auth == nil || !isOpenAICompatAuth(auth) {
 			continue
@@ -156,6 +185,7 @@ func (h *Handler) applyOpenAICompatRuntimeState() {
 		if !ok {
 			continue
 		}
+		matched++
 		auth.Disabled = entry.Disabled
 		auth.Unavailable = entry.Unavailable
 		auth.Status = coreauth.Status(strings.TrimSpace(entry.Status))
@@ -173,6 +203,11 @@ func (h *Handler) applyOpenAICompatRuntimeState() {
 		if _, err := manager.Update(ctx, auth); err != nil {
 			log.Warnf("failed to apply openai compat runtime state for %s: %v", auth.ID, err)
 		}
+	}
+	if matched > 0 {
+		h.openAICompatStateMu.Lock()
+		h.openAICompatStateApplied = true
+		h.openAICompatStateMu.Unlock()
 	}
 }
 
@@ -196,6 +231,12 @@ func (h *Handler) startOpenAICompatRuntimeStateSync() {
 		ticker := time.NewTicker(openAICompatRuntimeStateSyncInterval)
 		defer ticker.Stop()
 		for range ticker.C {
+			h.openAICompatStateMu.Lock()
+			shouldApply := !h.openAICompatStateApplied
+			h.openAICompatStateMu.Unlock()
+			if shouldApply {
+				h.applyOpenAICompatRuntimeState()
+			}
 			if err := h.persistOpenAICompatRuntimeState(); err != nil {
 				log.Warnf("failed to sync openai compat runtime state: %v", err)
 			}
@@ -212,7 +253,7 @@ func collectOpenAICompatRuntimeStateEntries(manager *coreauth.Manager) []openAIC
 		if !isOpenAICompatAuth(auth) || auth == nil {
 			continue
 		}
-		entries = append(entries, openAICompatRuntimeStateEntry{
+		entry := openAICompatRuntimeStateEntry{
 			AuthID:         strings.TrimSpace(auth.ID),
 			AuthIndex:      strings.TrimSpace(auth.EnsureIndex()),
 			Disabled:       auth.Disabled,
@@ -221,7 +262,11 @@ func collectOpenAICompatRuntimeStateEntries(manager *coreauth.Manager) []openAIC
 			StatusMessage:  strings.TrimSpace(auth.StatusMessage),
 			NextRetryAfter: auth.NextRetryAfter,
 			LastError:      cloneRuntimeStateError(auth.LastError),
-		})
+		}
+		if isDefaultOpenAICompatRuntimeStateEntry(entry) {
+			continue
+		}
+		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].AuthID < entries[j].AuthID
@@ -243,6 +288,7 @@ func (h *Handler) rememberOpenAICompatRuntimeStateEntries(entries []openAICompat
 	}
 	h.openAICompatStateMu.Lock()
 	h.openAICompatStateSig = string(signature)
+	h.openAICompatStateApplied = true
 	h.openAICompatStateMu.Unlock()
 }
 

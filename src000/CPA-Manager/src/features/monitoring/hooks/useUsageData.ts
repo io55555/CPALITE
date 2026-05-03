@@ -21,6 +21,18 @@ export interface UseUsageDataReturn {
   loadUsage: () => Promise<void>;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const unwrapUsagePayload = (payload: unknown): UsagePayload | null => {
+  if (!isRecord(payload)) return null;
+  const nested = payload.usage;
+  if (isRecord(nested)) {
+    return nested as UsagePayload;
+  }
+  return payload as UsagePayload;
+};
+
 export function useUsageData(): UseUsageDataReturn {
   const [usage, setUsage] = useState<UsagePayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,9 +48,9 @@ export function useUsageData(): UseUsageDataReturn {
     setError('');
 
     try {
-      const payload = await apiClient.get<UsagePayload>('/usage');
+      const payload = unwrapUsagePayload(await apiClient.get('/usage'));
       if (requestIdRef.current !== requestId) return;
-      setUsage(payload ?? null);
+      setUsage(payload);
       setLastRefreshedAt(new Date());
     } catch (err) {
       if (requestIdRef.current !== requestId) return;

@@ -40,6 +40,7 @@ type Handler struct {
 	mu                  sync.Mutex
 	openAICompatStateMu sync.Mutex
 	openAICompatStateSig string
+	openAICompatStateApplied bool
 	attemptsMu          sync.Mutex
 	failedAttempts      map[string]*attemptInfo // keyed by client IP
 	authManager         *coreauth.Manager

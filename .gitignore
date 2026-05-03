@@ -13,6 +13,7 @@ Desktop.ini
 ai.txt
 build.txt
 buildlog/
+规划*.txt
 
 # Python
 __pycache__/
