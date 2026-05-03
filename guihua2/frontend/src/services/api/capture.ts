@@ -12,6 +12,7 @@ export interface CaptureRecord {
   request_id: string;
   method: string;
   path: string;
+  query?: string;
   status_code: number;
   success: boolean;
   duration_ms: number;

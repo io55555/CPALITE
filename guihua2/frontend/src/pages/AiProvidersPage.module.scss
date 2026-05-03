@@ -1336,12 +1336,14 @@ $openai-toolbar-control-height: 36px;
 }
 
 .keyRuntimeMessage {
+  display: none;
   color: var(--text-secondary);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .keyRuntimeError {
+  display: none;
   color: var(--danger-color);
   font-size: 12px;
   overflow-wrap: anywhere;

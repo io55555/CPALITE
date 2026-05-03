@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -14,13 +14,87 @@ const defaultSettings: CaptureSettings = {
   max_body_bytes: 65536,
 };
 
-const formatStatus = (item: CaptureRecord) => item.status_code || item.upstream_status_code || 0;
+const formatShanghaiTime = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date);
+};
 
-const renderPacketBlock = (title: string, summary: Array<string | number>, body: string) => (
+const tryParseHeaderJson = (raw?: string): Array<[string, string[]]> | null => {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return Object.entries(parsed)
+      .map(([key, value]) => {
+        if (Array.isArray(value)) {
+          return [key, value.map((item) => String(item ?? ''))] as [string, string[]];
+        }
+        return [key, [String(value ?? '')]] as [string, string[]];
+      })
+      .sort((a, b) => a[0].localeCompare(b[0]));
+  } catch {
+    return null;
+  }
+};
+
+const buildHttpBlock = ({
+  startLine,
+  rawHeaders,
+  body,
+}: {
+  startLine: string;
+  rawHeaders?: string;
+  body?: string;
+}) => {
+  const parsedHeaders = tryParseHeaderJson(rawHeaders);
+  const lines = [startLine];
+  if (parsedHeaders) {
+    parsedHeaders.forEach(([key, values]) => {
+      values.forEach((value) => {
+        lines.push(`${key}: ${value}`);
+      });
+    });
+  } else if (rawHeaders && rawHeaders.trim()) {
+    lines.push(rawHeaders.trim());
+  }
+  lines.push('');
+  if (body && body.trim()) {
+    lines.push(body);
+  }
+  return lines.join('\n');
+};
+
+const formatPacketPanel = ({
+  title,
+  time,
+  statusCode,
+  startLine,
+  rawHeaders,
+  body,
+}: {
+  title: string;
+  time: string;
+  statusCode: number;
+  startLine: string;
+  rawHeaders?: string;
+  body?: string;
+}) => (
   <Card title={title}>
-    <div className={styles.codeBlock}>{summary.filter(Boolean).join('\n') || '(empty)'}</div>
-    <div className={styles.codeBlock} style={{ marginTop: 12 }}>
-      {body || '(empty)'}
+    <div className={styles.codeBlock}>
+      {`时间: ${formatShanghaiTime(time)} 东八区\n状态码: ${statusCode}\n${buildHttpBlock({
+        startLine,
+        rawHeaders,
+        body,
+      })}`}
     </div>
   </Card>
 );
@@ -103,6 +177,60 @@ export function RequestLabPage() {
     }
   };
 
+  const detailPanels = useMemo(() => {
+    if (!selected) return null;
+    const downstreamPath = selected.query ? `${selected.path}?${selected.query}` : selected.path;
+    const upstreamUrl = selected.upstream_request_url || '/';
+    const upstreamUrlObject = (() => {
+      try {
+        return new URL(upstreamUrl);
+      } catch {
+        return null;
+      }
+    })();
+    const upstreamPath = upstreamUrlObject
+      ? `${upstreamUrlObject.pathname}${upstreamUrlObject.search}`
+      : upstreamUrl;
+    const upstreamHost = upstreamUrlObject?.host ? ` [host: ${upstreamUrlObject.host}]` : '';
+
+    return (
+      <div className={styles.grid}>
+        {formatPacketPanel({
+          title: '下游请求',
+          time: selected.created_at,
+          statusCode: selected.status_code || 0,
+          startLine: `${selected.method} ${downstreamPath || '/'} HTTP/1.1`,
+          rawHeaders: selected.request_headers,
+          body: selected.request_body,
+        })}
+        {formatPacketPanel({
+          title: '上游请求',
+          time: selected.created_at,
+          statusCode: selected.upstream_status_code || selected.status_code || 0,
+          startLine: `${selected.method} ${upstreamPath || '/'} HTTP/1.1${upstreamHost}`,
+          rawHeaders: selected.upstream_request_headers,
+          body: selected.upstream_request_body,
+        })}
+        {formatPacketPanel({
+          title: '上游响应',
+          time: selected.created_at,
+          statusCode: selected.upstream_status_code || 0,
+          startLine: `HTTP/1.1 ${selected.upstream_status_code || 0}`,
+          rawHeaders: selected.upstream_response_headers,
+          body: selected.upstream_response_body || selected.error_text,
+        })}
+        {formatPacketPanel({
+          title: '下游响应',
+          time: selected.created_at,
+          statusCode: selected.status_code || 0,
+          startLine: `HTTP/1.1 ${selected.status_code || 0}`,
+          rawHeaders: selected.response_headers,
+          body: selected.response_body,
+        })}
+      </div>
+    );
+  }, [selected]);
+
   return (
     <div className={styles.page}>
       <Card title="抓包 / 过滤">
@@ -168,7 +296,7 @@ export function RequestLabPage() {
           </Button>
         </div>
         <p className={styles.hint}>
-          抓包数据会持久化到 sqlite，并按保留天数和包体大小自动截断，避免长期运行时内存和磁盘无界增长。
+          抓包数据持久化到 sqlite，并按保留天数和包体大小自动截断，避免长期运行时内存和磁盘无界增长。
         </p>
       </Card>
 
@@ -189,9 +317,9 @@ export function RequestLabPage() {
           <tbody>
             {items.map((item) => (
               <tr key={item.id}>
-                <td>{item.created_at}</td>
+                <td>{formatShanghaiTime(item.created_at)}</td>
                 <td className={item.success ? styles.statusGood : styles.statusBad}>
-                  {formatStatus(item)}
+                  {item.status_code || item.upstream_status_code || 0}
                 </td>
                 <td>
                   {item.method} {item.path}
@@ -211,50 +339,8 @@ export function RequestLabPage() {
         </table>
       </Card>
 
-      <Modal open={selected !== null} title="抓包详情" onClose={() => setSelected(null)} width={1100}>
-        {selected && (
-          <div className={styles.grid}>
-            {renderPacketBlock(
-              '下游请求',
-              [
-                `时间: ${selected.created_at}`,
-                `请求: ${selected.method} ${selected.path}`,
-                `状态码: ${selected.status_code || 0}`,
-              ],
-              [selected.request_headers, '', selected.request_body].filter(Boolean).join('\n')
-            )}
-            {renderPacketBlock(
-              '上游请求',
-              [
-                `目标: ${selected.upstream_request_url || '-'}`,
-                `认证: ${selected.auth_index || selected.auth_id || '-'}`,
-                `代理: ${selected.proxy_url || '-'}`,
-              ],
-              [selected.upstream_request_headers, '', selected.upstream_request_body]
-                .filter(Boolean)
-                .join('\n')
-            )}
-            {renderPacketBlock(
-              '上游响应',
-              [
-                `上游状态码: ${selected.upstream_status_code || 0}`,
-                `成功: ${selected.success ? '是' : '否'}`,
-                selected.error_text ? `错误: ${selected.error_text}` : '',
-              ],
-              [selected.upstream_response_headers, '', selected.upstream_response_body || selected.error_text]
-                .filter(Boolean)
-                .join('\n')
-            )}
-            {renderPacketBlock(
-              '下游响应',
-              [
-                `下游状态码: ${selected.status_code || 0}`,
-                `耗时: ${selected.duration_ms} ms`,
-              ],
-              [selected.response_headers, '', selected.response_body].filter(Boolean).join('\n')
-            )}
-          </div>
-        )}
+      <Modal open={selected !== null} title="抓包详情" onClose={() => setSelected(null)} width={1200}>
+        {detailPanels}
       </Modal>
     </div>
   );

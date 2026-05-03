@@ -3,6 +3,7 @@ package cliproxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,6 +130,7 @@ type captureBodyReadCloser struct {
 	breaker    *breaker.Manager
 	ctx        context.Context
 	closed     bool
+	captured   bool
 }
 
 func (r *captureBodyReadCloser) Read(p []byte) (int, error) {
@@ -142,6 +144,9 @@ func (r *captureBodyReadCloser) Read(p []byte) (int, error) {
 			_, _ = r.buf.Write(p[:remaining])
 		}
 	}
+	if errors.Is(err, io.EOF) {
+		r.captureResponse()
+	}
 	return n, err
 }
 
@@ -150,6 +155,15 @@ func (r *captureBodyReadCloser) Close() error {
 		return r.ReadCloser.Close()
 	}
 	r.closed = true
+	r.captureResponse()
+	return r.ReadCloser.Close()
+}
+
+func (r *captureBodyReadCloser) captureResponse() {
+	if r == nil || r.captured {
+		return
+	}
+	r.captured = true
 	bodyText := r.buf.String()
 	if session := capture.FromContext(r.ctx); session != nil {
 		session.BindAuth(r.auth.AuthID, r.auth.AuthIndex, r.auth.Provider, r.auth.ProxyURL)
@@ -163,7 +177,6 @@ func (r *captureBodyReadCloser) Close() error {
 		}
 	}
 	statusruler.EvaluateResponse(r.ctx, r.auth, r.statusCode, bodyText)
-	return r.ReadCloser.Close()
 }
 
 func snapshotAuth(auth *coreauth.Auth) breaker.AuthSnapshot {

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/Input';
 import { ModelInputList } from '@/components/ui/ModelInputList';
 import { Select } from '@/components/ui/Select';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
+import { OpenAIKeyEntriesEditor } from '@/components/providers/OpenAIKeyEntriesEditor';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useNotificationStore } from '@/stores';
 import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
@@ -523,6 +524,7 @@ export function AiProvidersOpenAIEditPage() {
       </div>
     );
   };
+  void renderKeyEntries;
 
   return (
     <SecondaryScreenShell
@@ -719,7 +721,22 @@ export function AiProvidersOpenAIEditPage() {
                 <label className={styles.keyEntriesTitle}>{t('ai_providers.openai_add_modal_keys_label')}</label>
                 <span className={styles.keyEntriesHint}>{t('ai_providers.openai_keys_hint')}</span>
               </div>
-              {renderKeyEntries(form.apiKeyEntries)}
+              <OpenAIKeyEntriesEditor
+                entries={form.apiKeyEntries}
+                saving={saving}
+                disableControls={disableControls}
+                isTestingKeys={isTestingKeys}
+                hasConfiguredModels={hasConfiguredModels}
+                keyTestStatuses={keyTestStatuses}
+                onEntriesChange={(entries) => setForm((prev) => ({ ...prev, apiKeyEntries: entries }))}
+                onResetStatuses={resetDraftKeyTestStatuses}
+                onResetTestSummary={() => {
+                  setTestStatus('idle');
+                  setTestMessage('');
+                }}
+                onTestSingleKey={testSingleKey}
+                showNotification={showNotification}
+              />
             </div>
           </div>
         )}

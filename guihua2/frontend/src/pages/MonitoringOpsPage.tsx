@@ -3,40 +3,33 @@ import { BreakerPage } from '@/pages/BreakerPage';
 import { RequestLabPage } from '@/pages/RequestLabPage';
 import { StatusRulerPage } from '@/pages/StatusRulerPage';
 import { useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import styles from './InspectorPages.module.scss';
 
 type OpsTab = 'capture' | 'rules' | 'breaker';
 
-const TAB_CONFIG: Array<{ key: OpsTab; label: string }> = [
-  { key: 'capture', label: '抓包 / 过滤' },
-  { key: 'rules', label: '状态规则' },
-  { key: 'breaker', label: 'IP 熔断' },
+const TAB_CONFIG: Array<{ key: OpsTab; label: string; path: string }> = [
+  { key: 'capture', label: '抓包 / 过滤', path: '/debugsetandip' },
+  { key: 'rules', label: '状态规则', path: '/debugsetandip/rules' },
+  { key: 'breaker', label: 'IP 熔断', path: '/debugsetandip/breaker' },
 ];
 
-const normalizeTab = (value: string | null): OpsTab => {
-  if (value === 'rules') return 'rules';
-  if (value === 'breaker') return 'breaker';
+const detectTab = (pathname: string): OpsTab => {
+  if (pathname.startsWith('/debugsetandip/rules')) return 'rules';
+  if (pathname.startsWith('/debugsetandip/breaker')) return 'breaker';
   return 'capture';
 };
 
 export function MonitoringOpsPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const activeTab = normalizeTab(searchParams.get('tab'));
+  const location = useLocation();
+  const activeTab = detectTab(location.pathname);
 
   const content = useMemo(() => {
     if (activeTab === 'rules') return <StatusRulerPage key="rules" />;
     if (activeTab === 'breaker') return <BreakerPage key="breaker" />;
     return <RequestLabPage key="capture" />;
   }, [activeTab]);
-
-  const switchTab = (tab: OpsTab) => {
-    navigate({
-      pathname: '/debugsetandip',
-      search: `?tab=${tab}`,
-    });
-  };
 
   return (
     <div className={styles.page}>
@@ -53,7 +46,7 @@ export function MonitoringOpsPage() {
               key={tab.key}
               size="sm"
               variant={activeTab === tab.key ? 'primary' : 'secondary'}
-              onClick={() => switchTab(tab.key)}
+              onClick={() => navigate(tab.path)}
             >
               {tab.label}
             </Button>
