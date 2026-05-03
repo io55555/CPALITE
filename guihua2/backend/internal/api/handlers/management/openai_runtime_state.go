@@ -44,6 +44,7 @@ func (h *Handler) PatchOpenAICompatRuntimeState(c *gin.Context) {
 			auth.Status = coreauth.StatusActive
 			auth.StatusMessage = ""
 			auth.NextRetryAfter = time.Time{}
+			auth.LastError = nil
 		}
 	} else if action := strings.ToLower(strings.TrimSpace(body.Action)); action != "" {
 		switch {
@@ -53,6 +54,7 @@ func (h *Handler) PatchOpenAICompatRuntimeState(c *gin.Context) {
 			auth.Status = coreauth.StatusActive
 			auth.StatusMessage = ""
 			auth.NextRetryAfter = time.Time{}
+			auth.LastError = nil
 		case action == "disable":
 			auth.Disabled = true
 			auth.Unavailable = true

@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -269,5 +271,60 @@ func TestOpenAICompatibilityWithAuthIndexTriggersPendingRuntimeStateApply(t *tes
 	}
 	if !gotAuth.Disabled || gotAuth.Status != coreauth.StatusDisabled {
 		t.Fatalf("reloaded auth disabled=%v status=%q, want true/%q", gotAuth.Disabled, gotAuth.Status, coreauth.StatusDisabled)
+	}
+}
+
+func TestPatchOpenAICompatRuntimeStateEnableClearsLastError(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{
+		ID:         "openai-compatibility:groq:enable-clear",
+		Provider:   "groq",
+		Status:     coreauth.StatusDisabled,
+		Disabled:   true,
+		Unavailable: true,
+		Index:      "auth-enable-clear",
+		StatusMessage: "manual_disable",
+		NextRetryAfter: time.Now().Add(time.Minute),
+		LastError: &coreauth.Error{
+			Message:    "unauthorized",
+			HTTPStatus: 401,
+		},
+		Attributes: map[string]string{
+			"compat_name":  "groq",
+			"provider_key": "groq",
+			"api_key":      "gsk_enable_clear",
+		},
+	}
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	h := NewHandler(cfg, filepath.Join(t.TempDir(), "config.yaml"), manager)
+	got := h.findAuthByIndex("auth-enable-clear")
+	if got == nil {
+		t.Fatal("expected auth by index")
+	}
+
+	got.Disabled = false
+	got.Unavailable = false
+	got.Status = coreauth.StatusActive
+	got.StatusMessage = ""
+	got.NextRetryAfter = time.Time{}
+	got.LastError = nil
+
+	if _, err := manager.Update(context.Background(), got); err != nil {
+		t.Fatalf("update auth: %v", err)
+	}
+	if err := h.persistOpenAICompatRuntimeState(); err != nil {
+		t.Fatalf("persist runtime state: %v", err)
+	}
+
+	path := filepath.Join(filepath.Dir(h.openAICompatRuntimeStatePath()), openAICompatRuntimeStateFileName)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("runtime state file should be removed or empty-default after enable, stat err=%v", err)
 	}
 }
