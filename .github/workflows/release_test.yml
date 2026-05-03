@@ -161,6 +161,14 @@ jobs:
           git -C .tmp-models show FETCH_HEAD:models.json > internal/registry/models/models.json
           rm -rf .tmp-models
 
+      - name: Sync Go module metadata
+        if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
+        working-directory: guihua2/backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+
       - name: Build smoke binary
         if: steps.release_check.outputs.exists != 'true' && (github.event_name == 'workflow_dispatch' || steps.block_check.outputs.blocked != 'true')
         working-directory: guihua2/backend
