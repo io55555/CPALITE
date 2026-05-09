@@ -306,6 +306,7 @@ func (s *Service) ApplyToAuth(auth *cliproxyauth.Auth) {
 	apiKey := strings.TrimSpace(auth.Attributes["api_key"])
 	st, ok := s.Get(provider, apiKey)
 	if !ok {
+		clearOpenAICompatAuthRuntimeState(auth)
 		return
 	}
 	if !st.Enabled || st.Status == StatusDisabled {
@@ -340,6 +341,34 @@ func (s *Service) ApplyToAuth(auth *cliproxyauth.Auth) {
 		state.LastError = nil
 		state.Status = cliproxyauth.StatusActive
 		state.StatusMessage = ""
+		state.UpdatedAt = time.Now()
+	}
+}
+
+func clearOpenAICompatAuthRuntimeState(auth *cliproxyauth.Auth) {
+	if auth == nil || auth.Disabled {
+		return
+	}
+	auth.Unavailable = false
+	auth.NextRetryAfter = time.Time{}
+	auth.Quota = cliproxyauth.QuotaState{}
+	auth.LastError = nil
+	if auth.Status != cliproxyauth.StatusDisabled {
+		auth.Status = cliproxyauth.StatusActive
+		auth.StatusMessage = ""
+	}
+	for _, state := range auth.ModelStates {
+		if state == nil {
+			continue
+		}
+		state.Unavailable = false
+		state.NextRetryAfter = time.Time{}
+		state.Quota = cliproxyauth.QuotaState{}
+		state.LastError = nil
+		if state.Status != cliproxyauth.StatusDisabled {
+			state.Status = cliproxyauth.StatusActive
+			state.StatusMessage = ""
+		}
 		state.UpdatedAt = time.Now()
 	}
 }

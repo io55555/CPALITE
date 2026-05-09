@@ -159,7 +159,7 @@ const resolveCredentialMatch = (
   if (!resolvedAuthIndex && !authFileName) {
     const provider = normalizeProviderName(detail.provider);
     const authType = String(detail.auth_type ?? '').trim().toLowerCase();
-    if (authType === 'api_key' && (sourceText || authIndex)) {
+    if ((authType === 'api_key' || authType === 'apikey') && (sourceText || authIndex)) {
       const keyMatch = findOpenAIApiKeyMatch(
         openaiProviders,
         provider,

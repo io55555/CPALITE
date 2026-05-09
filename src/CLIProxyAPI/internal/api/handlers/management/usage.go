@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,9 +16,29 @@ import (
 )
 
 const (
-	usageQueryTimeout = 10 * time.Second
-	usageQueryMaxRows = 50000
+	usageQueryTimeout  = 10 * time.Second
+	usageQueryMaxRows  = 50000
+	usageQueryCacheTTL = 2 * time.Second
 )
+
+var usageQueryCache = newUsageQueryCache()
+
+type usageQueryCacheEntry struct {
+	result    usage.APIUsage
+	expiresAt time.Time
+	ready     chan struct{}
+	loading   bool
+	err       error
+}
+
+type usageQueryCacheStore struct {
+	mu      sync.Mutex
+	entries map[string]*usageQueryCacheEntry
+}
+
+func newUsageQueryCache() *usageQueryCacheStore {
+	return &usageQueryCacheStore{entries: make(map[string]*usageQueryCacheEntry)}
+}
 
 type deleteUsageRequest struct {
 	IDs []string `json:"ids"`
@@ -60,12 +81,77 @@ func (h *Handler) GetUsageStatistics(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), usageQueryTimeout)
 	defer cancel()
-	result, err := store.Query(ctx, rng)
+	result, err := usageQueryCache.query(ctx, store, rng)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query usage"})
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func (s *usageQueryCacheStore) query(ctx context.Context, store usage.Store, rng usage.QueryRange) (usage.APIUsage, error) {
+	if s == nil || store == nil {
+		return usage.APIUsage{}, nil
+	}
+	key := usageQueryCacheKey(rng)
+	now := time.Now()
+	s.mu.Lock()
+	if entry := s.entries[key]; entry != nil {
+		if !entry.loading && now.Before(entry.expiresAt) {
+			result, err := entry.result, entry.err
+			s.mu.Unlock()
+			return result, err
+		}
+		if entry.loading {
+			ready := entry.ready
+			s.mu.Unlock()
+			select {
+			case <-ready:
+				s.mu.Lock()
+				latest := s.entries[key]
+				if latest == nil {
+					s.mu.Unlock()
+					return usage.APIUsage{}, nil
+				}
+				result, err := latest.result, latest.err
+				s.mu.Unlock()
+				return result, err
+			case <-ctx.Done():
+				return usage.APIUsage{}, ctx.Err()
+			}
+		}
+	}
+	entry := &usageQueryCacheEntry{ready: make(chan struct{}), loading: true}
+	s.entries[key] = entry
+	s.mu.Unlock()
+
+	result, err := store.Query(ctx, rng)
+
+	s.mu.Lock()
+	entry.result = result
+	entry.err = err
+	entry.expiresAt = time.Now().Add(usageQueryCacheTTL)
+	entry.loading = false
+	close(entry.ready)
+	for cacheKey, cached := range s.entries {
+		if cached == nil || cached.loading || time.Now().Before(cached.expiresAt) {
+			continue
+		}
+		delete(s.entries, cacheKey)
+	}
+	s.mu.Unlock()
+	return result, err
+}
+
+func usageQueryCacheKey(rng usage.QueryRange) string {
+	start, end := "", ""
+	if rng.Start != nil && !rng.Start.IsZero() {
+		start = rng.Start.UTC().Format(time.RFC3339Nano)
+	}
+	if rng.End != nil && !rng.End.IsZero() {
+		end = rng.End.UTC().Format(time.RFC3339Nano)
+	}
+	return start + "|" + end + "|" + strconv.Itoa(rng.Limit)
 }
 
 func hasUsageRangeQuery(c *gin.Context) bool {

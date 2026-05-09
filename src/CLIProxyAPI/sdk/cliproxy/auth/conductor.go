@@ -275,10 +275,12 @@ func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
 	}
 	now := time.Now()
 	var snapshot *Auth
+	var beforeSnapshot *Auth
 	clearQuotaModels := make([]string, 0)
 	m.mu.Lock()
 	auth, ok := m.auths[authID]
 	if ok && auth != nil {
+		beforeSnapshot = auth.Clone()
 		auth.Unavailable = false
 		auth.NextRetryAfter = time.Time{}
 		auth.Quota = QuotaState{}
@@ -319,6 +321,7 @@ func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
 	}
 	m.queueRefreshReschedule(snapshot.ID)
 	m.hook.OnAuthUpdated(ctx, snapshot.Clone())
+	logAuthStateTransition(ctx, beforeSnapshot, snapshot)
 }
 
 // ReconcileRegistryModelStates aligns per-model runtime state with the current
@@ -1194,7 +1197,9 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		return nil, nil
 	}
 	m.mu.Lock()
+	var beforeSnapshot *Auth
 	if existing, ok := m.auths[auth.ID]; ok && existing != nil {
+		beforeSnapshot = existing.Clone()
 		if !auth.indexAssigned && auth.Index == "" {
 			auth.Index = existing.Index
 			auth.indexAssigned = existing.indexAssigned
@@ -1220,6 +1225,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.queueRefreshReschedule(auth.ID)
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
+	logAuthStateTransition(ctx, beforeSnapshot, authClone)
 	return auth.Clone(), nil
 }
 
@@ -2128,10 +2134,12 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	clearModelQuota := false
 	setModelQuota := false
 	var authSnapshot *Auth
+	var beforeSnapshot *Auth
 	var persistSnapshot *Auth
 
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+		beforeSnapshot = auth.Clone()
 		now := time.Now()
 		auth.recordRecentRequest(now, result.Success)
 		if result.Success {
@@ -2282,6 +2290,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	}
 
 	m.hook.OnResult(ctx, result)
+	logAuthStateTransition(ctx, beforeSnapshot, authSnapshot)
 }
 
 func ensureModelState(auth *Auth, model string) *ModelState {
