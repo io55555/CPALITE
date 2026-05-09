@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -27,6 +27,7 @@ const formatChinaTime = (value?: string) => {
   if (!value) return '无';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  if (date.getFullYear() <= 1) return '无';
   const parts = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour12: false,
@@ -117,6 +118,7 @@ function StatusIcon({ status }: { status: KeyTestStatus['status'] }) {
 export function AiProvidersOpenAIEditPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { showNotification } = useNotificationStore();
   const {
     hasIndexParam,
@@ -150,6 +152,11 @@ export function AiProvidersOpenAIEditPage() {
   const [keyStates, setKeyStates] = useState<Record<string, OpenAIKeyState>>({});
   const [detailState, setDetailState] = useState<OpenAIKeyState | null>(null);
   const [bulkText, setBulkText] = useState('');
+  const tracedKeyIndex = useMemo(() => {
+    const value = new URLSearchParams(location.search).get('key');
+    const parsed = value === null ? Number.NaN : Number(value);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+  }, [location.search]);
 
   const refreshKeyStates = useCallback(async () => {
     try {
@@ -535,7 +542,10 @@ export function AiProvidersOpenAIEditPage() {
                   ? '异常'
                   : '激活';
             return (
-              <div key={index} className={styles.keyTableRow}>
+              <div
+                key={index}
+                className={`${styles.keyTableRow} ${tracedKeyIndex === index ? styles.keyTableRowTrace : ''}`}
+              >
                 {/* 序号 */}
                 <div className={styles.keyTableColIndex}>{index + 1}</div>
 

@@ -16,6 +16,7 @@ import (
 )
 
 type UsageReporter struct {
+	ctx         context.Context
 	provider    string
 	model       string
 	alias       string
@@ -35,6 +36,7 @@ func NewUsageReporter(ctx context.Context, provider, model string, auth *cliprox
 		alias = model
 	}
 	reporter := &UsageReporter{
+		ctx:         ctx,
 		provider:    provider,
 		model:       model,
 		alias:       strings.TrimSpace(alias),
@@ -142,6 +144,7 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 	if r == nil {
 		return usage.Record{Model: model, Detail: detail, Failed: failed}
 	}
+	rawRequest, rawResponse := UsageRawPackets(r.ctx)
 	return usage.Record{
 		Provider:    r.provider,
 		Model:       model,
@@ -154,6 +157,8 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 		RequestedAt: r.requestedAt,
 		Latency:     r.latency(),
 		Failed:      failed,
+		RawRequest:  rawRequest,
+		RawResponse: rawResponse,
 		Detail:      detail,
 	}
 }

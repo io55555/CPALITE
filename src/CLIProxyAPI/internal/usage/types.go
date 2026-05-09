@@ -28,6 +28,8 @@ type Record struct {
 	FirstByteLatencyMs int64
 	GenerationMs       int64
 	ThinkingEffort     string
+	RawRequest         string
+	RawResponse        string
 	Tokens             TokenStats
 	Failed             bool
 }
@@ -38,9 +40,13 @@ type RequestDetail struct {
 	LatencyMs          int64      `json:"latency_ms"`
 	FirstByteLatencyMs int64      `json:"first_byte_latency_ms"`
 	GenerationMs       int64      `json:"generation_ms"`
+	Provider           string     `json:"provider,omitempty"`
 	Source             string     `json:"source"`
+	AuthType           string     `json:"auth_type,omitempty"`
 	AuthIndex          string     `json:"auth_index"`
 	ThinkingEffort     string     `json:"thinking_effort"`
+	RawRequest         string     `json:"raw_request,omitempty"`
+	RawResponse        string     `json:"raw_response,omitempty"`
 	Tokens             TokenStats `json:"tokens"`
 	Failed             bool       `json:"failed"`
 }

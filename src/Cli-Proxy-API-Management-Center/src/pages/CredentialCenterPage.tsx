@@ -10,8 +10,10 @@ import { useUsageData, type UsagePayload } from '@/components/usage';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { authFilesApi } from '@/services/api/authFiles';
 import { authRefreshQueueApi } from '@/services/api/authRefreshQueue';
+import { providersApi } from '@/services/api';
 import type { AuthFileItem } from '@/types/authFile';
 import type { AuthRefreshQueueResponse } from '@/types/authRefreshQueue';
+import type { OpenAIProviderConfig } from '@/types/provider';
 import { filterUsageByTimeRange, type UsageTimeRange } from '@/utils/usage';
 import {
   DEFAULT_USAGE_TIME_RANGE,
@@ -51,6 +53,7 @@ export function CredentialCenterPage() {
     refreshFullRange: true
   });
   const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
+  const [openaiProviders, setOpenaiProviders] = useState<OpenAIProviderConfig[]>([]);
   const [authRefreshQueue, setAuthRefreshQueue] = useState<AuthRefreshQueueResponse | null>(null);
   const [authRefreshQueueLoading, setAuthRefreshQueueLoading] = useState(false);
   const [authRefreshQueueError, setAuthRefreshQueueError] = useState<string | null>(null);
@@ -60,6 +63,11 @@ export function CredentialCenterPage() {
     const files = Array.isArray(res) ? res : (res as { files?: AuthFileItem[] })?.files;
     if (!Array.isArray(files)) return;
     setAuthFiles(files);
+  }, []);
+
+  const loadOpenAIProviders = useCallback(async () => {
+    const providers = await providersApi.getOpenAIProviders();
+    setOpenaiProviders(providers);
   }, []);
 
   const loadAuthRefreshQueue = useCallback(async () => {
@@ -77,17 +85,17 @@ export function CredentialCenterPage() {
   }, [t]);
 
   const handleRefresh = useCallback(async () => {
-    await Promise.all([loadUsage(), loadAuthFiles(), loadAuthRefreshQueue()]);
-  }, [loadAuthFiles, loadAuthRefreshQueue, loadUsage]);
+    await Promise.all([loadUsage(), loadAuthFiles(), loadAuthRefreshQueue(), loadOpenAIProviders()]);
+  }, [loadAuthFiles, loadAuthRefreshQueue, loadOpenAIProviders, loadUsage]);
 
   useHeaderRefresh(handleRefresh);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void Promise.all([loadAuthFiles(), loadAuthRefreshQueue()]).catch(() => {});
+      void Promise.all([loadAuthFiles(), loadAuthRefreshQueue(), loadOpenAIProviders()]).catch(() => {});
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadAuthFiles, loadAuthRefreshQueue]);
+  }, [loadAuthFiles, loadAuthRefreshQueue, loadOpenAIProviders]);
 
   useEffect(() => {
     try {
@@ -167,6 +175,7 @@ export function CredentialCenterPage() {
           loading={loading}
           modelPrices={modelPrices}
           authFiles={authFiles}
+          openaiProviders={openaiProviders}
         />
         <CodexCredentialQuotaCard
           usage={usage as UsagePayload | null}

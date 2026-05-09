@@ -1,4 +1,5 @@
 import type { AuthFileItem } from '@/types/authFile';
+import type { OpenAIProviderConfig } from '@/types/provider';
 import {
   calculateCost,
   collectUsageDetails,
@@ -20,6 +21,7 @@ export interface CredentialUsageRow {
   tokens: number;
   cost: number;
   successRate: number;
+  tracePath?: string;
 }
 
 export const CREDENTIAL_COST_WINDOW_GRACE_MS = 60 * 1000;
@@ -33,6 +35,7 @@ interface CredentialUsageInput {
   usage: unknown;
   authFiles: AuthFileItem[];
   modelPrices: Record<string, ModelPrice>;
+  openaiProviders?: OpenAIProviderConfig[];
 }
 
 interface AuthFileLookup {
@@ -46,6 +49,7 @@ interface CredentialMatch {
   type: string;
   authIndex: string | null;
   authFileName: string | null;
+  tracePath?: string;
 }
 
 export const normalizeCredentialType = (file?: AuthFileItem) => {
@@ -79,7 +83,8 @@ const buildAuthFileLookup = (authFiles: AuthFileItem[]): AuthFileLookup => {
 
 const resolveCredentialMatch = (
   detail: UsageDetail,
-  lookup: AuthFileLookup
+  lookup: AuthFileLookup,
+  openaiProviders: OpenAIProviderConfig[] = []
 ): CredentialMatch | null => {
   const authIndex = normalizeAuthIndex(detail.auth_index);
   const sourceRaw = String(detail.source ?? '').trim();
@@ -94,6 +99,23 @@ const resolveCredentialMatch = (
   const authFileName = matchedFile?.name ?? null;
 
   if (!resolvedAuthIndex && !authFileName) {
+    const provider = String(detail.provider ?? '').trim();
+    const authType = String(detail.auth_type ?? '').trim().toLowerCase();
+    if (authType === 'api_key' && sourceText) {
+      const providerIndex = openaiProviders.findIndex((item) => item.name === provider);
+      const keyIndex =
+        providerIndex >= 0
+          ? (openaiProviders[providerIndex].apiKeyEntries || []).findIndex((entry) => entry.apiKey === sourceText)
+          : -1;
+      return {
+        rowKey: `api_key:${provider}:${sourceText}`,
+        displayName: provider ? `${provider}、${sourceText}` : sourceText,
+        type: provider || 'api_key',
+        authIndex: null,
+        authFileName: null,
+        tracePath: providerIndex >= 0 ? `/ai-providers/openai/${providerIndex}${keyIndex >= 0 ? `?key=${keyIndex}` : ''}` : undefined
+      };
+    }
     return null;
   }
 
@@ -120,7 +142,8 @@ const getRequestCompletedAtMs = (detail: UsageDetail): number => {
 export function buildCredentialUsageRows({
   usage,
   authFiles,
-  modelPrices
+  modelPrices,
+  openaiProviders = []
 }: CredentialUsageInput): CredentialUsageRow[] {
   if (!usage) return [];
 
@@ -128,7 +151,7 @@ export function buildCredentialUsageRows({
   const rowMap = new Map<string, CredentialUsageRow>();
 
   collectUsageDetails(usage).forEach((detail) => {
-    const match = resolveCredentialMatch(detail, lookup);
+    const match = resolveCredentialMatch(detail, lookup, openaiProviders);
     if (!match) return;
 
     const existing = rowMap.get(match.rowKey) ?? {
@@ -142,8 +165,10 @@ export function buildCredentialUsageRows({
       failureCount: 0,
       tokens: 0,
       cost: 0,
-      successRate: 100
+      successRate: 100,
+      tracePath: match.tracePath
     };
+    existing.tracePath = existing.tracePath || match.tracePath;
 
     existing.requests += 1;
     if (detail.failed === true) {

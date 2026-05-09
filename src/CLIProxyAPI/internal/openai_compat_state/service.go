@@ -268,6 +268,21 @@ func (s *Service) MarkError(provider, apiKey, message, rawRequest, rawResponse s
 	})
 }
 
+func (s *Service) MarkFrozen(provider, apiKey, message, rawRequest, rawResponse string, duration time.Duration) State {
+	return s.update(provider, apiKey, func(st *State) {
+		if duration <= 0 {
+			duration = 5 * time.Minute
+		}
+		st.Enabled = true
+		st.Status = StatusFrozen
+		st.StatusMessage = message
+		st.FrozenUntil = time.Now().Add(duration)
+		st.LastError = message
+		st.RawRequest = truncateRaw(rawRequest)
+		st.RawResponse = truncateRaw(rawResponse)
+	})
+}
+
 func (s *Service) MarkSuccess(provider, apiKey, rawRequest, rawResponse string) State {
 	return s.update(provider, apiKey, func(st *State) {
 		st.Enabled = true

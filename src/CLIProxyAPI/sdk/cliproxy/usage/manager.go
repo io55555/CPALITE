@@ -22,6 +22,8 @@ type Record struct {
 	RequestedAt time.Time
 	Latency     time.Duration
 	Failed      bool
+	RawRequest  string
+	RawResponse string
 	Detail      Detail
 }
 

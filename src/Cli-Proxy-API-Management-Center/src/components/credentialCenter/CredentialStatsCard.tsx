@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -6,6 +7,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import type { UsagePayload } from '@/components/usage';
 import type { AuthFileItem } from '@/types/authFile';
+import type { OpenAIProviderConfig } from '@/types/provider';
 import {
   buildCredentialUsageRows,
   normalizeCredentialType,
@@ -24,23 +26,26 @@ interface CredentialStatsCardProps {
   loading: boolean;
   modelPrices: Record<string, ModelPrice>;
   authFiles: AuthFileItem[];
+  openaiProviders?: OpenAIProviderConfig[];
 }
 
 export function CredentialStatsCard({
   usage,
   loading,
   modelPrices,
-  authFiles
+  authFiles,
+  openaiProviders = []
 }: CredentialStatsCardProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>('displayName');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [typeFilter, setTypeFilter] = useState(ALL_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
 
   const rows = useMemo(
-    () => buildCredentialUsageRows({ usage, authFiles, modelPrices }),
-    [authFiles, modelPrices, usage]
+    () => buildCredentialUsageRows({ usage, authFiles, modelPrices, openaiProviders }),
+    [authFiles, modelPrices, openaiProviders, usage]
   );
 
   const typeOptions = useMemo(
@@ -193,6 +198,15 @@ export function CredentialStatsCard({
                       <div>
                         <span>{row.displayName}</span>
                         {row.type && <span className={styles.credentialType}>{row.type}</span>}
+                        {row.tracePath && (
+                          <button
+                            type="button"
+                            className={styles.inlineTraceButton}
+                            onClick={() => navigate(row.tracePath || '')}
+                          >
+                            追踪
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td>

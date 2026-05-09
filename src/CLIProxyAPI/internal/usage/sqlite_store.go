@@ -111,6 +111,8 @@ func (s *SQLiteStore) initSchema(ctx context.Context) error {
 	first_byte_latency_ms INTEGER NOT NULL DEFAULT 0 CHECK (first_byte_latency_ms >= 0),
 	generation_ms INTEGER NOT NULL DEFAULT 0 CHECK (generation_ms >= 0),
 	thinking_effort TEXT NOT NULL DEFAULT '',
+	raw_request TEXT NOT NULL DEFAULT '',
+	raw_response TEXT NOT NULL DEFAULT '',
 	input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
 	output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
 	reasoning_tokens INTEGER NOT NULL DEFAULT 0 CHECK (reasoning_tokens >= 0),
@@ -118,11 +120,16 @@ func (s *SQLiteStore) initSchema(ctx context.Context) error {
 	total_tokens INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens >= 0),
 	failed INTEGER NOT NULL DEFAULT 0 CHECK (failed IN (0, 1))
 )`,
+		`ALTER TABLE usage_records ADD COLUMN raw_request TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_records ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_timestamp ON usage_records(timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_api_model ON usage_records(api_key, endpoint, provider, model)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
 			return fmt.Errorf("usage sqlite init schema: %w", err)
 		}
 	}
@@ -194,8 +201,9 @@ func (s *SQLiteStore) flush(ctx context.Context) {
 INSERT INTO usage_records (
 	id, timestamp, api_key, provider, model, source, auth_index, auth_type, endpoint, request_id,
 	latency_ms, first_byte_latency_ms, generation_ms, thinking_effort,
+	raw_request, raw_response,
 	input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `)
 	if err != nil {
 		_ = tx.Rollback()
@@ -243,6 +251,8 @@ func execInsert(stmt *sql.Stmt, record Record) error {
 		nonNegative(record.FirstByteLatencyMs),
 		nonNegative(record.GenerationMs),
 		strings.TrimSpace(record.ThinkingEffort),
+		truncateUsageRaw(record.RawRequest),
+		truncateUsageRaw(record.RawResponse),
 		tokens.InputTokens,
 		tokens.OutputTokens,
 		tokens.ReasoningTokens,
@@ -265,11 +275,11 @@ func (s *SQLiteStore) Query(ctx context.Context, rng QueryRange) (APIUsage, erro
 		limit = defaultQueryLimit
 	}
 	query := `
-SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, thinking_effort,
+SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM (
-SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, thinking_effort,
+SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM usage_records`
@@ -314,7 +324,10 @@ FROM usage_records`
 			&model,
 			&detail.Source,
 			&detail.AuthIndex,
+			&detail.AuthType,
 			&detail.ThinkingEffort,
+			&detail.RawRequest,
+			&detail.RawResponse,
 			&detail.LatencyMs,
 			&detail.FirstByteLatencyMs,
 			&detail.GenerationMs,
@@ -442,9 +455,13 @@ func addRecordToUsage(result APIUsage, record Record) {
 		LatencyMs:          nonNegative(record.LatencyMs),
 		FirstByteLatencyMs: nonNegative(record.FirstByteLatencyMs),
 		GenerationMs:       nonNegative(record.GenerationMs),
+		Provider:           strings.TrimSpace(record.Provider),
 		Source:             strings.TrimSpace(record.Source),
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),
+		AuthType:           strings.TrimSpace(record.AuthType),
 		ThinkingEffort:     strings.TrimSpace(record.ThinkingEffort),
+		RawRequest:         truncateUsageRaw(record.RawRequest),
+		RawResponse:        truncateUsageRaw(record.RawResponse),
 		Tokens:             nonNegativeTokenStats(record.Tokens),
 		Failed:             record.Failed,
 	}
@@ -462,6 +479,14 @@ func addUsageDetail(result APIUsage, apiKey, endpoint, provider, model string, d
 		result[key] = map[string][]RequestDetail{}
 	}
 	result[key][modelKey] = append(result[key][modelKey], detail)
+}
+
+func truncateUsageRaw(value string) string {
+	const max = 256 * 1024
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
 }
 
 func formatSQLiteTimestamp(timestamp time.Time) string {

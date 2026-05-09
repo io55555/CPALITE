@@ -57,6 +57,8 @@ type RequestEventRow = {
   cachedTokens: number;
   totalTokens: number;
   cacheHitRatio: number | null;
+  rawRequest?: string;
+  rawResponse?: string;
 };
 
 export interface RequestEventsDetailsCardProps {
@@ -358,6 +360,8 @@ export function RequestEventsDetailsCard({
         cachedTokens,
         totalTokens,
         cacheHitRatio,
+        rawRequest: detail.raw_request,
+        rawResponse: detail.raw_response,
       };
     });
 
@@ -909,6 +913,20 @@ export function RequestEventsDetailsCard({
               <div className={styles.requestEventsFailureMessage}>
                 {selectedFailureMessage || t('usage_stats.request_events_failure_log_empty')}
               </div>
+            </div>
+
+            <div className={styles.requestEventsFailureMessageBlock}>
+              <div className={styles.requestEventsFailureMetaLabel}>原始请求包</div>
+              <pre className={styles.requestEventsFailurePacket}>
+                {selectedFailureRow.rawRequest || '当前暂无原始请求包。'}
+              </pre>
+            </div>
+
+            <div className={styles.requestEventsFailureMessageBlock}>
+              <div className={styles.requestEventsFailureMetaLabel}>原始响应包</div>
+              <pre className={styles.requestEventsFailurePacket}>
+                {selectedFailureRow.rawResponse || '当前暂无原始响应包。'}
+              </pre>
             </div>
 
             <div className={styles.requestEventsFailureNote}>

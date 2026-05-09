@@ -24,6 +24,8 @@ const (
 	apiRequestKey           = "API_REQUEST"
 	apiResponseKey          = "API_RESPONSE"
 	apiWebsocketTimelineKey = "API_WEBSOCKET_TIMELINE"
+	usageRawRequestKey      = "USAGE_RAW_REQUEST"
+	usageRawResponseKey     = "USAGE_RAW_RESPONSE"
 	creditsUsedKey          = "__antigravity_credits_used__"
 )
 
@@ -51,6 +53,44 @@ type upstreamAttempt struct {
 	bodyHasContent       bool
 	prevWasSSEEvent      bool
 	errorWritten         bool
+}
+
+func RecordUsageRawRequest(ctx context.Context, raw string) {
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil || strings.TrimSpace(raw) == "" {
+		return
+	}
+	ginCtx.Set(usageRawRequestKey, raw)
+}
+
+func RecordUsageRawResponse(ctx context.Context, raw string) {
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil || strings.TrimSpace(raw) == "" {
+		return
+	}
+	ginCtx.Set(usageRawResponseKey, raw)
+}
+
+func UsageRawPackets(ctx context.Context) (string, string) {
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil {
+		return "", ""
+	}
+	valueString := func(key string) string {
+		value, exists := ginCtx.Get(key)
+		if !exists {
+			return ""
+		}
+		switch v := value.(type) {
+		case string:
+			return v
+		case []byte:
+			return string(v)
+		default:
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	return valueString(usageRawRequestKey), valueString(usageRawResponseKey)
 }
 
 // RecordAPIRequest stores the upstream request metadata in Gin context for request logging.

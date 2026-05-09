@@ -1324,6 +1324,19 @@ $openai-toolbar-control-height: 36px;
   }
 }
 
+.keyTableRowTrace {
+  animation: key-row-trace-flash 0.8s ease-in-out 5;
+}
+
+@keyframes key-row-trace-flash {
+  0%, 100% {
+    background: transparent;
+  }
+  50% {
+    background: color-mix(in srgb, var(--primary-color) 18%, transparent);
+  }
+}
+
 // 列定义
 .keyTableColIndex {
   display: flex;

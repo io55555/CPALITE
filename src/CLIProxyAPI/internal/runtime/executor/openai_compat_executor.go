@@ -128,6 +128,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs)
 	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
+	helps.RecordUsageRawRequest(ctx, rawRequest)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -150,6 +151,8 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
+		helps.RecordUsageRawResponse(ctx, "Proxy error: "+err.Error())
+		e.markProxyFailure(auth, apiKey, err, rawRequest)
 		return resp, err
 	}
 	defer func() {
@@ -163,6 +166,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
+		helps.RecordUsageRawResponse(ctx, rawResponse)
 		e.applyKeyStatusRulers(auth, apiKey, httpResp.StatusCode, b, rawRequest, rawResponse)
 		reporter.PublishFailure(ctx)
 		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
@@ -237,6 +241,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Cache-Control", "no-cache")
 	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
+	helps.RecordUsageRawRequest(ctx, rawRequest)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -259,6 +264,8 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
+		helps.RecordUsageRawResponse(ctx, "Proxy error: "+err.Error())
+		e.markProxyFailure(auth, apiKey, err, rawRequest)
 		return nil, err
 	}
 	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
@@ -267,6 +274,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
+		helps.RecordUsageRawResponse(ctx, rawResponse)
 		e.applyKeyStatusRulers(auth, apiKey, httpResp.StatusCode, b, rawRequest, rawResponse)
 		reporter.PublishFailure(ctx)
 		if errClose := httpResp.Body.Close(); errClose != nil {
@@ -437,6 +445,70 @@ func (e *OpenAICompatExecutor) applyKeyStatusRulers(auth *cliproxyauth.Auth, api
 	if _, matched := service.ApplyRulers(*compat, apiKey, status, body, rawRequest, rawResponse); !matched {
 		service.MarkError(compat.Name, apiKey, string(body), rawRequest, rawResponse)
 	}
+}
+
+func (e *OpenAICompatExecutor) providerName(auth *cliproxyauth.Auth) string {
+	if compat := e.resolveCompatConfig(auth); compat != nil {
+		return strings.TrimSpace(compat.Name)
+	}
+	if auth != nil && auth.Attributes != nil {
+		if v := strings.TrimSpace(auth.Attributes["compat_name"]); v != "" {
+			return v
+		}
+		if v := strings.TrimSpace(auth.Attributes["provider_key"]); v != "" {
+			return v
+		}
+	}
+	return strings.TrimSpace(e.provider)
+}
+
+func (e *OpenAICompatExecutor) markProxyFailure(auth *cliproxyauth.Auth, apiKey string, err error, rawRequest string) {
+	if err == nil || !isProxyFailureMessage(err.Error()) {
+		return
+	}
+	providerName := e.providerName(auth)
+	if providerName == "" || strings.TrimSpace(apiKey) == "" {
+		return
+	}
+	cooldown := 300 * time.Second
+	if e.cfg != nil && e.cfg.ProxyFailureCooldownSeconds > 0 {
+		cooldown = time.Duration(e.cfg.ProxyFailureCooldownSeconds) * time.Second
+	}
+	rawResponse := "Proxy error: " + err.Error()
+	if service := openai_compat_state.DefaultService(); service != nil {
+		service.MarkFrozen(providerName, apiKey, err.Error(), rawRequest, rawResponse, cooldown)
+	}
+}
+
+func isProxyFailureMessage(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	hasProxySignal := strings.Contains(lower, "socks connect") ||
+		strings.Contains(lower, "proxyconnect") ||
+		strings.Contains(lower, "proxy connection") ||
+		strings.Contains(lower, "proxy error") ||
+		strings.Contains(lower, "proxy failed")
+	if !hasProxySignal {
+		return false
+	}
+	for _, signal := range []string{
+		"dial tcp",
+		"connectex",
+		"connection refused",
+		"actively refused",
+		"no connection could be made",
+		"connection reset",
+		"i/o timeout",
+		"tls handshake timeout",
+		"no such host",
+	} {
+		if strings.Contains(lower, signal) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byte {

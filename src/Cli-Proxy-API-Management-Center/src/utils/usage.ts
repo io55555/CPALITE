@@ -64,6 +64,8 @@ export interface UsageDetail {
   id?: string;
   timestamp: string;
   source: string;
+  provider?: string;
+  auth_type?: string;
   auth_index: string | number | null;
   latency_ms?: number;
   first_byte_latency_ms?: number;
@@ -78,6 +80,8 @@ export interface UsageDetail {
   };
   thinking?: UsageThinking | null;
   thinking_effort?: string;
+  raw_request?: string;
+  raw_response?: string;
   failed: boolean;
   __modelName?: string;
   __timestampMs?: number;
@@ -878,7 +882,9 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
         details.push({
           ...(id ? { id } : {}),
           timestamp,
+          provider: typeof detailRaw.provider === 'string' ? detailRaw.provider.trim() : undefined,
           source: normalizeSource(detailRaw.source),
+          auth_type: typeof detailRaw.auth_type === 'string' ? detailRaw.auth_type.trim() : undefined,
           auth_index: (detailRaw?.auth_index ??
             detailRaw?.authIndex ??
             detailRaw?.AuthIndex ??
@@ -889,6 +895,8 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
           tokens: normalizeUsageTokens(detailRaw.tokens),
           thinking: normalizeUsageThinking(detailRaw.thinking),
           ...(thinkingEffort ? { thinking_effort: thinkingEffort } : {}),
+          raw_request: typeof detailRaw.raw_request === 'string' ? detailRaw.raw_request : undefined,
+          raw_response: typeof detailRaw.raw_response === 'string' ? detailRaw.raw_response : undefined,
           failed: detailRaw.failed === true,
           __modelName: modelName,
           __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
