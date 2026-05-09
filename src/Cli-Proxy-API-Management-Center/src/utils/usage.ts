@@ -85,6 +85,7 @@ export interface UsageDetail {
   failed: boolean;
   __modelName?: string;
   __timestampMs?: number;
+  __sourceRaw?: string;
 }
 
 export interface UsageDetailWithEndpoint extends UsageDetail {
@@ -884,6 +885,7 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
           timestamp,
           provider: typeof detailRaw.provider === 'string' ? detailRaw.provider.trim() : undefined,
           source: normalizeSource(detailRaw.source),
+          __sourceRaw: typeof detailRaw.source === 'string' ? detailRaw.source.trim() : undefined,
           auth_type: typeof detailRaw.auth_type === 'string' ? detailRaw.auth_type.trim() : undefined,
           auth_index: (detailRaw?.auth_index ??
             detailRaw?.authIndex ??

@@ -20,6 +20,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
 	"golang.org/x/net/context"
@@ -571,6 +572,9 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 				addon = hdr.Clone()
 			}
 		}
+		if shouldPublishAuthSelectionFailure(err) {
+			publishAuthSelectionFailureUsage(ctx, strings.Join(providers, ","), normalizedModel, rawJSON, status, err)
+		}
 		return nil, nil, &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 	}
 	if !PassthroughHeadersEnabled(h.Cfg) {
@@ -619,12 +623,54 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 				addon = hdr.Clone()
 			}
 		}
+		if shouldPublishAuthSelectionFailure(err) {
+			publishAuthSelectionFailureUsage(ctx, strings.Join(providers, ","), normalizedModel, rawJSON, status, err)
+		}
 		return nil, nil, &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 	}
 	if !PassthroughHeadersEnabled(h.Cfg) {
 		return resp.Payload, nil, nil
 	}
 	return resp.Payload, FilterUpstreamHeaders(resp.Headers), nil
+}
+
+func publishAuthSelectionFailureUsage(ctx context.Context, provider, model string, rawJSON []byte, status int, err error) {
+	rawRequest := buildDownstreamRawRequest(ctx, rawJSON)
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+	}
+	rawResponse := fmt.Sprintf("HTTP/1.1 %d %s\nContent-Type: application/json\n\n%s", status, http.StatusText(status), string(BuildErrorResponseBody(status, errText)))
+	coreusage.PublishRecord(ctx, coreusage.Record{
+		Provider:    provider,
+		Model:       model,
+		Source:      "auth-selection",
+		RequestedAt: time.Now(),
+		Failed:      true,
+		RawRequest:  rawRequest,
+		RawResponse: rawResponse,
+	})
+}
+
+func buildDownstreamRawRequest(ctx context.Context, body []byte) string {
+	if ctx == nil {
+		return string(body)
+	}
+	ginCtx, ok := ctx.Value("gin").(*gin.Context)
+	if !ok || ginCtx == nil || ginCtx.Request == nil {
+		return string(body)
+	}
+	req := ginCtx.Request
+	path := "/"
+	if req.URL != nil && req.URL.RequestURI() != "" {
+		path = req.URL.RequestURI()
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s HTTP/%d.%d\n", req.Method, path, req.ProtoMajor, req.ProtoMinor)
+	_ = req.Header.Write(&b)
+	b.WriteByte('\n')
+	b.Write(body)
+	return b.String()
 }
 
 // ExecuteStreamWithAuthManager executes a streaming request via the core auth manager.
@@ -671,6 +717,9 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 			if hdr := he.Headers(); hdr != nil {
 				addon = hdr.Clone()
 			}
+		}
+		if shouldPublishAuthSelectionFailure(err) {
+			publishAuthSelectionFailureUsage(ctx, strings.Join(providers, ","), normalizedModel, rawJSON, status, err)
 		}
 		errChan <- &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 		close(errChan)
@@ -803,6 +852,20 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 		}
 	}()
 	return dataChan, upstreamHeaders, errChan
+}
+
+func shouldPublishAuthSelectionFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var authErr *coreauth.Error
+	if errors.As(err, &authErr) && authErr != nil {
+		return authErr.Code == "auth_not_found" || authErr.Code == "auth_unavailable" || authErr.Code == "model_cooldown"
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "auth_not_found") ||
+		strings.Contains(lower, "auth_unavailable") ||
+		strings.Contains(lower, "model_cooldown")
 }
 
 func validateSSEDataJSON(chunk []byte) error {

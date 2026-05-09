@@ -728,6 +728,43 @@ func TestManagerExecute_OpenAICompatAliasPoolBlockedAuthDoesNotConsumeRetryBudge
 	}
 }
 
+func TestManagerExecute_OpenAICompatSchedulerKeepsAuthWithoutRegistryModelsEligible(t *testing.T) {
+	cfg := &internalconfig.Config{
+		OpenAICompatibility: []internalconfig.OpenAICompatibility{{
+			Name: "pool",
+			Models: []internalconfig.OpenAICompatibilityModel{
+				{Name: "llama-3.1-8b-instant"},
+			},
+		}},
+	}
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(cfg)
+	executor := &authScopedOpenAICompatPoolExecutor{id: "pool"}
+	m.RegisterExecutor(executor)
+
+	auth := &Auth{
+		ID:       "normal-key-without-registry-models",
+		Provider: "pool",
+		Status:   StatusActive,
+		Attributes: map[string]string{
+			"api_key":      "normal-key",
+			"compat_name":  "pool",
+			"provider_key": "pool",
+		},
+	}
+	if _, err := m.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	resp, err := m.Execute(context.Background(), []string{"pool"}, cliproxyexecutor.Request{Model: "llama-3.1-8b-instant"}, cliproxyexecutor.Options{})
+	if err != nil {
+		t.Fatalf("execute error = %v, want scheduler to use auth without registry model snapshot", err)
+	}
+	if got := string(resp.Payload); got != "normal-key-without-registry-models|llama-3.1-8b-instant" {
+		t.Fatalf("payload = %q", got)
+	}
+}
+
 func TestManagerExecuteStream_OpenAICompatAliasPoolStopsOnInvalidBootstrap(t *testing.T) {
 	alias := "claude-opus-4.66"
 	invalidErr := &Error{HTTPStatus: http.StatusBadRequest, Message: "invalid_request_error: malformed payload"}

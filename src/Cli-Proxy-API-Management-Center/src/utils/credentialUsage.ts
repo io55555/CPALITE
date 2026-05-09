@@ -94,9 +94,9 @@ const normalizeProviderName = (value: unknown): string => {
   return provider && provider.toLowerCase() !== 'unknown' ? provider : '';
 };
 
-const buildSourceCandidates = (sourceRaw: string, sourceText: string): Set<string> => {
+const buildSourceCandidates = (...values: string[]): Set<string> => {
   const candidates = new Set<string>();
-  [sourceRaw, sourceText].forEach((value) => {
+  values.forEach((value) => {
     if (!value) return;
     candidates.add(value);
     if (!value.includes(':')) {
@@ -147,6 +147,7 @@ const resolveCredentialMatch = (
   const authIndex = normalizeAuthIndex(detail.auth_index);
   const sourceRaw = String(detail.source ?? '').trim();
   const sourceText = sourceRaw.startsWith('t:') ? sourceRaw.slice(2) : sourceRaw;
+  const originalSource = String(detail.__sourceRaw ?? '').trim();
   const provider = normalizeProviderName(detail.provider);
   const authType = String(detail.auth_type ?? '').trim().toLowerCase();
   const isApiKeyUsage = authType === 'api_key' || authType === 'apikey';
@@ -156,7 +157,7 @@ const resolveCredentialMatch = (
       openaiProviders,
       provider,
       authIndex,
-      buildSourceCandidates(sourceRaw, sourceText)
+      buildSourceCandidates(sourceRaw, sourceText, originalSource)
     );
     if (keyMatch) {
       return {

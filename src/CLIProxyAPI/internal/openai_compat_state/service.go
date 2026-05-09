@@ -17,6 +17,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	_ "modernc.org/sqlite"
 )
@@ -380,7 +381,8 @@ func (s *Service) update(provider, apiKey string, mutate func(*State)) State {
 	key := stateKey(provider, apiKey)
 	now := time.Now().UTC()
 	s.mu.Lock()
-	st := s.states[key]
+	before := s.states[key]
+	st := before
 	if st.ProviderName == "" {
 		st.ProviderName = strings.TrimSpace(provider)
 		st.APIKey = strings.TrimSpace(apiKey)
@@ -393,11 +395,47 @@ func (s *Service) update(provider, apiKey string, mutate func(*State)) State {
 	s.states[key] = st
 	s.dirty[key] = st
 	s.mu.Unlock()
+	logOpenAICompatStateChange(before, st)
 	select {
 	case s.wake <- struct{}{}:
 	default:
 	}
 	return visibleState(st, now)
+}
+
+func logOpenAICompatStateChange(before, after State) {
+	if strings.TrimSpace(after.APIKey) == "" {
+		return
+	}
+	if before.ProviderName == "" && after.Status == StatusActive && after.Enabled {
+		return
+	}
+	if before.Enabled == after.Enabled &&
+		before.Status == after.Status &&
+		before.StatusMessage == after.StatusMessage &&
+		before.FrozenUntil.Equal(after.FrozenUntil) {
+		return
+	}
+	log.WithFields(log.Fields{
+		"provider": after.ProviderName,
+		"api_key":  after.APIKey,
+	}).Infof("OpenAI兼容API Key状态变更: %s -> %s", describeOpenAICompatState(before), describeOpenAICompatState(after))
+}
+
+func describeOpenAICompatState(st State) string {
+	if st.ProviderName == "" {
+		return "未记录"
+	}
+	if !st.Enabled || st.Status == StatusDisabled {
+		return "停用"
+	}
+	if st.Status == StatusFrozen && st.FrozenUntil.After(time.Now()) {
+		return fmt.Sprintf("冷却%d秒", int64(time.Until(st.FrozenUntil).Round(time.Second)/time.Second))
+	}
+	if st.Status == StatusError {
+		return "异常"
+	}
+	return "启用"
 }
 
 func (s *Service) writer() {

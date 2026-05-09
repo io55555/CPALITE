@@ -610,7 +610,22 @@ export function RequestEventsDetailsCard({
     if (!normalizedAuthIndex) return null;
     return authFileMap.get(normalizedAuthIndex) ?? null;
   }, [authFileMap, selectedFailureRow]);
-  const selectedFailureMessage = selectedCredentialInfo?.statusMessage?.trim() || '';
+  const selectedFailureMessage = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    const statusMessage = selectedCredentialInfo?.statusMessage?.trim();
+    if (statusMessage) return statusMessage;
+    const rawResponse = selectedFailureRow.rawResponse?.trim();
+    if (!rawResponse) return '';
+    const body = rawResponse.split(/\r?\n\r?\n/).slice(1).join('\n\n').trim() || rawResponse;
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
+      const message = parsed.error?.message ?? parsed.message;
+      if (typeof message === 'string' && message.trim()) return message.trim();
+    } catch {
+      // 原始响应不一定是 JSON，下面直接显示截断文本。
+    }
+    return body.length > 2000 ? `${body.slice(0, 2000)}...` : body;
+  }, [selectedCredentialInfo, selectedFailureRow]);
 
   return (
     <Card

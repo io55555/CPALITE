@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -152,7 +151,7 @@ func authLogAccount(auth *Auth) string {
 		return kind
 	}
 	if strings.EqualFold(kind, "api_key") {
-		return "api_key:" + util.HideAPIKey(value)
+		return "api_key:" + value
 	}
 	return kind + ":" + value
 }

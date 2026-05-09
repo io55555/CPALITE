@@ -659,10 +659,21 @@ func (m *scheduledAuthMeta) supportsModel(modelKey string) bool {
 		return true
 	}
 	if len(m.supportedModelSet) == 0 {
-		return false
+		return m.openAICompatWithoutModelSnapshot()
 	}
 	_, ok := m.supportedModelSet[modelKey]
 	return ok
+}
+
+func (m *scheduledAuthMeta) openAICompatWithoutModelSnapshot() bool {
+	if m == nil || m.auth == nil || m.auth.Attributes == nil {
+		return false
+	}
+	if strings.TrimSpace(m.auth.Attributes["compat_name"]) != "" {
+		return true
+	}
+	return strings.TrimSpace(m.auth.Attributes["provider_key"]) != "" &&
+		strings.TrimSpace(m.auth.Attributes["api_key"]) != ""
 }
 
 // upsertEntryLocked updates or inserts one auth entry and rebuilds indexes when ordering changes.
