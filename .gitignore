@@ -20,6 +20,8 @@ buildlog/
 无用备份文件/
 src--*/
 进度*.txt
+opencode.json*
+/tui.json
 
 # Python
 __pycache__/

@@ -55,7 +55,40 @@ func (h *Handler) PatchOpenAICompatKeyState(c *gin.Context) {
 		return
 	}
 	st := service.SetEnabled(body.ProviderName, body.APIKey, *body.Enabled)
+	h.refreshOpenAICompatKeyRuntime(c.Request.Context(), st.ProviderName, st.APIKey)
 	c.JSON(http.StatusOK, st)
+}
+
+func (h *Handler) refreshOpenAICompatKeyRuntime(ctx context.Context, providerName, apiKey string) {
+	if h == nil || h.authManager == nil {
+		return
+	}
+	providerName = strings.TrimSpace(providerName)
+	apiKey = strings.TrimSpace(apiKey)
+	if providerName == "" || apiKey == "" {
+		return
+	}
+	service := h.currentOpenAICompatKeyState()
+	if service == nil {
+		return
+	}
+	for _, auth := range h.authManager.List() {
+		if auth == nil || auth.Attributes == nil {
+			continue
+		}
+		authKey := strings.TrimSpace(auth.Attributes["api_key"])
+		if authKey != apiKey {
+			continue
+		}
+		compatName := strings.TrimSpace(auth.Attributes["compat_name"])
+		providerKey := strings.TrimSpace(auth.Attributes["provider_key"])
+		if !strings.EqualFold(providerName, compatName) && !strings.EqualFold(providerName, providerKey) {
+			continue
+		}
+		service.ApplyToAuth(auth)
+		_, _ = h.authManager.Update(cliproxyauth.WithSkipPersist(ctx), auth)
+		h.authManager.RefreshSchedulerEntry(auth.ID)
+	}
 }
 
 // GetOpenAICompatKeyStateDetail 返回单个 key 的错误和原始包详情。
@@ -159,6 +192,7 @@ func (h *Handler) testOpenAICompatKey(ctx context.Context, body testOpenAICompat
 	if err != nil {
 		if service := h.currentOpenAICompatKeyState(); service != nil {
 			service.MarkError(provider.Name, apiKey, err.Error(), rawRequest, "")
+			h.refreshOpenAICompatKeyRuntime(ctx, provider.Name, apiKey)
 		}
 		return gin.H{"ok": false, "error": err.Error(), "provider_name": provider.Name, "api_key": apiKey}
 	}
@@ -170,11 +204,13 @@ func (h *Handler) testOpenAICompatKey(ctx context.Context, body testOpenAICompat
 			if _, matched := service.ApplyRulers(*provider, apiKey, resp.StatusCode, b, rawRequest, rawResponse); !matched {
 				service.MarkError(provider.Name, apiKey, string(b), rawRequest, rawResponse)
 			}
+			h.refreshOpenAICompatKeyRuntime(ctx, provider.Name, apiKey)
 		}
 		return gin.H{"ok": false, "status": resp.StatusCode, "error": string(b), "provider_name": provider.Name, "api_key": apiKey}
 	}
 	if service := h.currentOpenAICompatKeyState(); service != nil {
 		service.MarkSuccess(provider.Name, apiKey, rawRequest, rawResponse)
+		h.refreshOpenAICompatKeyRuntime(ctx, provider.Name, apiKey)
 	}
 	return gin.H{"ok": true, "status": resp.StatusCode, "provider_name": provider.Name, "api_key": apiKey}
 }

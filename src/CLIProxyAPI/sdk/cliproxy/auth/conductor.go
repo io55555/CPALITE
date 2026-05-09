@@ -179,6 +179,10 @@ type Manager struct {
 	// Auto refresh state
 	refreshCancel context.CancelFunc
 	refreshLoop   *authAutoRefreshLoop
+
+	persistMu      sync.Mutex
+	persistDirty   map[string]*Auth
+	persistStarted sync.Once
 }
 
 // ApplyExternalState lets integrations merge independently persisted runtime state
@@ -201,6 +205,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		auths:            make(map[string]*Auth),
 		providerOffsets:  make(map[string]int),
 		modelPoolOffsets: make(map[string]int),
+		persistDirty:     make(map[string]*Auth),
 	}
 	// atomic.Value requires non-nil initial value.
 	manager.runtimeConfig.Store(&internalconfig.Config{})
@@ -259,6 +264,7 @@ func (m *Manager) RefreshSchedulerEntry(authID string) {
 	}
 	snapshot := auth.Clone()
 	m.mu.RUnlock()
+	applyOpenAICompatPersistedState(snapshot, time.Now())
 	m.scheduler.upsertAuth(snapshot)
 }
 
@@ -341,6 +347,7 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 	}
 
 	var snapshot *Auth
+	var persistSnapshot *Auth
 	now := time.Now()
 
 	m.mu.Lock()
@@ -380,13 +387,17 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 				auth.Status = StatusActive
 			}
 			auth.UpdatedAt = now
-			if errPersist := m.persist(ctx, auth); errPersist != nil {
-				logEntryWithRequestID(ctx).WithField("auth_id", auth.ID).Warnf("failed to persist auth changes during model state reconciliation: %v", errPersist)
-			}
 			snapshot = auth.Clone()
+			persistSnapshot = snapshot.Clone()
 		}
 	}
 	m.mu.Unlock()
+
+	if persistSnapshot != nil {
+		if errPersist := m.persist(ctx, persistSnapshot); errPersist != nil {
+			logEntryWithRequestID(ctx).WithField("auth_id", persistSnapshot.ID).Warnf("failed to persist auth changes during model state reconciliation: %v", errPersist)
+		}
+	}
 
 	if m.scheduler != nil && snapshot != nil {
 		m.scheduler.upsertAuth(snapshot)
@@ -1163,6 +1174,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	authClone := auth.Clone()
+	applyOpenAICompatPersistedState(authClone, time.Now())
 	m.mu.Lock()
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
@@ -1198,6 +1210,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	authClone := auth.Clone()
+	applyOpenAICompatPersistedState(authClone, time.Now())
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
@@ -1228,7 +1241,9 @@ func (m *Manager) Load(ctx context.Context) error {
 			continue
 		}
 		auth.EnsureIndex()
-		m.auths[auth.ID] = auth.Clone()
+		authClone := auth.Clone()
+		applyOpenAICompatPersistedState(authClone, time.Now())
+		m.auths[auth.ID] = authClone
 	}
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
 	if cfg == nil {
@@ -2113,6 +2128,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	clearModelQuota := false
 	setModelQuota := false
 	var authSnapshot *Auth
+	var persistSnapshot *Auth
 
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
@@ -2244,10 +2260,11 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		}
 
 		applyOpenAICompatPersistedState(auth, now)
-		_ = m.persist(ctx, auth)
 		authSnapshot = auth.Clone()
+		persistSnapshot = authSnapshot.Clone()
 	}
 	m.mu.Unlock()
+	m.queuePersist(ctx, persistSnapshot)
 	if m.scheduler != nil && authSnapshot != nil {
 		m.scheduler.upsertAuth(authSnapshot)
 	}
@@ -3349,6 +3366,50 @@ func (m *Manager) persist(ctx context.Context, auth *Auth) error {
 	return err
 }
 
+func (m *Manager) queuePersist(ctx context.Context, auth *Auth) {
+	if m == nil || m.store == nil || auth == nil || shouldSkipPersist(ctx) {
+		return
+	}
+	if auth.Attributes != nil {
+		if v := strings.ToLower(strings.TrimSpace(auth.Attributes["runtime_only"])); v == "true" {
+			return
+		}
+	}
+	if auth.Metadata == nil {
+		return
+	}
+	snapshot := auth.Clone()
+	m.persistStarted.Do(func() {
+		go m.persistLoop()
+	})
+	m.persistMu.Lock()
+	m.persistDirty[snapshot.ID] = snapshot
+	m.persistMu.Unlock()
+}
+
+func (m *Manager) persistLoop() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		m.flushQueuedPersist(context.Background())
+	}
+}
+
+func (m *Manager) flushQueuedPersist(ctx context.Context) {
+	if m == nil || m.store == nil {
+		return
+	}
+	m.persistMu.Lock()
+	pending := m.persistDirty
+	m.persistDirty = make(map[string]*Auth)
+	m.persistMu.Unlock()
+	for _, auth := range pending {
+		if err := m.persist(ctx, auth); err != nil {
+			logEntryWithRequestID(ctx).WithField("auth_id", auth.ID).Warnf("failed to persist queued auth state: %v", err)
+		}
+	}
+}
+
 // StartAutoRefresh launches a background loop that evaluates auth freshness
 // every few seconds and triggers refresh operations when required.
 // Only one loop is kept alive; starting a new one cancels the previous run.
@@ -3397,6 +3458,7 @@ func (m *Manager) StopAutoRefresh() {
 	if stoppable, ok := m.selector.(StoppableSelector); ok {
 		stoppable.Stop()
 	}
+	m.flushQueuedPersist(context.Background())
 }
 
 func (m *Manager) queueRefreshReschedule(authID string) {

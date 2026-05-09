@@ -125,7 +125,7 @@ export function OpenAISection({
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 30_000);
+    const timer = window.setInterval(() => void refresh(), 5_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
