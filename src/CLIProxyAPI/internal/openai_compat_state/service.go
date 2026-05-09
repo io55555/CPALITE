@@ -268,6 +268,18 @@ func (s *Service) MarkError(provider, apiKey, message, rawRequest, rawResponse s
 	})
 }
 
+func (s *Service) MarkSuccess(provider, apiKey, rawRequest, rawResponse string) State {
+	return s.update(provider, apiKey, func(st *State) {
+		st.Enabled = true
+		st.Status = StatusActive
+		st.StatusMessage = "test passed"
+		st.FrozenUntil = time.Time{}
+		st.LastError = ""
+		st.RawRequest = truncateRaw(rawRequest)
+		st.RawResponse = truncateRaw(rawResponse)
+	})
+}
+
 func (s *Service) ApplyToAuth(auth *cliproxyauth.Auth) {
 	if s == nil || auth == nil || auth.Attributes == nil {
 		return

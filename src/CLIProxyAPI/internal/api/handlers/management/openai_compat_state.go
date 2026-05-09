@@ -23,9 +23,13 @@ type patchOpenAICompatKeyStateRequest struct {
 }
 
 type testOpenAICompatKeyRequest struct {
-	ProviderName string `json:"provider_name"`
-	APIKey       string `json:"api_key"`
-	ProxyURL     string `json:"proxy_url"`
+	ProviderName string                                  `json:"provider_name"`
+	APIKey       string                                  `json:"api_key"`
+	ProxyURL     string                                  `json:"proxy_url"`
+	BaseURL      string                                  `json:"base_url"`
+	Model        string                                  `json:"model"`
+	Headers      map[string]string                       `json:"headers"`
+	StatusRulers []config.OpenAICompatibilityStatusRuler `json:"status_rulers"`
 }
 
 // GetOpenAICompatKeyStates 返回 OpenAI 兼容 key 的运行态。
@@ -110,7 +114,11 @@ func (h *Handler) TestAllOpenAICompatKeys(c *gin.Context) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i] = h.testOpenAICompatKey(c.Request.Context(), testOpenAICompatKeyRequest(keys[i]))
+			results[i] = h.testOpenAICompatKey(c.Request.Context(), testOpenAICompatKeyRequest{
+				ProviderName: keys[i].ProviderName,
+				APIKey:       keys[i].APIKey,
+				ProxyURL:     keys[i].ProxyURL,
+			})
 		}()
 	}
 	wg.Wait()
@@ -118,7 +126,7 @@ func (h *Handler) TestAllOpenAICompatKeys(c *gin.Context) {
 }
 
 func (h *Handler) testOpenAICompatKey(ctx context.Context, body testOpenAICompatKeyRequest) gin.H {
-	provider := h.findOpenAICompatProvider(body.ProviderName)
+	provider := h.openAICompatProviderForTest(body)
 	if provider == nil {
 		return gin.H{"ok": false, "error": "provider not found", "provider_name": body.ProviderName}
 	}
@@ -126,7 +134,11 @@ func (h *Handler) testOpenAICompatKey(ctx context.Context, body testOpenAICompat
 	if apiKey == "" {
 		return gin.H{"ok": false, "error": "api_key required", "provider_name": body.ProviderName}
 	}
-	reqBody := []byte(`{"model":"` + firstOpenAICompatModel(*provider) + `","messages":[{"role":"user","content":"ping"}],"stream":false,"max_tokens":1}`)
+	model := strings.TrimSpace(body.Model)
+	if model == "" {
+		model = firstOpenAICompatModel(*provider)
+	}
+	reqBody := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"ping"}],"stream":false,"max_tokens":1}`)
 	url := strings.TrimSuffix(provider.BaseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
@@ -155,14 +167,58 @@ func (h *Handler) testOpenAICompatKey(ctx context.Context, body testOpenAICompat
 	rawResponse := openai_compat_state.BuildRawResponse(resp, b)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if service := h.currentOpenAICompatKeyState(); service != nil {
-			service.ApplyRulers(*provider, apiKey, resp.StatusCode, b, rawRequest, rawResponse)
+			if _, matched := service.ApplyRulers(*provider, apiKey, resp.StatusCode, b, rawRequest, rawResponse); !matched {
+				service.MarkError(provider.Name, apiKey, string(b), rawRequest, rawResponse)
+			}
 		}
 		return gin.H{"ok": false, "status": resp.StatusCode, "error": string(b), "provider_name": provider.Name, "api_key": apiKey}
 	}
 	if service := h.currentOpenAICompatKeyState(); service != nil {
-		service.SetEnabled(provider.Name, apiKey, true)
+		service.MarkSuccess(provider.Name, apiKey, rawRequest, rawResponse)
 	}
 	return gin.H{"ok": true, "status": resp.StatusCode, "provider_name": provider.Name, "api_key": apiKey}
+}
+
+func (h *Handler) openAICompatProviderForTest(body testOpenAICompatKeyRequest) *config.OpenAICompatibility {
+	provider := h.findOpenAICompatProvider(body.ProviderName)
+	if provider == nil && strings.TrimSpace(body.BaseURL) == "" {
+		return nil
+	}
+	var out config.OpenAICompatibility
+	if provider != nil {
+		out = *provider
+		if provider.APIKeyEntries != nil {
+			out.APIKeyEntries = append([]config.OpenAICompatibilityAPIKey(nil), provider.APIKeyEntries...)
+		}
+		if provider.Models != nil {
+			out.Models = append([]config.OpenAICompatibilityModel(nil), provider.Models...)
+		}
+		out.Headers = config.NormalizeHeaders(provider.Headers)
+		if provider.StatusRulers != nil {
+			out.StatusRulers = append([]config.OpenAICompatibilityStatusRuler(nil), provider.StatusRulers...)
+		}
+	} else {
+		out.Name = strings.TrimSpace(body.ProviderName)
+	}
+	if out.Name == "" {
+		out.Name = strings.TrimSpace(body.ProviderName)
+	}
+	if baseURL := strings.TrimSpace(body.BaseURL); baseURL != "" {
+		out.BaseURL = baseURL
+	}
+	if body.Headers != nil {
+		out.Headers = config.NormalizeHeaders(body.Headers)
+	}
+	if model := strings.TrimSpace(body.Model); model != "" {
+		out.Models = []config.OpenAICompatibilityModel{{Name: model}}
+	}
+	if body.StatusRulers != nil {
+		out.StatusRulers = append([]config.OpenAICompatibilityStatusRuler(nil), body.StatusRulers...)
+	}
+	if strings.TrimSpace(out.BaseURL) == "" {
+		return nil
+	}
+	return &out
 }
 
 func (h *Handler) findOpenAICompatProvider(name string) *config.OpenAICompatibility {

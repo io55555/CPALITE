@@ -482,8 +482,9 @@ func TestManagerExecuteStream_ModelSupportBadRequestFallsBackAndSuspendsAuth(t *
 	}
 }
 
-func TestManager_ProxyFailureCoolsAuthForFiveMinutes(t *testing.T) {
+func TestManager_ProxyFailureUsesConfiguredCooldown(t *testing.T) {
 	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{ProxyFailureCooldownSeconds: 123})
 	executor := &authFallbackExecutor{
 		id: "openai-compatibility",
 		executeErrors: map[string]error{
@@ -545,8 +546,8 @@ func TestManager_ProxyFailureCoolsAuthForFiveMinutes(t *testing.T) {
 		t.Fatalf("expected model state for %q", model)
 	}
 	remaining := time.Until(state.NextRetryAfter)
-	if !state.Unavailable || remaining < 295*time.Second || remaining > 301*time.Second {
-		t.Fatalf("proxy failure cooldown = unavailable:%v remaining:%v, want about 300s", state.Unavailable, remaining)
+	if !state.Unavailable || remaining < 118*time.Second || remaining > 124*time.Second {
+		t.Fatalf("proxy failure cooldown = unavailable:%v remaining:%v, want about 123s", state.Unavailable, remaining)
 	}
 }
 

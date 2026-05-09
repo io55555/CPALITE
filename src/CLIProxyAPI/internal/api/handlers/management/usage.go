@@ -26,31 +26,13 @@ func (r usageQueueRecord) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(r))
 }
 
-func (h *Handler) usageStatisticsEnabled() bool {
-	if h == nil {
-		return false
-	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.cfg != nil && h.cfg.UsageStatisticsEnabled
-}
-
-// GetFwindyUsage keeps Fwindy's /usage frontend API while preserving the
-// upstream behaviour that this legacy path is absent when usage is disabled.
+// GetFwindyUsage keeps Fwindy's /usage frontend API.
 func (h *Handler) GetFwindyUsage(c *gin.Context) {
-	if !h.usageStatisticsEnabled() {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
 	h.GetUsageStatistics(c)
 }
 
 // DeleteFwindyUsage keeps Fwindy's /usage deletion API.
 func (h *Handler) DeleteFwindyUsage(c *gin.Context) {
-	if !h.usageStatisticsEnabled() {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
 	h.DeleteUsageRecords(c)
 }
 

@@ -249,10 +249,24 @@ export const providersApi = {
   getOpenAIKeyStateDetail: (providerName: string, apiKey: string): Promise<OpenAIKeyState> =>
     apiClient.get(`/openai-compatibility/key-state/detail?provider_name=${encodeURIComponent(providerName)}&api_key=${encodeURIComponent(apiKey)}`),
 
-  testOpenAIKey: (providerName: string, apiKey: string, proxyUrl?: string): Promise<{ ok: boolean; error?: string; status?: number }> =>
+  testOpenAIKey: (
+    providerName: string,
+    apiKey: string,
+    proxyUrl?: string,
+    options?: {
+      baseUrl?: string;
+      model?: string;
+      headers?: Record<string, string>;
+      statusRulers?: OpenAIProviderConfig['statusRulers'];
+    }
+  ): Promise<{ ok: boolean; error?: string; status?: number }> =>
     apiClient.post('/openai-compatibility/test-key', {
       provider_name: providerName,
       api_key: apiKey,
       proxy_url: proxyUrl ?? '',
+      base_url: options?.baseUrl ?? '',
+      model: options?.model ?? '',
+      headers: options?.headers ?? {},
+      status_rulers: options?.statusRulers ?? [],
     })
 };

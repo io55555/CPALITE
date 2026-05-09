@@ -184,6 +184,15 @@ export function AiProvidersOpenAIEditPage() {
   }, [form.baseUrl, form.headers, form.modelEntries, testModel]);
   const previousConnectivityConfigRef = useRef(connectivityConfigSignature);
 
+  const currentHeaders = useMemo(() => {
+    return form.headers.reduce<Record<string, string>>((acc, entry) => {
+      const key = entry.key.trim();
+      if (!key) return acc;
+      acc[key] = entry.value;
+      return acc;
+    }, {});
+  }, [form.headers]);
+
   useEffect(() => {
     if (previousConnectivityConfigRef.current === connectivityConfigSignature) {
       return;
@@ -230,7 +239,12 @@ export function AiProvidersOpenAIEditPage() {
       setDraftKeyTestStatus(keyIndex, { status: 'loading', message: '' });
 
       try {
-        const result = await providersApi.testOpenAIKey(form.name, keyEntry.apiKey.trim(), keyEntry.proxyUrl);
+        const result = await providersApi.testOpenAIKey(form.name, keyEntry.apiKey.trim(), keyEntry.proxyUrl, {
+          baseUrl,
+          model: modelName,
+          headers: currentHeaders,
+          statusRulers: form.statusRulers,
+        });
         if (!result.ok) {
           throw new Error(result.error || `HTTP ${result.status ?? ''}`.trim());
         }
@@ -247,11 +261,12 @@ export function AiProvidersOpenAIEditPage() {
         const errorMessage = isTimeout
           ? t('ai_providers.openai_test_timeout', { seconds: OPENAI_TEST_TIMEOUT_MS / 1000 })
           : message;
+        await refreshKeyStates();
         setDraftKeyTestStatus(keyIndex, { status: 'error', message: errorMessage });
         return false;
       }
     },
-    [form.baseUrl, form.name, form.apiKeyEntries, testModel, availableModels, t, setDraftKeyTestStatus, showNotification, refreshKeyStates]
+    [form.baseUrl, form.name, form.apiKeyEntries, form.statusRulers, testModel, availableModels, t, setDraftKeyTestStatus, showNotification, refreshKeyStates, currentHeaders]
   );
 
   const testSingleKey = useCallback(
@@ -493,8 +508,6 @@ export function AiProvidersOpenAIEditPage() {
                 : persistedState?.status === 'error'
                   ? '异常'
                   : '激活';
-            const clickableState = stateText !== '激活';
-
             return (
               <div key={index} className={styles.keyTableRow}>
                 {/* 序号 */}
@@ -509,8 +522,8 @@ export function AiProvidersOpenAIEditPage() {
                   <button
                     type="button"
                     className="link-button"
-                    onClick={() => clickableState && void openStateDetail(entry)}
-                    disabled={!clickableState}
+                    onClick={() => persistedState && void openStateDetail(entry)}
+                    disabled={!persistedState}
                     title={persistedState?.status_message || persistedState?.last_error || ''}
                   >
                     {stateText}
@@ -799,7 +812,12 @@ export function AiProvidersOpenAIEditPage() {
             <div className={styles.keyEntriesSection}>
               <div className={styles.keyEntriesHeader}>
                 <label className={styles.keyEntriesTitle}>status-rulers</label>
-                <span className={styles.keyEntriesHint}>示例：401 + json-path message 等于 Wrong API Key {'->'} freeze-24h；action 支持 disable、freeze-24h、freeze-10m、freeze-30s。</span>
+                <span className={styles.keyEntriesHint}>
+                  示例：401 + json-path message 等于 Wrong API Key {'->'} freeze-24h；action 支持 disable、freeze-24h、freeze-10m、freeze-30s。
+                </span>
+              </div>
+              <div className={styles.sectionHint}>
+                规则按顺序匹配，先匹配 HTTP status，再匹配 json-path/json-equals 或 body-equals；json-path 使用 gjson 路径，例如 message、error.code。第一个命中的规则会更新当前 key 状态并记录原始请求/响应包。
               </div>
               <textarea
                 className="input"

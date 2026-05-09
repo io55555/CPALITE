@@ -90,7 +90,7 @@ func quotaCooldownDisabledForAuth(auth *Auth) bool {
 	return quotaCooldownDisabled.Load()
 }
 
-const proxyFailureCooldown = 300 * time.Second
+const defaultProxyFailureCooldown = 300 * time.Second
 
 // Result captures execution outcome used to adjust auth state.
 type Result struct {
@@ -2145,7 +2145,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 					statusCode := statusCodeFromResult(result.Error)
 					if isProxyFailureResultError(result.Error) {
-						next := now.Add(proxyFailureCooldown)
+						next := now.Add(m.proxyFailureCooldown())
 						state.NextRetryAfter = next
 						state.StatusMessage = proxyFailureStatusMessage(result.Error)
 						suspendReason = "proxy_failure"
@@ -2227,7 +2227,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					updateAggregatedAvailability(auth, now)
 				}
 			} else {
-				applyAuthFailureState(auth, result.Error, result.RetryAfter, now)
+				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown())
 			}
 		}
 
@@ -2566,6 +2566,17 @@ func proxyFailureStatusMessage(err *Error) string {
 	return err.Message
 }
 
+func (m *Manager) proxyFailureCooldown() time.Duration {
+	if m == nil {
+		return defaultProxyFailureCooldown
+	}
+	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+	if cfg == nil || cfg.ProxyFailureCooldownSeconds <= 0 {
+		return defaultProxyFailureCooldown
+	}
+	return time.Duration(cfg.ProxyFailureCooldownSeconds) * time.Second
+}
+
 func isRequestScopedNotFoundMessage(message string) bool {
 	if message == "" {
 		return false
@@ -2616,7 +2627,7 @@ func isRequestInvalidError(err error) bool {
 	}
 }
 
-func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time) {
+func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time, proxyCooldown time.Duration) {
 	if auth == nil {
 		return
 	}
@@ -2635,7 +2646,10 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 	}
 	if isProxyFailureResultError(resultErr) {
 		auth.StatusMessage = proxyFailureStatusMessage(resultErr)
-		auth.NextRetryAfter = now.Add(proxyFailureCooldown)
+		if proxyCooldown <= 0 {
+			proxyCooldown = defaultProxyFailureCooldown
+		}
+		auth.NextRetryAfter = now.Add(proxyCooldown)
 		return
 	}
 	statusCode := statusCodeFromResult(resultErr)

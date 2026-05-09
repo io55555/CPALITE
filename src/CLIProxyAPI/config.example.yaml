@@ -94,6 +94,11 @@ max-retry-interval: 30
 # When true, disable auth/model cooldown scheduling globally (prevents blackout windows after failure states).
 disable-cooling: false
 
+# How long to cool down a credential/model after its per-key proxy connection fails.
+# This protects fill-first routing from repeatedly selecting the same key when its proxy is down.
+# Default: 300 seconds.
+proxy-failure-cooldown-seconds: 300
+
 # disable-image-generation supports: false (default), true, or "chat".
 # - true: disable image_generation everywhere (also returns 404 for /v1/images/generations and /v1/images/edits).
 # - "chat": disable image_generation injection on non-images endpoints, but keep /v1/images/generations and /v1/images/edits enabled.
@@ -265,6 +270,36 @@ nonstream-keepalive-interval: 0
 #         alias: "claude-opus-4.66"
 #       - name: "kimi-k2.5"
 #         alias: "claude-opus-4.66"
+#     # Optional key status rules. Rules are evaluated after a non-2xx provider response.
+#     # Matching order is the list order: first match wins. `when.status` is checked first,
+#     # then optional body checks are evaluated. Supported actions:
+#     #   disable      -> permanently disable this API key until manually re-enabled
+#     #   freeze-24h   -> temporarily cool down this API key for hours
+#     #   freeze-10m   -> temporarily cool down this API key for minutes
+#     #   freeze-30s   -> temporarily cool down this API key for seconds
+#     # Supported match fields:
+#     #   status       -> HTTP status code, required
+#     #   json-path    -> gjson path in JSON response body, e.g. "message" or "error.code"
+#     #   json-equals  -> exact string value expected at json-path
+#     #   body-equals  -> exact plain response body after trimming spaces
+#     status-rulers:
+#       - name: "401+json.message(Wrong API Key)=freeze-24h"
+#         when:
+#           status: 401
+#           json-path: "message"
+#           json-equals: "Wrong API Key"
+#         action: "freeze-24h"
+#       - name: "400+json.error.code(organization_restricted)=disable"
+#         when:
+#           status: 400
+#           json-path: "error.code"
+#           json-equals: "organization_restricted"
+#         action: "disable"
+#       - name: "401+body unauthorized=disable"
+#         when:
+#           status: 401
+#           body-equals: "unauthorized"
+#         action: "disable"
 
 # Vertex API keys (Vertex-compatible endpoints, base-url is optional)
 # vertex-api-key:
