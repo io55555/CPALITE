@@ -49,6 +49,69 @@ import (
 const oauthCallbackSuccessHTML = `<html><head><meta charset="utf-8"><title>Authentication successful</title><script>setTimeout(function(){window.close();},5000);</script></head><body><h1>Authentication successful!</h1><p>You can close this window.</p><p>This window will close automatically in 5 seconds.</p></body></html>`
 
 const defaultManagementConcurrencyLimit = 16
+const defaultManagementQueueLimit = 16
+
+type managementProcessorPool struct {
+	workers chan struct{}
+	queue   chan struct{}
+}
+
+func newManagementProcessorPool(workers, queue int) *managementProcessorPool {
+	if workers <= 0 {
+		workers = defaultManagementConcurrencyLimit
+	}
+	if queue < 0 {
+		queue = 0
+	}
+	return &managementProcessorPool{
+		workers: make(chan struct{}, workers),
+		queue:   make(chan struct{}, queue),
+	}
+}
+
+func (p *managementProcessorPool) middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if p == nil || !isManagementRequestPath(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
+		if p.tryRun(c) {
+			return
+		}
+		select {
+		case p.queue <- struct{}{}:
+			defer func() { <-p.queue }()
+			p.run(c)
+		default:
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "management processor pool is busy"})
+		}
+	}
+}
+
+func (p *managementProcessorPool) tryRun(c *gin.Context) bool {
+	select {
+	case p.workers <- struct{}{}:
+		defer func() { <-p.workers }()
+		c.Next()
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *managementProcessorPool) run(c *gin.Context) {
+	for {
+		select {
+		case p.workers <- struct{}{}:
+			defer func() { <-p.workers }()
+			c.Next()
+			return
+		case <-c.Request.Context().Done():
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "management request cancelled"})
+			return
+		}
+	}
+}
 
 type serverOptionConfig struct {
 	extraMiddleware      []gin.HandlerFunc
@@ -220,12 +283,12 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	if optionState.engineConfigurator != nil {
 		optionState.engineConfigurator(engine)
 	}
-	managementLimiter := make(chan struct{}, defaultManagementConcurrencyLimit)
-	engine.Use(managementConcurrencyMiddleware(managementLimiter))
+	managementPool := newManagementProcessorPool(defaultManagementConcurrencyLimit, defaultManagementQueueLimit)
 
 	// Add middleware
 	engine.Use(logging.GinLogrusLogger())
 	engine.Use(logging.GinLogrusRecovery())
+	engine.Use(managementPool.middleware())
 	for _, mw := range optionState.extraMiddleware {
 		engine.Use(mw)
 	}
@@ -699,22 +762,6 @@ func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 	}
 }
 
-func managementConcurrencyMiddleware(limiter chan struct{}) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if limiter == nil || !isManagementRequestPath(c.Request.URL.Path) {
-			c.Next()
-			return
-		}
-		select {
-		case limiter <- struct{}{}:
-			defer func() { <-limiter }()
-			c.Next()
-		default:
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "management API is busy"})
-		}
-	}
-}
-
 func isManagementRequestPath(path string) bool {
 	return path == "/management.html" || path == "/v0/management" || strings.HasPrefix(path, "/v0/management/")
 }
@@ -991,7 +1038,6 @@ func (s *Server) Stop(ctx context.Context) error {
 			log.Debugf("failed to close shared listener: %v", errClose)
 		}
 	}
-
 	// Shutdown the HTTP server.
 	if err := s.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", err)

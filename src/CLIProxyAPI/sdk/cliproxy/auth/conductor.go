@@ -269,6 +269,7 @@ func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
 	}
 	now := time.Now()
 	var snapshot *Auth
+	clearQuotaModels := make([]string, 0)
 	m.mu.Lock()
 	auth, ok := m.auths[authID]
 	if ok && auth != nil {
@@ -278,9 +279,12 @@ func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
 		auth.Status = StatusActive
 		auth.StatusMessage = ""
 		auth.LastError = nil
-		for _, state := range auth.ModelStates {
+		for model, state := range auth.ModelStates {
 			if state == nil {
 				continue
+			}
+			if state.Quota.Exceeded || state.Quota.Reason != "" || !state.Quota.NextRecoverAt.IsZero() {
+				clearQuotaModels = append(clearQuotaModels, model)
 			}
 			state.Unavailable = false
 			state.NextRetryAfter = time.Time{}
@@ -302,6 +306,10 @@ func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
 	}
 	if m.scheduler != nil {
 		m.scheduler.upsertAuth(snapshot)
+	}
+	for _, model := range clearQuotaModels {
+		registry.GetGlobalRegistry().ClearModelQuotaExceeded(snapshot.ID, model)
+		registry.GetGlobalRegistry().ResumeClientModel(snapshot.ID, model)
 	}
 	m.queueRefreshReschedule(snapshot.ID)
 	m.hook.OnAuthUpdated(ctx, snapshot.Clone())
