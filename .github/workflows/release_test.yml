@@ -1,0 +1,114 @@
+name: Manual Release Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Official version, for example v6.9.49"
+        required: true
+        type: string
+      release_notes:
+        description: "Enhancement notes for this release"
+        required: false
+        type: string
+      target_ref:
+        description: "Optional commit or branch to build"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.release_version }}
+      TARGET_REF: ${{ inputs.target_ref || github.sha }}
+      FRONTEND_DIR: src/Cli-Proxy-API-Management-Center
+      BACKEND_DIR: src/CLIProxyAPI
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.TARGET_REF }}
+
+      - name: Set build metadata
+        run: |
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ env.FRONTEND_DIR }}/package-lock.json
+
+      - name: Build management panel
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: |
+          npm ci
+          VITE_VERSION="$VERSION" npm run build
+          cp dist/index.html "$GITHUB_WORKSPACE/management.html"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.BACKEND_DIR }}/go.mod
+          cache-dependency-path: ${{ env.BACKEND_DIR }}/go.sum
+
+      - name: Create release notes
+        run: |
+          echo "RELEASE_NOTES_FILE=$RUNNER_TEMP/release_notes.md" >> "$GITHUB_ENV"
+          RELEASE_NOTES_FILE="$RUNNER_TEMP/release_notes.md"
+          cat > "$RELEASE_NOTES_FILE" <<EOF
+          Official base version: $VERSION
+          Upstream baselines: CLIProxyAPI@785b00c / Management-Center@126f7fa
+          Includes: management.html, CLIProxyAPI multi-platform archives, checksums.txt
+          Enhancements: state persistence / monitoring / rules engine / packet debug
+
+          ${{ inputs.release_notes }}
+          EOF
+
+      - name: Prepare release tag
+        run: |
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            TAG_COMMIT="$(git rev-list -n 1 "$VERSION")"
+            HEAD_COMMIT="$(git rev-parse HEAD)"
+            if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
+              echo "Tag $VERSION already exists on $TAG_COMMIT, current HEAD is $HEAD_COMMIT" >&2
+              exit 1
+            fi
+          else
+            git tag "$VERSION"
+          fi
+
+      - name: Build archives with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          workdir: ${{ env.BACKEND_DIR }}
+          args: release --clean --skip=publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create tag when missing
+        run: |
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            git push origin "$VERSION"
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
+          body_path: ${{ env.RELEASE_NOTES_FILE }}
+          files: |
+            management.html
+            ${{ env.BACKEND_DIR }}/dist/*.tar.gz
+            ${{ env.BACKEND_DIR }}/dist/*.zip
+            ${{ env.BACKEND_DIR }}/dist/checksums.txt
