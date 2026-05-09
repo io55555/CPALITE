@@ -10,9 +10,8 @@ import { Select } from '@/components/ui/Select';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useNotificationStore } from '@/stores';
-import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
-import type { ApiKeyEntry } from '@/types';
-import { buildHeaderObject, hasHeader } from '@/utils/headers';
+import { providersApi } from '@/services/api';
+import type { ApiKeyEntry, OpenAIKeyState } from '@/types';
 import { buildApiKeyEntry, buildOpenAIChatCompletionsEndpoint } from '@/components/providers/utils';
 import type { OpenAIEditOutletContext } from './AiProvidersOpenAIEditLayout';
 import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore';
@@ -126,6 +125,26 @@ export function AiProvidersOpenAIEditPage() {
 
   const swipeRef = useEdgeSwipeBack({ onBack: handleBack });
   const [isTestingKeys, setIsTestingKeys] = useState(false);
+  const [keyStates, setKeyStates] = useState<Record<string, OpenAIKeyState>>({});
+  const [detailState, setDetailState] = useState<OpenAIKeyState | null>(null);
+  const [bulkText, setBulkText] = useState('');
+
+  const refreshKeyStates = useCallback(async () => {
+    try {
+      const states = await providersApi.getOpenAIKeyStates();
+      const next: Record<string, OpenAIKeyState> = {};
+      states.forEach((state) => {
+        next[`${state.provider_name}::${state.api_key}`] = state;
+      });
+      setKeyStates(next);
+    } catch {
+      // 状态展示不阻断配置编辑。
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshKeyStates();
+  }, [refreshKeyStates]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -208,38 +227,14 @@ export function AiProvidersOpenAIEditPage() {
         return false;
       }
 
-      const customHeaders = buildHeaderObject(form.headers);
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...customHeaders,
-      };
-      if (!hasHeader(headers, 'authorization')) {
-        headers.Authorization = `Bearer ${keyEntry.apiKey.trim()}`;
-      }
-
-      // Set loading state for this key
       setDraftKeyTestStatus(keyIndex, { status: 'loading', message: '' });
 
       try {
-        const result = await apiCallApi.request(
-          {
-            method: 'POST',
-            url: endpoint,
-            header: Object.keys(headers).length ? headers : undefined,
-            data: JSON.stringify({
-              model: modelName,
-              messages: [{ role: 'user', content: 'Hi' }],
-              stream: false,
-              max_tokens: 5,
-            }),
-          },
-          { timeout: OPENAI_TEST_TIMEOUT_MS }
-        );
-
-        if (result.statusCode < 200 || result.statusCode >= 300) {
-          throw new Error(getApiCallErrorMessage(result));
+        const result = await providersApi.testOpenAIKey(form.name, keyEntry.apiKey.trim(), keyEntry.proxyUrl);
+        if (!result.ok) {
+          throw new Error(result.error || `HTTP ${result.status ?? ''}`.trim());
         }
-
+        await refreshKeyStates();
         setDraftKeyTestStatus(keyIndex, { status: 'success', message: '' });
         return true;
       } catch (err: unknown) {
@@ -256,7 +251,7 @@ export function AiProvidersOpenAIEditPage() {
         return false;
       }
     },
-    [form.baseUrl, form.apiKeyEntries, form.headers, testModel, availableModels, t, setDraftKeyTestStatus, showNotification]
+    [form.baseUrl, form.name, form.apiKeyEntries, testModel, availableModels, t, setDraftKeyTestStatus, showNotification, refreshKeyStates]
   );
 
   const testSingleKey = useCallback(
@@ -367,6 +362,67 @@ export function AiProvidersOpenAIEditPage() {
     navigate('models');
   };
 
+  const keyStateFor = useCallback(
+    (apiKey: string) => keyStates[`${form.name}::${apiKey}`],
+    [form.name, keyStates]
+  );
+
+  const toggleKeyEnabled = useCallback(
+    async (entry: ApiKeyEntry, enabled: boolean) => {
+      if (!entry.apiKey.trim()) return;
+      const state = await providersApi.updateOpenAIKeyState(form.name, entry.apiKey.trim(), enabled);
+      setKeyStates((prev) => ({ ...prev, [`${state.provider_name}::${state.api_key}`]: state }));
+    },
+    [form.name]
+  );
+
+  const openStateDetail = useCallback(async (entry: ApiKeyEntry) => {
+    if (!entry.apiKey.trim()) return;
+    const state = await providersApi.getOpenAIKeyStateDetail(form.name, entry.apiKey.trim());
+    setDetailState(state);
+  }, [form.name]);
+
+  const bulkPreview = useMemo(() => {
+    const existing = new Set(form.apiKeyEntries.map((entry) => entry.apiKey.trim()).filter(Boolean));
+    const seen = new Set<string>();
+    let add = 0;
+    let exists = 0;
+    let duplicate = 0;
+    let invalid = 0;
+    const rows: ApiKeyEntry[] = [];
+    bulkText.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const parts = trimmed.split(/\s+/);
+      if (parts.length > 2 || !parts[0]) {
+        invalid += 1;
+        return;
+      }
+      const apiKey = parts[0];
+      if (existing.has(apiKey)) {
+        exists += 1;
+        return;
+      }
+      if (seen.has(apiKey)) {
+        duplicate += 1;
+        return;
+      }
+      seen.add(apiKey);
+      add += 1;
+      rows.push({ apiKey, proxyUrl: parts[1] ?? '' });
+    });
+    return { add, exists, duplicate, invalid, rows };
+  }, [bulkText, form.apiKeyEntries]);
+
+  const applyBulkAdd = useCallback(() => {
+    if (bulkPreview.rows.length === 0) return;
+    setForm((prev) => ({
+      ...prev,
+      apiKeyEntries: [...prev.apiKeyEntries.filter((entry) => entry.apiKey.trim()), ...bulkPreview.rows],
+    }));
+    setBulkText('');
+  }, [bulkPreview.rows, setForm]);
+
   const renderKeyEntries = (entries: ApiKeyEntry[]) => {
     const list = entries.length ? entries : [buildApiKeyEntry()];
 
@@ -418,6 +474,7 @@ export function AiProvidersOpenAIEditPage() {
           <div className={styles.keyTableHeader}>
             <div className={styles.keyTableColIndex}>#</div>
             <div className={styles.keyTableColStatus}>{t('common.status')}</div>
+            <div className={styles.keyTableColStatus}>启停</div>
             <div className={styles.keyTableColKey}>{t('common.api_key')}</div>
             <div className={styles.keyTableColProxy}>{t('common.proxy_url')}</div>
             <div className={styles.keyTableColAction}>{t('common.action')}</div>
@@ -427,6 +484,16 @@ export function AiProvidersOpenAIEditPage() {
           {list.map((entry, index) => {
             const keyStatus = keyTestStatuses[index]?.status ?? 'idle';
             const canTestKey = Boolean(entry.apiKey?.trim()) && hasConfiguredModels;
+            const persistedState = keyStateFor(entry.apiKey.trim());
+            const enabled = persistedState?.enabled !== false && persistedState?.status !== 'disabled';
+            const stateText = persistedState?.status === 'frozen' && persistedState.frozen_until
+              ? `冷却 ${Math.max(0, Math.ceil((new Date(persistedState.frozen_until).getTime() - Date.now()) / 1000))}s`
+              : persistedState?.status === 'disabled'
+                ? '禁用'
+                : persistedState?.status === 'error'
+                  ? '异常'
+                  : '激活';
+            const clickableState = stateText !== '激活';
 
             return (
               <div key={index} className={styles.keyTableRow}>
@@ -439,6 +506,25 @@ export function AiProvidersOpenAIEditPage() {
                   title={keyTestStatuses[index]?.message || ''}
                 >
                   <StatusIcon status={keyStatus} />
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => clickableState && void openStateDetail(entry)}
+                    disabled={!clickableState}
+                    title={persistedState?.status_message || persistedState?.last_error || ''}
+                  >
+                    {stateText}
+                  </button>
+                </div>
+
+                <div className={styles.keyTableColStatus}>
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(event) => void toggleKeyEnabled(entry, event.target.checked)}
+                    disabled={saving || disableControls || isTestingKeys || !entry.apiKey.trim()}
+                    aria-label="启用 API Key"
+                  />
                 </div>
 
                 {/* Key 输入框 */}
@@ -688,11 +774,64 @@ export function AiProvidersOpenAIEditPage() {
                 <label className={styles.keyEntriesTitle}>{t('ai_providers.openai_add_modal_keys_label')}</label>
                 <span className={styles.keyEntriesHint}>{t('ai_providers.openai_keys_hint')}</span>
               </div>
+              <textarea
+                className="input"
+                rows={5}
+                value={bulkText}
+                onChange={(event) => setBulkText(event.target.value)}
+                placeholder={'批量添加：每行 key 或 key proxy-url'}
+                disabled={saving || disableControls || isTestingKeys}
+              />
+              <div className={styles.sectionHint}>
+                可新增 {bulkPreview.add} 条 / 已存在重复 {bulkPreview.exists} 条 / 本次输入重复 {bulkPreview.duplicate} 条 / 格式错误 {bulkPreview.invalid} 条
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={applyBulkAdd}
+                disabled={saving || disableControls || isTestingKeys || bulkPreview.add === 0}
+              >
+                批量添加
+              </Button>
               {renderKeyEntries(form.apiKeyEntries)}
+            </div>
+
+            <div className={styles.keyEntriesSection}>
+              <div className={styles.keyEntriesHeader}>
+                <label className={styles.keyEntriesTitle}>status-rulers</label>
+                <span className={styles.keyEntriesHint}>示例：401 + json-path message 等于 Wrong API Key {'->'} freeze-24h；action 支持 disable、freeze-24h、freeze-10m、freeze-30s。</span>
+              </div>
+              <textarea
+                className="input"
+                rows={10}
+                value={JSON.stringify(form.statusRulers ?? [], null, 2)}
+                onChange={(event) => {
+                  try {
+                    const parsed = JSON.parse(event.target.value);
+                    if (Array.isArray(parsed)) {
+                      setForm((prev) => ({ ...prev, statusRulers: parsed }));
+                    }
+                  } catch {
+                    // 输入未完成时不覆盖当前有效规则。
+                  }
+                }}
+                disabled={saving || disableControls || isTestingKeys}
+              />
             </div>
           </div>
         )}
       </Card>
+      {detailState && (
+        <Card>
+          <div className={styles.keyEntriesHeader}>
+            <label className={styles.keyEntriesTitle}>Key 状态详情</label>
+            <Button variant="ghost" size="sm" onClick={() => setDetailState(null)}>关闭</Button>
+          </div>
+          <pre>{detailState.last_error || detailState.status_message}</pre>
+          <pre>{detailState.raw_request}</pre>
+          <pre>{detailState.raw_response}</pre>
+        </Card>
+      )}
     </SecondaryScreenShell>
   );
 }

@@ -256,6 +256,51 @@ func (m *Manager) RefreshSchedulerEntry(authID string) {
 	m.scheduler.upsertAuth(snapshot)
 }
 
+// MarkQuotaRecovered clears quota/runtime cooldown state and immediately returns the auth to scheduling.
+func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
+	if m == nil || authID == "" {
+		return
+	}
+	now := time.Now()
+	var snapshot *Auth
+	m.mu.Lock()
+	auth, ok := m.auths[authID]
+	if ok && auth != nil {
+		auth.Unavailable = false
+		auth.NextRetryAfter = time.Time{}
+		auth.Quota = QuotaState{}
+		auth.Status = StatusActive
+		auth.StatusMessage = ""
+		auth.LastError = nil
+		for _, state := range auth.ModelStates {
+			if state == nil {
+				continue
+			}
+			state.Unavailable = false
+			state.NextRetryAfter = time.Time{}
+			state.Quota = QuotaState{}
+			state.Status = StatusActive
+			state.StatusMessage = ""
+			state.LastError = nil
+			state.UpdatedAt = now
+		}
+		auth.UpdatedAt = now
+		snapshot = auth.Clone()
+	}
+	m.mu.Unlock()
+	if snapshot == nil {
+		return
+	}
+	if err := m.persist(ctx, snapshot); err != nil {
+		logEntryWithRequestID(ctx).WithField("auth_id", snapshot.ID).Warnf("failed to persist quota recovery: %v", err)
+	}
+	if m.scheduler != nil {
+		m.scheduler.upsertAuth(snapshot)
+	}
+	m.queueRefreshReschedule(snapshot.ID)
+	m.hook.OnAuthUpdated(ctx, snapshot.Clone())
+}
+
 // ReconcileRegistryModelStates aligns per-model runtime state with the current
 // registry snapshot for one auth.
 //

@@ -114,6 +114,7 @@ const buildOpenAIBaseline = (form: OpenAIFormState, testModel: string): OpenAIEd
   apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
   models: normalizeModelEntries(form.modelEntries),
   testModel: String(testModel ?? '').trim(),
+  statusRulers: form.statusRulers ?? [],
 });
 
 const areNormalizedApiKeyEntriesEqual = (
@@ -306,6 +307,7 @@ export function AiProvidersOpenAIEditLayout() {
         apiKeyEntries: initialData.apiKeyEntries?.length
           ? initialData.apiKeyEntries
           : [buildApiKeyEntry()],
+        statusRulers: initialData.statusRulers ?? [],
       };
 
       const available = modelEntries.map((entry) => entry.name.trim()).filter(Boolean);
@@ -425,6 +427,7 @@ export function AiProvidersOpenAIEditLayout() {
       baseline.prefix !== form.prefix.trim() ||
       baseline.baseUrl !== form.baseUrl.trim() ||
       baseline.testModel !== normalizedTestModel ||
+      JSON.stringify(baseline.statusRulers ?? []) !== JSON.stringify(form.statusRulers ?? []) ||
       isHeadersDirty ||
       isApiKeyEntriesDirty ||
       isModelsDirty);
@@ -485,6 +488,7 @@ export function AiProvidersOpenAIEditLayout() {
       if (resolvedTestModel) payload.testModel = resolvedTestModel;
       const models = entriesToModels(form.modelEntries);
       if (models.length) payload.models = models;
+      if (form.statusRulers?.length) payload.statusRulers = form.statusRulers;
 
       const nextList =
         editIndex !== null

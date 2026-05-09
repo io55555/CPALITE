@@ -30,7 +30,9 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/openai_compat_state"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers"
@@ -271,6 +273,8 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	managementasset.SetCurrentConfig(cfg)
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
+	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	applySignatureCacheConfig(nil, cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
@@ -279,6 +283,18 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	logDir := logging.ResolveLogDirectory(cfg)
 	s.mgmt.SetLogDirectory(logDir)
+	if cfg.UsageStatisticsEnabled {
+		if err := usage.InitDefaultStoreInLogDir(logDir); err != nil {
+			log.WithError(err).Warn("usage store unavailable")
+		}
+	}
+	if len(cfg.OpenAICompatibility) > 0 {
+		if err := openai_compat_state.InitDefault(filepath.Join(logDir, "openai_compat_key_state.db")); err != nil {
+			log.WithError(err).Warn("openai compatibility key state unavailable")
+		}
+	}
+	s.mgmt.SetUsageStore(usage.DefaultStore())
+	s.mgmt.SetOpenAICompatKeyState(openai_compat_state.DefaultService())
 	if optionState.postAuthHook != nil {
 		s.mgmt.SetPostAuthHook(optionState.postAuthHook)
 	}
@@ -623,6 +639,11 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/openai-compatibility", s.mgmt.PutOpenAICompat)
 		mgmt.PATCH("/openai-compatibility", s.mgmt.PatchOpenAICompat)
 		mgmt.DELETE("/openai-compatibility", s.mgmt.DeleteOpenAICompat)
+		mgmt.GET("/openai-compatibility/key-states", s.mgmt.GetOpenAICompatKeyStates)
+		mgmt.PATCH("/openai-compatibility/key-state", s.mgmt.PatchOpenAICompatKeyState)
+		mgmt.GET("/openai-compatibility/key-state/detail", s.mgmt.GetOpenAICompatKeyStateDetail)
+		mgmt.POST("/openai-compatibility/test-key", s.mgmt.TestOpenAICompatKey)
+		mgmt.POST("/openai-compatibility/test-all", s.mgmt.TestAllOpenAICompatKeys)
 
 		mgmt.GET("/vertex-api-key", s.mgmt.GetVertexCompatKeys)
 		mgmt.PUT("/vertex-api-key", s.mgmt.PutVertexCompatKeys)
@@ -641,6 +662,9 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/auth-files", s.mgmt.ListAuthFiles)
 		mgmt.GET("/auth-files/models", s.mgmt.GetAuthFileModels)
+		mgmt.GET("/auth-refresh-queue", s.mgmt.GetAuthRefreshQueue)
+		mgmt.GET("/usage/statistics", s.mgmt.GetUsageStatistics)
+		mgmt.DELETE("/usage/records", s.mgmt.DeleteUsageRecords)
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
 		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)
 		mgmt.POST("/auth-files", s.mgmt.UploadAuthFile)
@@ -931,6 +955,8 @@ func (s *Server) Stop(ctx context.Context) error {
 	if err := s.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", err)
 	}
+	_ = usage.CloseDefaultStore()
+	_ = openai_compat_state.CloseDefault()
 
 	log.Debug("API server stopped")
 	return nil

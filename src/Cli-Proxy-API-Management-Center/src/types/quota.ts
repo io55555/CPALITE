@@ -236,12 +236,16 @@ export interface CodexQuotaWindow {
   labelParams?: Record<string, string | number>;
   usedPercent: number | null;
   resetLabel: string;
+  resetAtUnix?: number | null;
+  windowSeconds?: number | null;
+  windowKind?: 'five-hour' | 'weekly' | 'other';
 }
 
 export interface CodexQuotaState {
   status: 'idle' | 'loading' | 'success' | 'error';
   windows: CodexQuotaWindow[];
   planType?: string | null;
+  refreshedAtMs?: number;
   error?: string;
   errorStatus?: number;
 }

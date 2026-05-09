@@ -121,6 +121,12 @@ type Config struct {
 	// OpenAICompatibility defines OpenAI API compatibility configurations for external providers.
 	OpenAICompatibility []OpenAICompatibility `yaml:"openai-compatibility" json:"openai-compatibility"`
 
+	// QuotaRecoveryRefreshIntervalSeconds controls periodic refresh for non-disabled quota-exhausted accounts.
+	QuotaRecoveryRefreshIntervalSeconds int `yaml:"quota-recovery-refresh-interval-seconds,omitempty" json:"quota-recovery-refresh-interval-seconds,omitempty"`
+
+	// QuotaRecoveryRefreshWorkers limits concurrent quota recovery refresh jobs.
+	QuotaRecoveryRefreshWorkers int `yaml:"quota-recovery-refresh-workers,omitempty" json:"quota-recovery-refresh-workers,omitempty"`
+
 	// VertexCompatAPIKey defines Vertex AI-compatible API key configurations for third-party providers.
 	// Used for services that use Vertex AI-style paths but with simple API key authentication.
 	VertexCompatAPIKey []VertexCompatKey `yaml:"vertex-api-key" json:"vertex-api-key"`
@@ -543,6 +549,9 @@ type OpenAICompatibility struct {
 
 	// Headers optionally adds extra HTTP headers for requests sent to this provider.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+
+	// StatusRulers defines response rules that disable or cool down API keys.
+	StatusRulers []OpenAICompatibilityStatusRuler `yaml:"status-rulers,omitempty" json:"status-rulers,omitempty"`
 }
 
 // OpenAICompatibilityAPIKey represents an API key configuration with optional proxy setting.
@@ -552,6 +561,21 @@ type OpenAICompatibilityAPIKey struct {
 
 	// ProxyURL overrides the global proxy setting for this API key if provided.
 	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+}
+
+// OpenAICompatibilityStatusRuler describes how a provider response updates key status.
+type OpenAICompatibilityStatusRuler struct {
+	Name   string                             `yaml:"name" json:"name"`
+	When   OpenAICompatibilityStatusRulerWhen `yaml:"when" json:"when"`
+	Action string                             `yaml:"action" json:"action"`
+}
+
+// OpenAICompatibilityStatusRulerWhen describes the matching condition.
+type OpenAICompatibilityStatusRulerWhen struct {
+	Status     int    `yaml:"status" json:"status"`
+	JSONPath   string `yaml:"json-path,omitempty" json:"json-path,omitempty"`
+	JSONEquals string `yaml:"json-equals,omitempty" json:"json-equals,omitempty"`
+	BodyEquals string `yaml:"body-equals,omitempty" json:"body-equals,omitempty"`
 }
 
 // OpenAICompatibilityModel represents a model configuration for OpenAI compatibility,

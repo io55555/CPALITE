@@ -262,6 +262,9 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
   if (models.length) result.models = models;
   if (priority !== undefined) result.priority = Number(priority);
   if (testModel) result.testModel = String(testModel);
+  if (Array.isArray(provider['status-rulers'])) {
+    result.statusRulers = provider['status-rulers'] as OpenAIProviderConfig['statusRulers'];
+  }
   const authIndex = normalizeAuthIndex(
     provider['auth-index'] ?? provider.authIndex ?? provider['auth_index']
   );

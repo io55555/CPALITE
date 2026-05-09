@@ -19,6 +19,7 @@ buildlog/
 开发计划*.txt
 无用备份文件/
 src--*/
+进度*.txt
 
 # Python
 __pycache__/

@@ -186,6 +186,14 @@ export function IconTrash2({ size = 20, ...props }: IconProps) {
   );
 }
 
+export function IconMinus({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} {...props}>
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
 export function IconChevronUp({ size = 20, ...props }: IconProps) {
   return (
     <svg {...baseSvgProps} width={size} height={size} {...props}>
@@ -406,6 +414,19 @@ export function IconSidebarAuthFiles({ size = 20, ...props }: IconProps) {
   );
 }
 
+export function IconSidebarCredentialCenter({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M8 9h8" />
+      <path d="M8 13h5" />
+      <circle cx="16" cy="14" r="2" fill="currentColor" fillOpacity="0.12" />
+      <path d="M16 12v4" />
+      <path d="M14 14h4" />
+    </svg>
+  );
+}
+
 export function IconSidebarOauth({ size = 20, ...props }: IconProps) {
   return (
     <svg {...sidebarSvgProps} width={size} height={size} {...props}>
@@ -438,6 +459,18 @@ export function IconSidebarLogs({ size = 20, ...props }: IconProps) {
       <circle cx="7.8" cy="6.2" r="0.8" fill="currentColor" fillOpacity="0.4" stroke="none" />
       <path d="M7 12l3 2.5-3 2.5" />
       <path d="M13 17h4" />
+    </svg>
+  );
+}
+
+export function IconSidebarMonitoring({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+      <path d="M4 20h16" />
+      <rect x="5" y="12.5" width="3.2" height="7.5" rx="0.6" />
+      <rect x="10.4" y="8" width="3.2" height="12" rx="0.6" fill="currentColor" fillOpacity="0.12" />
+      <rect x="15.8" y="5" width="3.2" height="15" rx="0.6" />
+      <path d="M5 9.5l4-2.7 3.4 2.2 5.6-4.5" />
     </svg>
   );
 }

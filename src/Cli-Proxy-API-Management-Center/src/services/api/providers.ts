@@ -13,7 +13,8 @@ import type {
   OpenAIProviderConfig,
   ProviderKeyConfig,
   ApiKeyEntry,
-  ModelAlias
+  ModelAlias,
+  OpenAIKeyState
 } from '@/types';
 
 const serializeHeaders = (headers?: Record<string, string>) => (headers && Object.keys(headers).length ? headers : undefined);
@@ -152,6 +153,7 @@ const serializeOpenAIProvider = (provider: OpenAIProviderConfig) => {
   if (models && models.length) payload.models = models;
   if (provider.priority !== undefined) payload.priority = provider.priority;
   if (provider.testModel) payload['test-model'] = provider.testModel;
+  if (Array.isArray(provider.statusRulers)) payload['status-rulers'] = provider.statusRulers;
   return payload;
 };
 
@@ -232,5 +234,25 @@ export const providersApi = {
     apiClient.patch('/openai-compatibility', { index, value: { disabled } }),
 
   deleteOpenAIProvider: (name: string) =>
-    apiClient.delete(`/openai-compatibility?name=${encodeURIComponent(name)}`)
+    apiClient.delete(`/openai-compatibility?name=${encodeURIComponent(name)}`),
+
+  getOpenAIKeyStates: (): Promise<OpenAIKeyState[]> =>
+    apiClient.get('/openai-compatibility/key-states'),
+
+  updateOpenAIKeyState: (providerName: string, apiKey: string, enabled: boolean): Promise<OpenAIKeyState> =>
+    apiClient.patch('/openai-compatibility/key-state', {
+      provider_name: providerName,
+      api_key: apiKey,
+      enabled,
+    }),
+
+  getOpenAIKeyStateDetail: (providerName: string, apiKey: string): Promise<OpenAIKeyState> =>
+    apiClient.get(`/openai-compatibility/key-state/detail?provider_name=${encodeURIComponent(providerName)}&api_key=${encodeURIComponent(apiKey)}`),
+
+  testOpenAIKey: (providerName: string, apiKey: string, proxyUrl?: string): Promise<{ ok: boolean; error?: string; status?: number }> =>
+    apiClient.post('/openai-compatibility/test-key', {
+      provider_name: providerName,
+      api_key: apiKey,
+      proxy_url: proxyUrl ?? '',
+    })
 };

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/openai_compat_state"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/diff"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 )
@@ -238,6 +239,9 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 				Attributes: attrs,
 				CreatedAt:  now,
 				UpdatedAt:  now,
+			}
+			if stateService := openai_compat_state.DefaultService(); stateService != nil {
+				stateService.ApplyToAuth(a)
 			}
 			out = append(out, a)
 			createdEntries++

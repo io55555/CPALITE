@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/openai_compat_state"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
@@ -126,6 +127,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs)
+	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -160,6 +162,8 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
+		e.applyKeyStatusRulers(auth, apiKey, httpResp.StatusCode, b, rawRequest, rawResponse)
 		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
 		return resp, err
 	}
@@ -231,6 +235,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs)
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Cache-Control", "no-cache")
+	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -260,6 +265,8 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
+		e.applyKeyStatusRulers(auth, apiKey, httpResp.StatusCode, b, rawRequest, rawResponse)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
@@ -417,6 +424,15 @@ func (e *OpenAICompatExecutor) resolveCompatConfig(auth *cliproxyauth.Auth) *con
 		}
 	}
 	return nil
+}
+
+func (e *OpenAICompatExecutor) applyKeyStatusRulers(auth *cliproxyauth.Auth, apiKey string, status int, body []byte, rawRequest, rawResponse string) {
+	service := openai_compat_state.DefaultService()
+	compat := e.resolveCompatConfig(auth)
+	if service == nil || compat == nil || strings.TrimSpace(apiKey) == "" {
+		return
+	}
+	service.ApplyRulers(*compat, apiKey, status, body, rawRequest, rawResponse)
 }
 
 func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byte {

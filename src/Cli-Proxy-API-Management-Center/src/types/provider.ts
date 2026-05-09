@@ -17,6 +17,30 @@ export interface ApiKeyEntry {
   authIndex?: string;
 }
 
+export interface OpenAIStatusRuler {
+  name: string;
+  when: {
+    status: number;
+    'json-path'?: string;
+    'json-equals'?: string;
+    'body-equals'?: string;
+  };
+  action: string;
+}
+
+export interface OpenAIKeyState {
+  provider_name: string;
+  api_key: string;
+  enabled: boolean;
+  status: string;
+  status_message?: string;
+  frozen_until?: string;
+  last_error?: string;
+  raw_request?: string;
+  raw_response?: string;
+  updated_at?: string;
+}
+
 export interface CloakConfig {
   mode?: string;
   strictMode?: boolean;
@@ -59,6 +83,7 @@ export interface OpenAIProviderConfig {
   models?: ModelAlias[];
   priority?: number;
   testModel?: string;
+  statusRulers?: OpenAIStatusRuler[];
   authIndex?: string;
   [key: string]: unknown;
 }

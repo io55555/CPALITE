@@ -12,6 +12,7 @@ import type { SetStateAction } from 'react';
 import { create } from 'zustand';
 import type { OpenAIFormState } from '@/components/providers/types';
 import { buildApiKeyEntry } from '@/components/providers/utils';
+import type { OpenAIStatusRuler } from '@/types';
 
 export type OpenAITestStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -33,6 +34,7 @@ export type OpenAIEditBaseline = {
   }>;
   models: Array<{ name: string; alias: string }>;
   testModel: string;
+  statusRulers?: OpenAIStatusRuler[];
 };
 
 export type OpenAIEditDraft = {
@@ -73,6 +75,7 @@ const buildEmptyForm = (): OpenAIFormState => ({
   apiKeyEntries: [buildApiKeyEntry()],
   modelEntries: [{ name: '', alias: '' }],
   testModel: undefined,
+  statusRulers: [],
 });
 
 const buildEmptyDraft = (): OpenAIEditDraft => ({

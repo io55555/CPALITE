@@ -13,9 +13,12 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/authrecovery"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/openai_compat_state"
 	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
+	internalusage "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/wsrelay"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
@@ -711,6 +714,7 @@ func (s *Service) Run(ctx context.Context) error {
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(context.Background(), interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
+		authrecovery.Start(ctx, s.cfg, s.coreManager)
 	}
 
 	select {
@@ -789,6 +793,12 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		}
 
 		usage.StopDefault()
+		if err := internalusage.CloseDefaultStore(); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
+		if err := openai_compat_state.CloseDefault(); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
 	})
 	return shutdownErr
 }

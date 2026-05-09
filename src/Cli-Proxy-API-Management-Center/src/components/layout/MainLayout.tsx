@@ -14,6 +14,7 @@ import { PageTransition } from '@/components/common/PageTransition';
 import { MainRoutes } from '@/router/MainRoutes';
 import {
   IconSidebarAuthFiles,
+  IconSidebarCredentialCenter,
   IconSidebarConfig,
   IconSidebarDashboard,
   IconSidebarLogs,
@@ -21,6 +22,7 @@ import {
   IconSidebarProviders,
   IconSidebarQuota,
   IconSidebarSystem,
+  IconSidebarMonitoring,
 } from '@/components/ui/icons';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
 import {
@@ -41,6 +43,8 @@ const sidebarIcons: Record<string, ReactNode> = {
   authFiles: <IconSidebarAuthFiles size={18} />,
   oauth: <IconSidebarOauth size={18} />,
   quota: <IconSidebarQuota size={18} />,
+  monitoring: <IconSidebarMonitoring size={18} />,
+  credentialCenter: <IconSidebarCredentialCenter size={18} />,
   config: <IconSidebarConfig size={18} />,
   logs: <IconSidebarLogs size={18} />,
   system: <IconSidebarSystem size={18} />,
@@ -391,6 +395,8 @@ export function MainLayout() {
     { path: '/auth-files', label: t('nav.auth_files'), icon: sidebarIcons.authFiles },
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
     { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },
+    { path: '/monitor', label: t('nav.monitoring_center'), icon: sidebarIcons.monitoring },
+    { path: '/credential-center', label: t('nav.credential_center'), icon: sidebarIcons.credentialCenter },
     ...(config?.loggingToFile
       ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }]
       : []),
