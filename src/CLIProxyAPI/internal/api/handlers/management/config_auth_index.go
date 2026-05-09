@@ -51,9 +51,9 @@ func (h *Handler) liveAuthIndexByID() map[string]string {
 	if h == nil {
 		return out
 	}
-	h.mu.RLock()
+	h.mu.Lock()
 	manager := h.authManager
-	h.mu.RUnlock()
+	h.mu.Unlock()
 	if manager == nil {
 		return out
 	}

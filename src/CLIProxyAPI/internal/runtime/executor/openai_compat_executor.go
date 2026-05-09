@@ -164,6 +164,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
 		e.applyKeyStatusRulers(auth, apiKey, httpResp.StatusCode, b, rawRequest, rawResponse)
+		reporter.PublishFailure(ctx)
 		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
 		return resp, err
 	}
@@ -267,6 +268,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
 		e.applyKeyStatusRulers(auth, apiKey, httpResp.StatusCode, b, rawRequest, rawResponse)
+		reporter.PublishFailure(ctx)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
@@ -432,7 +434,9 @@ func (e *OpenAICompatExecutor) applyKeyStatusRulers(auth *cliproxyauth.Auth, api
 	if service == nil || compat == nil || strings.TrimSpace(apiKey) == "" {
 		return
 	}
-	service.ApplyRulers(*compat, apiKey, status, body, rawRequest, rawResponse)
+	if _, matched := service.ApplyRulers(*compat, apiKey, status, body, rawRequest, rawResponse); !matched {
+		service.MarkError(compat.Name, apiKey, string(body), rawRequest, rawResponse)
+	}
 }
 
 func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byte {

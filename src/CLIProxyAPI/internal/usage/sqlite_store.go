@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -15,7 +16,13 @@ import (
 const sqliteTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 type SQLiteStore struct {
-	db *sql.DB
+	db        *sql.DB
+	mu        sync.Mutex
+	pending   []Record
+	wake      chan struct{}
+	done      chan struct{}
+	stopped   chan struct{}
+	closeOnce sync.Once
 }
 
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
@@ -29,8 +36,13 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("usage sqlite open: %w", err)
 	}
-	db.SetMaxOpenConns(1)
-	store := &SQLiteStore{db: db}
+	db.SetMaxOpenConns(4)
+	store := &SQLiteStore{
+		db:      db,
+		wake:    make(chan struct{}, 1),
+		done:    make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
 	if err := store.initSchema(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -39,6 +51,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	go store.writer()
 	return store, nil
 }
 
@@ -79,6 +92,9 @@ func restrictSQLiteDBFile(path string) error {
 
 func (s *SQLiteStore) initSchema(ctx context.Context) error {
 	statements := []string{
+		`PRAGMA journal_mode=WAL`,
+		`PRAGMA synchronous=NORMAL`,
+		`PRAGMA busy_timeout=5000`,
 		`CREATE TABLE IF NOT EXISTS usage_records (
 	id TEXT PRIMARY KEY,
 	timestamp TEXT NOT NULL,
@@ -119,17 +135,99 @@ func (s *SQLiteStore) Insert(ctx context.Context, record Record) error {
 	if strings.TrimSpace(record.ID) == "" {
 		return fmt.Errorf("usage record id is empty")
 	}
+	if record.Timestamp.IsZero() {
+		record.Timestamp = time.Now()
+	}
+	record.Tokens = nonNegativeTokenStats(record.Tokens)
+	record.Tokens.TotalTokens = normalizeTotalTokens(record.Tokens)
 
-	tokens := nonNegativeTokenStats(record.Tokens)
-	tokens.TotalTokens = normalizeTotalTokens(tokens)
+	s.mu.Lock()
+	s.pending = append(s.pending, record)
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
 
-	_, err := s.db.ExecContext(ctx, `
+func (s *SQLiteStore) writer() {
+	ticker := time.NewTicker(time.Second)
+	defer func() {
+		ticker.Stop()
+		close(s.stopped)
+	}()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-s.wake:
+		case <-ticker.C:
+		}
+		select {
+		case <-ticker.C:
+		case <-s.done:
+			return
+		}
+		s.flush(context.Background())
+	}
+}
+
+func (s *SQLiteStore) flush(ctx context.Context) {
+	if s == nil || s.db == nil {
+		return
+	}
+	s.mu.Lock()
+	pending := s.pending
+	s.pending = nil
+	s.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		s.restorePending(pending)
+		return
+	}
+	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO usage_records (
 	id, timestamp, api_key, provider, model, source, auth_index, auth_type, endpoint, request_id,
 	latency_ms, first_byte_latency_ms, generation_ms, thinking_effort,
 	input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`,
+`)
+	if err != nil {
+		_ = tx.Rollback()
+		s.restorePending(pending)
+		return
+	}
+	for _, record := range pending {
+		if err := execInsert(stmt, record); err != nil {
+			_ = stmt.Close()
+			_ = tx.Rollback()
+			s.restorePending(pending)
+			return
+		}
+	}
+	_ = stmt.Close()
+	if err := tx.Commit(); err != nil {
+		s.restorePending(pending)
+	}
+}
+
+func (s *SQLiteStore) restorePending(records []Record) {
+	if len(records) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.pending = append(records, s.pending...)
+	s.mu.Unlock()
+}
+
+func execInsert(stmt *sql.Stmt, record Record) error {
+	tokens := nonNegativeTokenStats(record.Tokens)
+	tokens.TotalTokens = normalizeTotalTokens(tokens)
+	_, err := stmt.ExecContext(context.Background(),
 		strings.TrimSpace(record.ID),
 		formatSQLiteRecordTimestamp(record.Timestamp),
 		strings.TrimSpace(record.APIKey),
@@ -227,16 +325,16 @@ FROM usage_records`
 		detail.FirstByteLatencyMs = nonNegative(detail.FirstByteLatencyMs)
 		detail.GenerationMs = nonNegative(detail.GenerationMs)
 		detail.Failed = failedInt != 0
-
-		key := groupingKey(apiKey, endpoint, provider)
-		modelKey := normalizeModel(model)
-		if result[key] == nil {
-			result[key] = map[string][]RequestDetail{}
-		}
-		result[key][modelKey] = append(result[key][modelKey], detail)
+		addUsageDetail(result, apiKey, endpoint, provider, model, detail)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("usage sqlite rows: %w", err)
+	}
+	for _, record := range s.pendingSnapshot() {
+		if !recordInRange(record, rng) {
+			continue
+		}
+		addRecordToUsage(result, record)
 	}
 	return result, nil
 }
@@ -247,9 +345,34 @@ func (s *SQLiteStore) Delete(ctx context.Context, ids []string) (DeleteResult, e
 		result.Missing = append(result.Missing, ids...)
 		return result, nil
 	}
+	removePending := make(map[string]struct{}, len(ids))
+	deletedPending := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			removePending[id] = struct{}{}
+		}
+	}
+	if len(removePending) > 0 {
+		s.mu.Lock()
+		kept := s.pending[:0]
+		for _, record := range s.pending {
+			if _, ok := removePending[strings.TrimSpace(record.ID)]; ok {
+				result.Deleted++
+				deletedPending[strings.TrimSpace(record.ID)] = struct{}{}
+				delete(removePending, strings.TrimSpace(record.ID))
+				continue
+			}
+			kept = append(kept, record)
+		}
+		s.pending = kept
+		s.mu.Unlock()
+	}
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if id == "" {
+			continue
+		}
+		if _, ok := deletedPending[id]; ok {
 			continue
 		}
 		res, err := s.db.ExecContext(ctx, "DELETE FROM usage_records WHERE id = ?", id)
@@ -273,7 +396,61 @@ func (s *SQLiteStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	s.closeOnce.Do(func() {
+		close(s.done)
+		<-s.stopped
+	})
+	s.flush(context.Background())
 	return s.db.Close()
+}
+
+func (s *SQLiteStore) pendingSnapshot() []Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Record(nil), s.pending...)
+}
+
+func recordInRange(record Record, rng QueryRange) bool {
+	ts := record.Timestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	if rng.Start != nil && !rng.Start.IsZero() && ts.Before(*rng.Start) {
+		return false
+	}
+	if rng.End != nil && !rng.End.IsZero() && !ts.Before(*rng.End) {
+		return false
+	}
+	return true
+}
+
+func addRecordToUsage(result APIUsage, record Record) {
+	detail := RequestDetail{
+		ID:                 strings.TrimSpace(record.ID),
+		Timestamp:          record.Timestamp.UTC(),
+		LatencyMs:          nonNegative(record.LatencyMs),
+		FirstByteLatencyMs: nonNegative(record.FirstByteLatencyMs),
+		GenerationMs:       nonNegative(record.GenerationMs),
+		Source:             strings.TrimSpace(record.Source),
+		AuthIndex:          strings.TrimSpace(record.AuthIndex),
+		ThinkingEffort:     strings.TrimSpace(record.ThinkingEffort),
+		Tokens:             nonNegativeTokenStats(record.Tokens),
+		Failed:             record.Failed,
+	}
+	if detail.Timestamp.IsZero() {
+		detail.Timestamp = time.Now().UTC()
+	}
+	detail.Tokens.TotalTokens = normalizeTotalTokens(detail.Tokens)
+	addUsageDetail(result, record.APIKey, record.Endpoint, record.Provider, record.Model, detail)
+}
+
+func addUsageDetail(result APIUsage, apiKey, endpoint, provider, model string, detail RequestDetail) {
+	key := groupingKey(apiKey, endpoint, provider)
+	modelKey := normalizeModel(model)
+	if result[key] == nil {
+		result[key] = map[string][]RequestDetail{}
+	}
+	result[key][modelKey] = append(result[key][modelKey], detail)
 }
 
 func formatSQLiteTimestamp(timestamp time.Time) string {

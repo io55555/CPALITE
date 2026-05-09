@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { HeaderInputList } from '@/components/ui/HeaderInputList';
 import { Input } from '@/components/ui/Input';
+import { Modal } from '@/components/ui/Modal';
 import { ModelInputList } from '@/components/ui/ModelInputList';
 import { Select } from '@/components/ui/Select';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
@@ -19,6 +20,8 @@ import styles from './AiProvidersPage.module.scss';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 
 const OPENAI_TEST_TIMEOUT_MS = 30_000;
+const openAIKeyStateKey = (providerName: string, apiKey: string) =>
+  `${providerName.trim().toLowerCase()}::${apiKey.trim()}`;
 
 const getErrorMessage = (err: unknown) => {
   if (err instanceof Error) return err.message;
@@ -134,7 +137,7 @@ export function AiProvidersOpenAIEditPage() {
       const states = await providersApi.getOpenAIKeyStates();
       const next: Record<string, OpenAIKeyState> = {};
       states.forEach((state) => {
-        next[`${state.provider_name}::${state.api_key}`] = state;
+        next[openAIKeyStateKey(state.provider_name, state.api_key)] = state;
       });
       setKeyStates(next);
     } catch {
@@ -149,12 +152,16 @@ export function AiProvidersOpenAIEditPage() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (detailState) {
+          setDetailState(null);
+          return;
+        }
         handleBack();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleBack]);
+  }, [detailState, handleBack]);
 
   const canSave = !disableControls && !loading && !saving && !invalidIndexParam && !invalidIndex && !isTestingKeys;
   const hasConfiguredModels = form.modelEntries.some((entry) => entry.name.trim());
@@ -378,7 +385,7 @@ export function AiProvidersOpenAIEditPage() {
   };
 
   const keyStateFor = useCallback(
-    (apiKey: string) => keyStates[`${form.name}::${apiKey}`],
+    (apiKey: string) => keyStates[openAIKeyStateKey(form.name, apiKey)],
     [form.name, keyStates]
   );
 
@@ -386,7 +393,7 @@ export function AiProvidersOpenAIEditPage() {
     async (entry: ApiKeyEntry, enabled: boolean) => {
       if (!entry.apiKey.trim()) return;
       const state = await providersApi.updateOpenAIKeyState(form.name, entry.apiKey.trim(), enabled);
-      setKeyStates((prev) => ({ ...prev, [`${state.provider_name}::${state.api_key}`]: state }));
+      setKeyStates((prev) => ({ ...prev, [openAIKeyStateKey(state.provider_name, state.api_key)]: state }));
     },
     [form.name]
   );
@@ -839,17 +846,29 @@ export function AiProvidersOpenAIEditPage() {
           </div>
         )}
       </Card>
-      {detailState && (
-        <Card>
-          <div className={styles.keyEntriesHeader}>
-            <label className={styles.keyEntriesTitle}>Key 状态详情</label>
-            <Button variant="ghost" size="sm" onClick={() => setDetailState(null)}>关闭</Button>
+      <Modal
+        open={Boolean(detailState)}
+        title="Key 状态详情"
+        width={920}
+        onClose={() => setDetailState(null)}
+        footer={
+          <Button variant="secondary" size="sm" onClick={() => setDetailState(null)}>
+            关闭
+          </Button>
+        }
+      >
+        {detailState && (
+          <div className={styles.keyStateDetail}>
+            <div className={styles.sectionHint}>
+              {detailState.status_message || detailState.last_error || '无错误详情'}
+            </div>
+            <label className={styles.keyEntriesTitle}>原始请求包</label>
+            <pre>{detailState.raw_request || '无'}</pre>
+            <label className={styles.keyEntriesTitle}>原始响应包</label>
+            <pre>{detailState.raw_response || '无'}</pre>
           </div>
-          <pre>{detailState.last_error || detailState.status_message}</pre>
-          <pre>{detailState.raw_request}</pre>
-          <pre>{detailState.raw_response}</pre>
-        </Card>
-      )}
+        )}
+      </Modal>
     </SecondaryScreenShell>
   );
 }

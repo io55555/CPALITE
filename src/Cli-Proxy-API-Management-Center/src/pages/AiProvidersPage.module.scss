@@ -669,6 +669,33 @@ $openai-toolbar-control-height: 36px;
   }
 }
 
+.apiKeyEntryState {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.apiKeyEntryStateActive {
+  background: var(--success-badge-bg, #d1fae5);
+  color: var(--success-badge-text, #065f46);
+}
+
+.apiKeyEntryStateFrozen {
+  background: var(--warning-badge-bg, #fef3c7);
+  color: var(--warning-badge-text, #92400e);
+}
+
+.apiKeyEntryStateDisabled,
+.apiKeyEntryStateError {
+  background: var(--failure-badge-bg);
+  color: var(--failure-badge-text);
+}
+
 .apiKeyEntryStats {
   display: flex;
   gap: 6px;
@@ -1201,6 +1228,27 @@ $openai-toolbar-control-height: 36px;
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+.keyStateDetail {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+
+  pre {
+    max-height: 280px;
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    padding: $spacing-sm;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.5;
+  }
 }
 
 .keyEntriesList {

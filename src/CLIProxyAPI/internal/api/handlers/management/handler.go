@@ -38,7 +38,7 @@ const attemptMaxIdleTime = 2 * time.Hour
 type Handler struct {
 	cfg                 *config.Config
 	configFilePath      string
-	mu                  sync.RWMutex
+	mu                  sync.Mutex
 	attemptsMu          sync.Mutex
 	failedAttempts      map[string]*attemptInfo // keyed by client IP
 	authManager         *coreauth.Manager
@@ -141,8 +141,8 @@ func (h *Handler) currentUsageStore() usage.Store {
 	if h == nil {
 		return nil
 	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.usageStore
 }
 
@@ -236,7 +236,6 @@ func (h *Handler) AuthenticateManagementKey(clientIP string, localClient bool, p
 		return false, http.StatusForbidden, "remote management disabled"
 	}
 
-	h.mu.RLock()
 	cfg := h.cfg
 	var (
 		allowRemote bool
@@ -250,7 +249,6 @@ func (h *Handler) AuthenticateManagementKey(clientIP string, localClient bool, p
 		allowRemote = true
 	}
 	envSecret := h.envSecret
-	h.mu.RUnlock()
 
 	now := time.Now()
 	h.attemptsMu.Lock()

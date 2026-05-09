@@ -16,7 +16,8 @@ import {
 } from '@/components/ui/icons';
 import iconOpenaiLight from '@/assets/icons/openai-light.svg';
 import iconOpenaiDark from '@/assets/icons/openai-dark.svg';
-import type { OpenAIProviderConfig } from '@/types';
+import { providersApi } from '@/services/api';
+import type { OpenAIKeyState, OpenAIProviderConfig } from '@/types';
 import { maskApiKey } from '@/utils/format';
 import { statusBarDataFromRecentRequests } from '@/utils/recentRequests';
 import styles from '@/pages/AiProvidersPage.module.scss';
@@ -42,6 +43,8 @@ interface FloatingToolbarStyle {
 }
 
 const EMPTY_STATUS_BAR = statusBarDataFromRecentRequests([]);
+const openAIKeyStateKey = (providerName: string, apiKey: string) =>
+  `${providerName.trim().toLowerCase()}::${apiKey.trim()}`;
 
 interface OpenAISectionProps {
   configs: OpenAIProviderConfig[];
@@ -90,6 +93,8 @@ export function OpenAISection({
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set());
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [keyStates, setKeyStates] = useState<Record<string, OpenAIKeyState>>({});
+  const [now, setNow] = useState(() => Date.now());
   const [dropdownLayout, setDropdownLayout] = useState({ openAbove: false, maxHeight: 300 });
   const [floatingToolbarStyle, setFloatingToolbarStyle] = useState<FloatingToolbarStyle>({
     left: 0,
@@ -103,6 +108,34 @@ export function OpenAISection({
   const floatingDropdownRef = useRef<HTMLDivElement>(null);
 
   const shouldRenderFloatingToolbar = !isTransitionAnimating && floatingToolbarStyle.visible;
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const states = await providersApi.getOpenAIKeyStates();
+        if (cancelled) return;
+        const next: Record<string, OpenAIKeyState> = {};
+        states.forEach((state) => {
+          next[openAIKeyStateKey(state.provider_name, state.api_key)] = state;
+        });
+        setKeyStates(next);
+      } catch {
+        // 状态展示不能影响提供商列表。
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [configs]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (isTransitionAnimating) {
@@ -524,6 +557,27 @@ export function OpenAISection({
     </span>
   );
 
+  const getKeyStateText = (providerName: string, apiKey: string) => {
+    const state = keyStates[openAIKeyStateKey(providerName, apiKey)];
+    if (!state) return '正常';
+    if (!state.enabled || state.status === 'disabled') return '禁用';
+    if (state.status === 'frozen' && state.frozen_until) {
+      const remaining = Math.max(0, Math.ceil((new Date(state.frozen_until).getTime() - now) / 1000));
+      return remaining > 0 ? `冷却剩余 ${remaining}s` : '正常';
+    }
+    if (state.status === 'error') return '异常';
+    return '正常';
+  };
+
+  const getKeyStateClass = (providerName: string, apiKey: string) => {
+    const state = keyStates[openAIKeyStateKey(providerName, apiKey)];
+    if (!state || state.status === 'active') return styles.apiKeyEntryStateActive;
+    if (!state.enabled || state.status === 'disabled') return styles.apiKeyEntryStateDisabled;
+    if (state.status === 'frozen') return styles.apiKeyEntryStateFrozen;
+    if (state.status === 'error') return styles.apiKeyEntryStateError;
+    return styles.apiKeyEntryStateActive;
+  };
+
   const renderProviderCard = ({ config: provider, originalIndex }: IndexedOpenAIProvider) => {
     const stats = getOpenAIProviderTotalStats(provider, usageByProvider);
     const headerEntries = Object.entries(provider.headers || {});
@@ -590,6 +644,9 @@ export function OpenAISection({
                     >
                       <span className={styles.apiKeyEntryIndex}>{entryIndex + 1}</span>
                       <span className={styles.apiKeyEntryKey}>{maskApiKey(entry.apiKey)}</span>
+                      <span className={`${styles.apiKeyEntryState} ${getKeyStateClass(provider.name, entry.apiKey)}`}>
+                        {getKeyStateText(provider.name, entry.apiKey)}
+                      </span>
                       {entry.proxyUrl && (
                         <span className={styles.apiKeyEntryProxy}>{entry.proxyUrl}</span>
                       )}

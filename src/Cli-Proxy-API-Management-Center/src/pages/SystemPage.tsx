@@ -335,7 +335,7 @@ export function SystemPage() {
   }, []);
 
   useEffect(() => {
-    fetchModels();
+    fetchModels({ forceRefresh: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.connectionStatus, auth.apiBase]);
 
