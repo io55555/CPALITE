@@ -168,7 +168,8 @@ type Server struct {
 	wsAuthEnabled atomic.Bool
 
 	// management handler
-	mgmt *managementHandlers.Handler
+	mgmt                          *managementHandlers.Handler
+	managementAssetRefreshRunning atomic.Bool
 
 	// ampModule is the Amp routing module for model mapping hot-reload
 	ampModule *ampmodule.AmpModule
@@ -663,6 +664,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/auth-files", s.mgmt.ListAuthFiles)
 		mgmt.GET("/auth-files/models", s.mgmt.GetAuthFileModels)
 		mgmt.GET("/auth-refresh-queue", s.mgmt.GetAuthRefreshQueue)
+		mgmt.GET("/usage", s.mgmt.GetFwindyUsage)
+		mgmt.DELETE("/usage", s.mgmt.DeleteFwindyUsage)
 		mgmt.GET("/usage/statistics", s.mgmt.GetUsageStatistics)
 		mgmt.DELETE("/usage/records", s.mgmt.DeleteUsageRecords)
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
@@ -707,12 +710,9 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 
 	if _, err := os.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
-			// Synchronously ensure management.html is available with a detached context.
-			// Control panel bootstrap should not be canceled by client disconnects.
-			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
-				c.AbortWithStatus(http.StatusNotFound)
-				return
-			}
+			s.ensureManagementControlPanelAsync(cfg)
+			c.AbortWithStatus(http.StatusNotFound)
+			return
 		} else {
 			log.WithError(err).Error("failed to stat management control panel asset")
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -721,6 +721,24 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	}
 
 	c.File(filePath)
+}
+
+func (s *Server) ensureManagementControlPanelAsync(cfg *config.Config) {
+	if s == nil || cfg == nil {
+		return
+	}
+	if !s.managementAssetRefreshRunning.CompareAndSwap(false, true) {
+		return
+	}
+	proxyURL := cfg.ProxyURL
+	repository := cfg.RemoteManagement.PanelGitHubRepository
+	staticDir := managementasset.StaticDir(s.configFilePath)
+	go func() {
+		defer s.managementAssetRefreshRunning.Store(false)
+		if !managementasset.EnsureLatestManagementHTML(context.Background(), staticDir, proxyURL, repository) {
+			log.Warn("management control panel asset is missing and async refresh did not produce management.html")
+		}
+	}()
 }
 
 func (s *Server) enableKeepAlive(timeout time.Duration, onTimeout func()) {

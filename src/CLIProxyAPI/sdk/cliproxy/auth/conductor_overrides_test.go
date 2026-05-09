@@ -482,6 +482,74 @@ func TestManagerExecuteStream_ModelSupportBadRequestFallsBackAndSuspendsAuth(t *
 	}
 }
 
+func TestManager_ProxyFailureCoolsAuthForFiveMinutes(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	executor := &authFallbackExecutor{
+		id: "openai-compatibility",
+		executeErrors: map[string]error{
+			"aa-bad-auth": &Error{
+				HTTPStatus: http.StatusInternalServerError,
+				Message:    "Post \"https://api.groq.com/openai/v1/chat/completions\": socks connect tcp 127.0.0.1:25000->api.groq.com:443: dial tcp 127.0.0.1:25000: connectex: No connection could be made because the target machine actively refused it.",
+			},
+		},
+	}
+	m.RegisterExecutor(executor)
+
+	model := "llama-3.1-8b-instant"
+	badAuth := &Auth{ID: "aa-bad-auth", Provider: "openai-compatibility"}
+	goodAuth := &Auth{ID: "bb-good-auth", Provider: "openai-compatibility"}
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(badAuth.ID, "openai-compatibility", []*registry.ModelInfo{{ID: model}})
+	reg.RegisterClient(goodAuth.ID, "openai-compatibility", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(badAuth.ID)
+		reg.UnregisterClient(goodAuth.ID)
+	})
+
+	if _, errRegister := m.Register(context.Background(), badAuth); errRegister != nil {
+		t.Fatalf("register bad auth: %v", errRegister)
+	}
+	if _, errRegister := m.Register(context.Background(), goodAuth); errRegister != nil {
+		t.Fatalf("register good auth: %v", errRegister)
+	}
+
+	request := cliproxyexecutor.Request{Model: model}
+	for i := 0; i < 2; i++ {
+		resp, errExecute := m.Execute(context.Background(), []string{"openai-compatibility"}, request, cliproxyexecutor.Options{})
+		if errExecute != nil {
+			t.Fatalf("execute %d error = %v, want success", i, errExecute)
+		}
+		if string(resp.Payload) != goodAuth.ID {
+			t.Fatalf("execute %d payload = %q, want %q", i, string(resp.Payload), goodAuth.ID)
+		}
+	}
+
+	got := executor.ExecuteCalls()
+	want := []string{badAuth.ID, goodAuth.ID, goodAuth.ID}
+	if len(got) != len(want) {
+		t.Fatalf("execute calls = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("execute call %d auth = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	updatedBad, ok := m.GetByID(badAuth.ID)
+	if !ok || updatedBad == nil {
+		t.Fatalf("expected bad auth to remain registered")
+	}
+	state := updatedBad.ModelStates[model]
+	if state == nil {
+		t.Fatalf("expected model state for %q", model)
+	}
+	remaining := time.Until(state.NextRetryAfter)
+	if !state.Unavailable || remaining < 295*time.Second || remaining > 301*time.Second {
+		t.Fatalf("proxy failure cooldown = unavailable:%v remaining:%v, want about 300s", state.Unavailable, remaining)
+	}
+}
+
 func TestManager_MarkResult_RespectsAuthDisableCoolingOverride(t *testing.T) {
 	prev := quotaCooldownDisabled.Load()
 	quotaCooldownDisabled.Store(false)

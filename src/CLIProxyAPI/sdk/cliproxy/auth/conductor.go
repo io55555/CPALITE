@@ -90,6 +90,8 @@ func quotaCooldownDisabledForAuth(auth *Auth) bool {
 	return quotaCooldownDisabled.Load()
 }
 
+const proxyFailureCooldown = 300 * time.Second
+
 // Result captures execution outcome used to adjust auth state.
 type Result struct {
 	// AuthID references the auth that produced this result.
@@ -2142,7 +2144,13 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					}
 
 					statusCode := statusCodeFromResult(result.Error)
-					if isModelSupportResultError(result.Error) {
+					if isProxyFailureResultError(result.Error) {
+						next := now.Add(proxyFailureCooldown)
+						state.NextRetryAfter = next
+						state.StatusMessage = proxyFailureStatusMessage(result.Error)
+						suspendReason = "proxy_failure"
+						shouldSuspendModel = true
+					} else if isModelSupportResultError(result.Error) {
 						next := now.Add(12 * time.Hour)
 						state.NextRetryAfter = next
 						suspendReason = "model_not_supported"
@@ -2512,6 +2520,52 @@ func isModelSupportResultError(err *Error) bool {
 	return isModelSupportErrorMessage(err.Message)
 }
 
+func isProxyFailureResultError(err *Error) bool {
+	if err == nil {
+		return false
+	}
+	return isProxyFailureMessage(err.Message) || isProxyFailureMessage(err.Code)
+}
+
+func isProxyFailureMessage(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	hasProxySignal := strings.Contains(lower, "socks connect") ||
+		strings.Contains(lower, "proxyconnect") ||
+		strings.Contains(lower, "proxy connection") ||
+		strings.Contains(lower, "proxy error") ||
+		strings.Contains(lower, "proxy failed")
+	if !hasProxySignal {
+		return false
+	}
+	failureSignals := [...]string{
+		"dial tcp",
+		"connectex",
+		"connection refused",
+		"actively refused",
+		"no connection could be made",
+		"connection reset",
+		"i/o timeout",
+		"tls handshake timeout",
+		"no such host",
+	}
+	for _, signal := range failureSignals {
+		if strings.Contains(lower, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func proxyFailureStatusMessage(err *Error) string {
+	if err == nil || strings.TrimSpace(err.Message) == "" {
+		return "proxy failure"
+	}
+	return err.Message
+}
+
 func isRequestScopedNotFoundMessage(message string) bool {
 	if message == "" {
 		return false
@@ -2578,6 +2632,11 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		if resultErr.Message != "" {
 			auth.StatusMessage = resultErr.Message
 		}
+	}
+	if isProxyFailureResultError(resultErr) {
+		auth.StatusMessage = proxyFailureStatusMessage(resultErr)
+		auth.NextRetryAfter = now.Add(proxyFailureCooldown)
+		return
 	}
 	statusCode := statusCodeFromResult(resultErr)
 	switch statusCode {

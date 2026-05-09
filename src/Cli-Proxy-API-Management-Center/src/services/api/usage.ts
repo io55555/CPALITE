@@ -12,13 +12,13 @@ export const usageApi = {
    * 获取使用统计原始数据
    */
   getUsage: (params?: UsageQueryRange) =>
-    apiClient.get<Record<string, unknown>>('/usage/statistics', { timeout: USAGE_TIMEOUT_MS, params }),
+    apiClient.get<Record<string, unknown>>('/usage', { timeout: USAGE_TIMEOUT_MS, params }),
 
   /**
    * 删除指定 usage 记录
    */
   deleteUsage: (ids: string[]) =>
-    apiClient.delete<UsageDeleteResponse>('/usage/records', {
+    apiClient.delete<UsageDeleteResponse>('/usage', {
       timeout: USAGE_TIMEOUT_MS,
       data: { ids },
     }),

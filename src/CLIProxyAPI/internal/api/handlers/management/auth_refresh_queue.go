@@ -48,8 +48,8 @@ func (h *Handler) currentAuthManager() *coreauth.Manager {
 	if h == nil {
 		return nil
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return h.authManager
 }
 
