@@ -5,6 +5,7 @@ import {
   collectUsageDetails,
   extractTotalTokens,
   normalizeAuthIndex,
+  normalizeUsageSourceId,
   type ModelPrice,
   type UsageDetail
 } from '@/utils/usage';
@@ -52,6 +53,13 @@ interface CredentialMatch {
   tracePath?: string;
 }
 
+interface OpenAIApiKeyMatch {
+  providerIndex: number;
+  keyIndex: number;
+  providerName: string;
+  apiKey: string;
+}
+
 export const normalizeCredentialType = (file?: AuthFileItem) => {
   const rawType =
     typeof file?.type === 'string'
@@ -81,6 +89,56 @@ const buildAuthFileLookup = (authFiles: AuthFileItem[]): AuthFileLookup => {
   return { authIndexToFile, authFileNameToFile };
 };
 
+const normalizeProviderName = (value: unknown): string => {
+  const provider = String(value ?? '').trim();
+  return provider && provider.toLowerCase() !== 'unknown' ? provider : '';
+};
+
+const buildSourceCandidates = (sourceRaw: string, sourceText: string): Set<string> => {
+  const candidates = new Set<string>();
+  [sourceRaw, sourceText].forEach((value) => {
+    if (!value) return;
+    candidates.add(value);
+    if (!value.includes(':')) {
+      candidates.add(`k:${value}`);
+      candidates.add(`t:${value}`);
+    }
+  });
+  return candidates;
+};
+
+const findOpenAIApiKeyMatch = (
+  openaiProviders: OpenAIProviderConfig[],
+  providerHint: string,
+  authIndex: string | null,
+  sourceCandidates: Set<string>
+): OpenAIApiKeyMatch | null => {
+  const providerMatches = (provider: OpenAIProviderConfig) =>
+    !providerHint || provider.name.trim().toLowerCase() === providerHint.toLowerCase();
+
+  for (const [providerIndex, provider] of openaiProviders.entries()) {
+    if (!providerMatches(provider)) continue;
+
+    for (const [keyIndex, entry] of (provider.apiKeyEntries || []).entries()) {
+      const apiKey = entry.apiKey.trim();
+      if (!apiKey) continue;
+
+      const entryAuthIndex = normalizeAuthIndex(entry.authIndex);
+      const normalizedKeySource = normalizeUsageSourceId(apiKey);
+      const sourceMatched =
+        sourceCandidates.has(apiKey) ||
+        (normalizedKeySource ? sourceCandidates.has(normalizedKeySource) : false);
+      const authIndexMatched = Boolean(authIndex && entryAuthIndex && authIndex === entryAuthIndex);
+
+      if (authIndexMatched || sourceMatched) {
+        return { providerIndex, keyIndex, providerName: provider.name, apiKey };
+      }
+    }
+  }
+
+  return null;
+};
+
 const resolveCredentialMatch = (
   detail: UsageDetail,
   lookup: AuthFileLookup,
@@ -99,21 +157,33 @@ const resolveCredentialMatch = (
   const authFileName = matchedFile?.name ?? null;
 
   if (!resolvedAuthIndex && !authFileName) {
-    const provider = String(detail.provider ?? '').trim();
+    const provider = normalizeProviderName(detail.provider);
     const authType = String(detail.auth_type ?? '').trim().toLowerCase();
-    if (authType === 'api_key' && sourceText) {
-      const providerIndex = openaiProviders.findIndex((item) => item.name === provider);
-      const keyIndex =
-        providerIndex >= 0
-          ? (openaiProviders[providerIndex].apiKeyEntries || []).findIndex((entry) => entry.apiKey === sourceText)
-          : -1;
+    if (authType === 'api_key' && (sourceText || authIndex)) {
+      const keyMatch = findOpenAIApiKeyMatch(
+        openaiProviders,
+        provider,
+        authIndex,
+        buildSourceCandidates(sourceRaw, sourceText)
+      );
+      if (keyMatch) {
+        return {
+          rowKey: `api_key:${keyMatch.providerName}:${keyMatch.apiKey}`,
+          displayName: `${keyMatch.providerName}、${keyMatch.apiKey}`,
+          type: 'api_key',
+          authIndex,
+          authFileName: null,
+          tracePath: `/ai-providers/openai/${keyMatch.providerIndex}?key=${keyMatch.keyIndex}`
+        };
+      }
+
+      const displaySource = sourceText.replace(/^[kmt]:/, '') || authIndex || '-';
       return {
-        rowKey: `api_key:${provider}:${sourceText}`,
-        displayName: provider ? `${provider}、${sourceText}` : sourceText,
-        type: provider || 'api_key',
-        authIndex: null,
+        rowKey: `api_key:${provider || 'unknown'}:${displaySource}`,
+        displayName: provider ? `${provider}、${displaySource}` : `API Key、${displaySource}`,
+        type: 'api_key',
+        authIndex,
         authFileName: null,
-        tracePath: providerIndex >= 0 ? `/ai-providers/openai/${providerIndex}${keyIndex >= 0 ? `?key=${keyIndex}` : ''}` : undefined
       };
     }
     return null;

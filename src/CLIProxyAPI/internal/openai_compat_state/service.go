@@ -315,10 +315,32 @@ func (s *Service) ApplyToAuth(auth *cliproxyauth.Auth) {
 		return
 	}
 	if st.Status == StatusFrozen && st.FrozenUntil.After(time.Now()) {
+		auth.Disabled = false
 		auth.Unavailable = true
 		auth.NextRetryAfter = st.FrozenUntil
 		auth.Status = cliproxyauth.StatusError
 		auth.StatusMessage = st.StatusMessage
+		auth.LastError = nil
+		return
+	}
+	auth.Disabled = false
+	auth.Unavailable = false
+	auth.NextRetryAfter = time.Time{}
+	auth.Quota = cliproxyauth.QuotaState{}
+	auth.LastError = nil
+	auth.Status = cliproxyauth.StatusActive
+	auth.StatusMessage = ""
+	for _, state := range auth.ModelStates {
+		if state == nil {
+			continue
+		}
+		state.Unavailable = false
+		state.NextRetryAfter = time.Time{}
+		state.Quota = cliproxyauth.QuotaState{}
+		state.LastError = nil
+		state.Status = cliproxyauth.StatusActive
+		state.StatusMessage = ""
+		state.UpdatedAt = time.Now()
 	}
 }
 

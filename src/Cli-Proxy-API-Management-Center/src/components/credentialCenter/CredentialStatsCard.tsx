@@ -51,11 +51,14 @@ export function CredentialStatsCard({
   const typeOptions = useMemo(
     () => [
       { value: ALL_FILTER, label: t('usage_stats.filter_all') },
-      ...Array.from(new Set(authFiles.map((file) => normalizeCredentialType(file))))
+      ...Array.from(new Set([
+        ...authFiles.map((file) => normalizeCredentialType(file)),
+        ...rows.map((row) => row.type).filter(Boolean)
+      ]))
         .sort((a, b) => a.localeCompare(b))
         .map((type) => ({ value: type, label: type }))
     ],
-    [authFiles, t]
+    [authFiles, rows, t]
   );
 
   const typeOptionSet = useMemo(
@@ -109,6 +112,14 @@ export function CredentialStatsCard({
 
   const ariaSort = (key: SortKey): 'none' | 'ascending' | 'descending' =>
     sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+
+  const traceCredential = useCallback(
+    (tracePath: string) => {
+      const separator = tracePath.includes('?') ? '&' : '?';
+      navigate(`${tracePath}${separator}trace=${Date.now()}`);
+    },
+    [navigate]
+  );
 
   return (
     <Card
@@ -202,7 +213,7 @@ export function CredentialStatsCard({
                           <button
                             type="button"
                             className={styles.inlineTraceButton}
-                            onClick={() => navigate(row.tracePath || '')}
+                            onClick={() => traceCredential(row.tracePath || '')}
                           >
                             追踪
                           </button>

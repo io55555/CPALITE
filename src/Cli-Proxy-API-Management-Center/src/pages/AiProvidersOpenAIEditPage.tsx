@@ -152,6 +152,8 @@ export function AiProvidersOpenAIEditPage() {
   const [keyStates, setKeyStates] = useState<Record<string, OpenAIKeyState>>({});
   const [detailState, setDetailState] = useState<OpenAIKeyState | null>(null);
   const [bulkText, setBulkText] = useState('');
+  const tracedKeyRowRef = useRef<HTMLDivElement | null>(null);
+  const tracedKeyToken = useMemo(() => new URLSearchParams(location.search).get('trace') ?? '', [location.search]);
   const tracedKeyIndex = useMemo(() => {
     const value = new URLSearchParams(location.search).get('key');
     const parsed = value === null ? Number.NaN : Number(value);
@@ -174,6 +176,13 @@ export function AiProvidersOpenAIEditPage() {
   useEffect(() => {
     void refreshKeyStates();
   }, [refreshKeyStates]);
+
+  useEffect(() => {
+    if (tracedKeyIndex === null) return;
+    window.setTimeout(() => {
+      tracedKeyRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  }, [form.apiKeyEntries.length, tracedKeyIndex, tracedKeyToken]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -543,7 +552,8 @@ export function AiProvidersOpenAIEditPage() {
                   : '激活';
             return (
               <div
-                key={index}
+                key={tracedKeyIndex === index ? `${index}:${tracedKeyToken}` : index}
+                ref={tracedKeyIndex === index ? tracedKeyRowRef : undefined}
                 className={`${styles.keyTableRow} ${tracedKeyIndex === index ? styles.keyTableRowTrace : ''}`}
               >
                 {/* 序号 */}
