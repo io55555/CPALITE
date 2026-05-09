@@ -147,6 +147,38 @@ const resolveCredentialMatch = (
   const authIndex = normalizeAuthIndex(detail.auth_index);
   const sourceRaw = String(detail.source ?? '').trim();
   const sourceText = sourceRaw.startsWith('t:') ? sourceRaw.slice(2) : sourceRaw;
+  const provider = normalizeProviderName(detail.provider);
+  const authType = String(detail.auth_type ?? '').trim().toLowerCase();
+  const isApiKeyUsage = authType === 'api_key' || authType === 'apikey';
+
+  if (isApiKeyUsage && (sourceText || authIndex)) {
+    const keyMatch = findOpenAIApiKeyMatch(
+      openaiProviders,
+      provider,
+      authIndex,
+      buildSourceCandidates(sourceRaw, sourceText)
+    );
+    if (keyMatch) {
+      return {
+        rowKey: `api_key:${keyMatch.providerName}:${keyMatch.apiKey}`,
+        displayName: `${keyMatch.providerName}、${keyMatch.apiKey}`,
+        type: 'api_key',
+        authIndex,
+        authFileName: null,
+        tracePath: `/ai-providers/openai/${keyMatch.providerIndex}?key=${keyMatch.keyIndex}`
+      };
+    }
+
+    const displaySource = sourceText.replace(/^[kmt]:/, '') || authIndex || '-';
+    return {
+      rowKey: `api_key:${provider || 'unknown'}:${displaySource}`,
+      displayName: provider ? `${provider}、${displaySource}` : `API Key、${displaySource}`,
+      type: 'api_key',
+      authIndex,
+      authFileName: null
+    };
+  }
+
   const matchedFile =
     (authIndex ? lookup.authIndexToFile.get(authIndex) : undefined) ??
     (sourceRaw ? lookup.authFileNameToFile.get(sourceRaw) : undefined) ??
@@ -157,35 +189,6 @@ const resolveCredentialMatch = (
   const authFileName = matchedFile?.name ?? null;
 
   if (!resolvedAuthIndex && !authFileName) {
-    const provider = normalizeProviderName(detail.provider);
-    const authType = String(detail.auth_type ?? '').trim().toLowerCase();
-    if ((authType === 'api_key' || authType === 'apikey') && (sourceText || authIndex)) {
-      const keyMatch = findOpenAIApiKeyMatch(
-        openaiProviders,
-        provider,
-        authIndex,
-        buildSourceCandidates(sourceRaw, sourceText)
-      );
-      if (keyMatch) {
-        return {
-          rowKey: `api_key:${keyMatch.providerName}:${keyMatch.apiKey}`,
-          displayName: `${keyMatch.providerName}、${keyMatch.apiKey}`,
-          type: 'api_key',
-          authIndex,
-          authFileName: null,
-          tracePath: `/ai-providers/openai/${keyMatch.providerIndex}?key=${keyMatch.keyIndex}`
-        };
-      }
-
-      const displaySource = sourceText.replace(/^[kmt]:/, '') || authIndex || '-';
-      return {
-        rowKey: `api_key:${provider || 'unknown'}:${displaySource}`,
-        displayName: provider ? `${provider}、${displaySource}` : `API Key、${displaySource}`,
-        type: 'api_key',
-        authIndex,
-        authFileName: null,
-      };
-    }
     return null;
   }
 

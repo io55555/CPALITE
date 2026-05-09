@@ -35,11 +35,119 @@ type testOpenAICompatKeyRequest struct {
 // GetOpenAICompatKeyStates 返回 OpenAI 兼容 key 的运行态。
 func (h *Handler) GetOpenAICompatKeyStates(c *gin.Context) {
 	service := h.currentOpenAICompatKeyState()
-	if service == nil {
-		c.JSON(http.StatusOK, []openai_compat_state.State{})
+	var states []openai_compat_state.State
+	if service != nil {
+		states = service.List()
+	}
+	c.JSON(http.StatusOK, h.mergeOpenAICompatRuntimeKeyStates(states))
+}
+
+func (h *Handler) mergeOpenAICompatRuntimeKeyStates(states []openai_compat_state.State) []openai_compat_state.State {
+	if h == nil || h.authManager == nil {
+		if states == nil {
+			return []openai_compat_state.State{}
+		}
+		return states
+	}
+	now := time.Now()
+	merged := make(map[string]openai_compat_state.State, len(states))
+	for _, st := range states {
+		merged[openAICompatStateMergeKey(st.ProviderName, st.APIKey)] = st
+	}
+	for _, auth := range h.authManager.List() {
+		runtimeState, ok := openAICompatRuntimeKeyState(auth, now)
+		if !ok {
+			continue
+		}
+		key := openAICompatStateMergeKey(runtimeState.ProviderName, runtimeState.APIKey)
+		st, exists := merged[key]
+		if !exists {
+			merged[key] = runtimeState
+			continue
+		}
+		st.ProviderName = runtimeState.ProviderName
+		st.APIKey = runtimeState.APIKey
+		if runtimeState.Status != openai_compat_state.StatusActive || !runtimeState.Enabled {
+			st.Enabled = runtimeState.Enabled
+			st.Status = runtimeState.Status
+			st.StatusMessage = runtimeState.StatusMessage
+			st.FrozenUntil = runtimeState.FrozenUntil
+			if st.UpdatedAt.IsZero() || runtimeState.UpdatedAt.After(st.UpdatedAt) {
+				st.UpdatedAt = runtimeState.UpdatedAt
+			}
+		}
+		merged[key] = st
+	}
+	out := make([]openai_compat_state.State, 0, len(merged))
+	for _, st := range merged {
+		out = append(out, st)
+	}
+	return out
+}
+
+func openAICompatRuntimeKeyState(auth *cliproxyauth.Auth, now time.Time) (openai_compat_state.State, bool) {
+	if auth == nil || auth.Attributes == nil {
+		return openai_compat_state.State{}, false
+	}
+	providerName := strings.TrimSpace(auth.Attributes["compat_name"])
+	if providerName == "" {
+		providerName = strings.TrimSpace(auth.Attributes["provider_key"])
+	}
+	apiKey := strings.TrimSpace(auth.Attributes["api_key"])
+	if providerName == "" || apiKey == "" {
+		return openai_compat_state.State{}, false
+	}
+	st := openai_compat_state.State{
+		ProviderName: providerName,
+		APIKey:       apiKey,
+		Enabled:      true,
+		Status:       openai_compat_state.StatusActive,
+		UpdatedAt:    auth.UpdatedAt,
+	}
+	if st.UpdatedAt.IsZero() {
+		st.UpdatedAt = now.UTC()
+	}
+	overlayAuthRuntimeState(&st, auth.Disabled, auth.Status, auth.Unavailable, auth.NextRetryAfter, auth.StatusMessage, now)
+	for _, modelState := range auth.ModelStates {
+		if modelState == nil {
+			continue
+		}
+		overlayAuthRuntimeState(&st, false, modelState.Status, modelState.Unavailable, modelState.NextRetryAfter, modelState.StatusMessage, now)
+		if modelState.UpdatedAt.After(st.UpdatedAt) {
+			st.UpdatedAt = modelState.UpdatedAt
+		}
+	}
+	return st, true
+}
+
+func overlayAuthRuntimeState(st *openai_compat_state.State, disabled bool, status cliproxyauth.Status, unavailable bool, nextRetry time.Time, message string, now time.Time) {
+	if st == nil || st.Status == openai_compat_state.StatusDisabled {
 		return
 	}
-	c.JSON(http.StatusOK, service.List())
+	message = strings.TrimSpace(message)
+	switch {
+	case disabled || status == cliproxyauth.StatusDisabled:
+		st.Enabled = false
+		st.Status = openai_compat_state.StatusDisabled
+		st.StatusMessage = message
+		st.FrozenUntil = time.Time{}
+	case unavailable && nextRetry.After(now):
+		st.Enabled = true
+		st.Status = openai_compat_state.StatusFrozen
+		st.StatusMessage = message
+		st.FrozenUntil = nextRetry
+	case status == cliproxyauth.StatusError || unavailable:
+		if st.Status != openai_compat_state.StatusFrozen {
+			st.Enabled = true
+			st.Status = openai_compat_state.StatusError
+			st.StatusMessage = message
+			st.FrozenUntil = time.Time{}
+		}
+	}
+}
+
+func openAICompatStateMergeKey(providerName, apiKey string) string {
+	return strings.ToLower(strings.TrimSpace(providerName)) + "\x00" + strings.TrimSpace(apiKey)
 }
 
 // PatchOpenAICompatKeyState 启用或停用单个 key。
