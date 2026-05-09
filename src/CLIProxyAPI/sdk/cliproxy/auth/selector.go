@@ -500,7 +500,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 	if cachedAuthID, ok := s.cache.GetAndRefresh(cacheKey); ok {
 		for _, auth := range available {
 			if auth.ID == cachedAuthID {
-				entry.Infof("session-affinity: cache hit | session=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, provider, model)
+				entry.Infof("session-affinity: cache hit | session=%s auth=%s api_key=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, fullAPIKeyForLog(auth), provider, model)
 				return auth, nil
 			}
 		}
@@ -510,7 +510,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 			return nil, err
 		}
 		s.cache.Set(cacheKey, auth.ID)
-		entry.Infof("session-affinity: cache hit but auth unavailable, reselected | session=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, provider, model)
+		entry.Infof("session-affinity: cache hit but auth unavailable, reselected | session=%s auth=%s api_key=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, fullAPIKeyForLog(auth), provider, model)
 		return auth, nil
 	}
 
@@ -520,7 +520,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 			for _, auth := range available {
 				if auth.ID == cachedAuthID {
 					s.cache.Set(cacheKey, auth.ID)
-					entry.Infof("session-affinity: fallback cache hit | session=%s fallback=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), truncateSessionID(fallbackID), auth.ID, provider, model)
+					entry.Infof("session-affinity: fallback cache hit | session=%s fallback=%s auth=%s api_key=%s provider=%s model=%s", truncateSessionID(primaryID), truncateSessionID(fallbackID), auth.ID, fullAPIKeyForLog(auth), provider, model)
 					return auth, nil
 				}
 			}
@@ -532,7 +532,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 		return nil, err
 	}
 	s.cache.Set(cacheKey, auth.ID)
-	entry.Infof("session-affinity: cache miss, new binding | session=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, provider, model)
+	entry.Infof("session-affinity: cache miss, new binding | session=%s auth=%s api_key=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, fullAPIKeyForLog(auth), provider, model)
 	return auth, nil
 }
 
@@ -552,6 +552,22 @@ func truncateSessionID(id string) string {
 		return id
 	}
 	return id[:8] + "..."
+}
+
+func fullAPIKeyForLog(auth *Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if auth.Attributes != nil {
+		if key := strings.TrimSpace(auth.Attributes["api_key"]); key != "" {
+			return key
+		}
+	}
+	kind, value := auth.AccountInfo()
+	if strings.EqualFold(strings.TrimSpace(kind), "api_key") {
+		return strings.TrimSpace(value)
+	}
+	return ""
 }
 
 // Stop releases resources held by the selector.

@@ -50,6 +50,7 @@ type APIUsage map[string]map[string][]RequestDetail
 type QueryRange struct {
 	Start *time.Time
 	End   *time.Time
+	Limit int
 }
 
 type DeleteResult struct {

@@ -53,7 +53,7 @@ func TestLoggerPluginPersistsRecord(t *testing.T) {
 	}
 }
 
-func TestLoggerPluginSkipsWhenDisabled(t *testing.T) {
+func TestLoggerPluginPersistsRecordWhenLegacyStatisticsDisabled(t *testing.T) {
 	previous := StatisticsEnabled()
 	SetStatisticsEnabled(false)
 	defer SetStatisticsEnabled(previous)
@@ -81,8 +81,8 @@ func TestLoggerPluginSkipsWhenDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
-	if len(usage) != 0 {
-		t.Fatalf("usage len = %d, want 0: %+v", len(usage), usage)
+	if len(usage) == 0 {
+		t.Fatalf("usage len = 0, want record persisted")
 	}
 }
 

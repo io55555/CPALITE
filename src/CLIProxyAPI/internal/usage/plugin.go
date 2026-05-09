@@ -105,9 +105,6 @@ func SetStatisticsEnabled(enabled bool) { statisticsEnabled.Store(enabled) }
 func StatisticsEnabled() bool { return statisticsEnabled.Load() }
 
 func (p *LoggerPlugin) HandleUsage(ctx context.Context, record coreusage.Record) {
-	if !statisticsEnabled.Load() {
-		return
-	}
 	if p == nil || p.recorder == nil {
 		return
 	}

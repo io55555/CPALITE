@@ -181,6 +181,10 @@ type Manager struct {
 	refreshLoop   *authAutoRefreshLoop
 }
 
+// ApplyExternalState lets integrations merge independently persisted runtime state
+// into the selected auth without coupling this package to those integrations.
+var ApplyExternalState func(auth *Auth, now time.Time)
+
 // NewManager constructs a manager with optional custom selector and hook.
 func NewManager(store Store, selector Selector, hook Hook) *Manager {
 	if selector == nil {
@@ -2231,6 +2235,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		}
 
+		applyOpenAICompatPersistedState(auth, now)
 		_ = m.persist(ctx, auth)
 		authSnapshot = auth.Clone()
 	}
@@ -2412,6 +2417,17 @@ func clearAuthStateOnSuccess(auth *Auth, now time.Time) {
 	auth.LastError = nil
 	auth.NextRetryAfter = time.Time{}
 	auth.UpdatedAt = now
+}
+
+func applyOpenAICompatPersistedState(auth *Auth, now time.Time) {
+	if ApplyExternalState == nil {
+		return
+	}
+	ApplyExternalState(auth, now)
+	if auth.Disabled || auth.Status == StatusDisabled || (auth.Unavailable && auth.NextRetryAfter.After(now)) {
+		auth.UpdatedAt = now
+		updateAggregatedAvailability(auth, now)
+	}
 }
 
 func cloneError(err *Error) *Error {

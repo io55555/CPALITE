@@ -1251,6 +1251,14 @@ $openai-toolbar-control-height: 36px;
   }
 }
 
+.keyStateDetailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .keyEntriesList {
   display: flex;
   flex-direction: column;

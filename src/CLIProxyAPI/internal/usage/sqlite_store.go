@@ -14,6 +14,7 @@ import (
 )
 
 const sqliteTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
+const defaultQueryLimit = 50000
 
 type SQLiteStore struct {
 	db        *sql.DB
@@ -259,12 +260,20 @@ func (s *SQLiteStore) Query(ctx context.Context, rng QueryRange) (APIUsage, erro
 	if s == nil || s.db == nil {
 		return APIUsage{}, nil
 	}
+	limit := rng.Limit
+	if limit <= 0 || limit > defaultQueryLimit {
+		limit = defaultQueryLimit
+	}
 	query := `
 SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, thinking_effort,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
+FROM (
+SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, thinking_effort,
+       latency_ms, first_byte_latency_ms, generation_ms,
+       input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM usage_records`
-	args := make([]any, 0, 2)
+	args := make([]any, 0, 3)
 	where := make([]string, 0, 2)
 	if rng.Start != nil && !rng.Start.IsZero() {
 		where = append(where, "timestamp >= ?")
@@ -277,7 +286,9 @@ FROM usage_records`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
-	query += " ORDER BY timestamp ASC, id ASC"
+	query += " ORDER BY timestamp DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+	query += ") ORDER BY timestamp ASC, id ASC"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

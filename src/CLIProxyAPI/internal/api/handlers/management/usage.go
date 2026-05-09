@@ -1,6 +1,7 @@
 package management
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
+)
+
+const (
+	usageQueryTimeout = 10 * time.Second
+	usageQueryMaxRows = 50000
 )
 
 type deleteUsageRequest struct {
@@ -44,17 +50,45 @@ func (h *Handler) GetUsageStatistics(c *gin.Context) {
 	}
 
 	store := h.currentUsageStore()
+	if store == nil && hasUsageRangeQuery(c) {
+		store = h.ensureUsageStoreForMonitoring()
+	}
 	if store == nil {
 		c.JSON(http.StatusOK, usage.APIUsage{})
 		return
 	}
 
-	result, err := store.Query(c.Request.Context(), rng)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), usageQueryTimeout)
+	defer cancel()
+	result, err := store.Query(ctx, rng)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query usage"})
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func hasUsageRangeQuery(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	return strings.TrimSpace(c.Query("start")) != "" || strings.TrimSpace(c.Query("end")) != ""
+}
+
+func (h *Handler) ensureUsageStoreForMonitoring() usage.Store {
+	if h == nil || strings.TrimSpace(h.logDir) == "" {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.usageStore != nil {
+		return h.usageStore
+	}
+	if err := usage.InitDefaultStoreInLogDir(h.logDir); err != nil {
+		return nil
+	}
+	h.usageStore = usage.DefaultStore()
+	return h.usageStore
 }
 
 // DeleteUsageRecords 按记录 ID 删除已持久化的统计记录。
@@ -141,6 +175,7 @@ func parseUsageRange(c *gin.Context) (usage.QueryRange, bool) {
 		end = end.UTC()
 		rng.End = &end
 	}
+	rng.Limit = usageQueryMaxRows
 
 	return rng, true
 }

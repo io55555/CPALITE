@@ -23,6 +23,25 @@ const OPENAI_TEST_TIMEOUT_MS = 30_000;
 const openAIKeyStateKey = (providerName: string, apiKey: string) =>
   `${providerName.trim().toLowerCase()}::${apiKey.trim()}`;
 
+const formatChinaTime = (value?: string) => {
+  if (!value) return '无';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return `${get('year')}/${get('month')}/${get('day')}-${get('hour')}:${get('minute')}:${get('second')}`;
+};
+
 const getErrorMessage = (err: unknown) => {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
@@ -859,6 +878,10 @@ export function AiProvidersOpenAIEditPage() {
       >
         {detailState && (
           <div className={styles.keyStateDetail}>
+            <div className={styles.keyStateDetailMeta}>
+              <span>更新时间：{formatChinaTime(detailState.updated_at)}</span>
+              {detailState.frozen_until && <span>冷却至：{formatChinaTime(detailState.frozen_until)}</span>}
+            </div>
             <div className={styles.sectionHint}>
               {detailState.status_message || detailState.last_error || '无错误详情'}
             </div>

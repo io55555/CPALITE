@@ -48,6 +48,8 @@ import (
 
 const oauthCallbackSuccessHTML = `<html><head><meta charset="utf-8"><title>Authentication successful</title><script>setTimeout(function(){window.close();},5000);</script></head><body><h1>Authentication successful!</h1><p>You can close this window.</p><p>This window will close automatically in 5 seconds.</p></body></html>`
 
+const defaultManagementConcurrencyLimit = 16
+
 type serverOptionConfig struct {
 	extraMiddleware      []gin.HandlerFunc
 	engineConfigurator   func(*gin.Engine)
@@ -168,7 +170,8 @@ type Server struct {
 	wsAuthEnabled atomic.Bool
 
 	// management handler
-	mgmt *managementHandlers.Handler
+	mgmt                          *managementHandlers.Handler
+	managementAssetRefreshRunning atomic.Bool
 
 	// ampModule is the Amp routing module for model mapping hot-reload
 	ampModule *ampmodule.AmpModule
@@ -217,6 +220,8 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	if optionState.engineConfigurator != nil {
 		optionState.engineConfigurator(engine)
 	}
+	managementLimiter := make(chan struct{}, defaultManagementConcurrencyLimit)
+	engine.Use(managementConcurrencyMiddleware(managementLimiter))
 
 	// Add middleware
 	engine.Use(logging.GinLogrusLogger())
@@ -273,7 +278,6 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	managementasset.SetCurrentConfig(cfg)
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
-	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	applySignatureCacheConfig(nil, cfg)
 	// Initialize management handler
@@ -283,7 +287,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	logDir := logging.ResolveLogDirectory(cfg)
 	s.mgmt.SetLogDirectory(logDir)
-	if cfg.UsageStatisticsEnabled {
+	if gin.Mode() != gin.TestMode {
 		if err := usage.InitDefaultStoreInLogDir(logDir); err != nil {
 			log.WithError(err).Warn("usage store unavailable")
 		}
@@ -695,6 +699,26 @@ func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 	}
 }
 
+func managementConcurrencyMiddleware(limiter chan struct{}) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if limiter == nil || !isManagementRequestPath(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
+		select {
+		case limiter <- struct{}{}:
+			defer func() { <-limiter }()
+			c.Next()
+		default:
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "management API is busy"})
+		}
+	}
+}
+
+func isManagementRequestPath(path string) bool {
+	return path == "/management.html" || path == "/v0/management" || strings.HasPrefix(path, "/v0/management/")
+}
+
 func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	cfg := s.cfg
 	if cfg == nil || cfg.RemoteManagement.DisableControlPanel {
@@ -709,12 +733,9 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 
 	if _, err := os.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
-			// Synchronously ensure management.html is available with a detached context.
-			// Control panel bootstrap should not be canceled by client disconnects.
-			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
-				c.AbortWithStatus(http.StatusNotFound)
-				return
-			}
+			s.ensureManagementControlPanelAsync(cfg)
+			c.AbortWithStatus(http.StatusNotFound)
+			return
 		} else {
 			log.WithError(err).Error("failed to stat management control panel asset")
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -723,6 +744,24 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	}
 
 	c.File(filePath)
+}
+
+func (s *Server) ensureManagementControlPanelAsync(cfg *config.Config) {
+	if s == nil || cfg == nil {
+		return
+	}
+	if !s.managementAssetRefreshRunning.CompareAndSwap(false, true) {
+		return
+	}
+	proxyURL := cfg.ProxyURL
+	repository := cfg.RemoteManagement.PanelGitHubRepository
+	staticDir := managementasset.StaticDir(s.configFilePath)
+	go func() {
+		defer s.managementAssetRefreshRunning.Store(false)
+		if !managementasset.EnsureLatestManagementHTML(context.Background(), staticDir, proxyURL, repository) {
+			log.Warn("management control panel asset is missing and async refresh did not produce management.html")
+		}
+	}()
 }
 
 func (s *Server) enableKeepAlive(timeout time.Duration, onTimeout func()) {
@@ -1026,7 +1065,6 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 	}
 
 	if oldCfg == nil || oldCfg.UsageStatisticsEnabled != cfg.UsageStatisticsEnabled {
-		usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
 		redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	}
 
