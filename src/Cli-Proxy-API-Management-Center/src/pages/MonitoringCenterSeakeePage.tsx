@@ -134,8 +134,8 @@ type PanelProps = {
 
 type SummaryCardProps = {
   label: string;
-  value: string;
-  meta: string;
+  value: ReactNode;
+  meta: ReactNode;
   tone?: MonitoringStatusTone;
   variant?: 'primary' | 'secondary';
 };
@@ -1074,7 +1074,7 @@ export function MonitoringCenterPage() {
   const [customDraftStartInput, setCustomDraftStartInput] = useState(getTodayStartInputValue);
   const [customDraftEndInput, setCustomDraftEndInput] = useState(getCurrentInputValue);
   const [searchInput, setSearchInput] = useState('');
-  const [autoRefreshMs, setAutoRefreshMs] = useState('5000');
+  const [autoRefreshMs, setAutoRefreshMs] = useState('30000');
   const [selectedAccount, setSelectedAccount] = useState('all');
   const [selectedProvider, setSelectedProvider] = useState('all');
   const [selectedModel, setSelectedModel] = useState('all');
@@ -1437,7 +1437,16 @@ export function MonitoringCenterPage() {
   const primarySummaryCards: SummaryCardProps[] = [
     {
       label: t('monitoring.total_calls'),
-      value: formatCompactNumber(scopedSummary.totalCalls),
+      value: (
+        <span className={styles.summaryCompositeValue}>
+          <span>{formatCompactNumber(scopedSummary.totalCalls)}</span>
+          <span className={styles.summaryInlineStats}>
+            <span className={styles.goodText}>成功 {formatCompactNumber(scopedSummary.successCalls)}</span>
+            <span className={styles.badText}>失败 {formatCompactNumber(scopedSummary.failureCalls)}</span>
+            <span>成功率 {formatPercent(scopedSummary.successRate)}</span>
+          </span>
+        </span>
+      ),
       meta: `${accountRows.length} ${t('monitoring.accounts_suffix')}`,
     },
     {

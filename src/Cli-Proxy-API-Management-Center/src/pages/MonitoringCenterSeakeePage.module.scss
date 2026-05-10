@@ -706,7 +706,7 @@
 
 .summarySection {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -714,7 +714,7 @@
 .summarySub,
 .summaryGrid {
   display: grid;
-  gap: 14px;
+  gap: 8px;
 }
 
 .summaryHero {
@@ -727,10 +727,13 @@
 
 .summaryCard {
   display: grid;
-  gap: 8px;
+  grid-template-rows: auto minmax(32px, auto) auto;
+  gap: 5px;
   min-width: 0;
-  padding: 18px;
+  padding: 10px 12px;
   background: var(--monitor-surface-elevated);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
   transition:
     transform 0.18s ease,
     border-color 0.18s ease,
@@ -738,13 +741,13 @@
 }
 
 .summaryCardPrimary {
-  min-height: 150px;
+  min-height: 92px;
 }
 
 .summaryCardSecondary {
-  min-height: 104px;
-  padding: 15px 16px;
-  border-radius: 18px;
+  min-height: 76px;
+  padding: 9px 11px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--monitor-surface-elevated) 78%, var(--monitor-surface));
   box-shadow: var(--shadow);
 }
@@ -762,7 +765,7 @@
 .savedPricesHeader,
 .priceField label {
   color: var(--monitor-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -772,22 +775,48 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  font-size: 31px;
-  line-height: 1;
+  font-size: 24px;
+  line-height: 1.05;
   letter-spacing: 0;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .summaryCardSecondary .summaryValue {
-  font-size: 23px;
+  font-size: 20px;
 }
 
 .summaryMeta {
   margin-top: auto;
   color: var(--monitor-muted);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.summaryCompositeValue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.summaryInlineStats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  color: var(--monitor-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.goodText {
+  color: var(--monitor-green);
+}
+
+.badText {
+  color: var(--monitor-red);
 }
 
 .statusBadge {

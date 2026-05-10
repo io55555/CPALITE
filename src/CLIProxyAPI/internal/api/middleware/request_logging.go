@@ -13,7 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	log "github.com/sirupsen/logrus"
 )
 
 const maxErrorOnlyCapturedRequestBodyBytes int64 = 1 << 20 // 1 MiB
@@ -64,12 +66,93 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 		// Process the request
 		c.Next()
 
+		if packet, recorded := setUsageClientResponseFromWrapper(c, wrapper); recorded {
+			logCPASentClientResponseFromMiddleware(c, packet)
+		}
+		internalusage.FlushPendingRecords(c)
+
 		// Finalize logging after request processing
 		if err = wrapper.Finalize(c); err != nil {
 			// Log error but don't interrupt the response
 			// In a real implementation, you might want to use a proper logger here
 		}
 	}
+}
+
+func setUsageClientResponseFromWrapper(c *gin.Context, wrapper *ResponseWriterWrapper) (string, bool) {
+	if c == nil || wrapper == nil {
+		return "", false
+	}
+	if existing, exists := c.Get("USAGE_CLIENT_RESPONSE"); exists {
+		if text, ok := existing.(string); ok && strings.TrimSpace(text) != "" {
+			return text, false
+		}
+	}
+	status := wrapper.statusCode
+	if status == 0 {
+		status = c.Writer.Status()
+	}
+	if status <= 0 {
+		status = http.StatusOK
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "HTTP/1.1 %d %s\n", status, http.StatusText(status))
+	for key, values := range wrapper.cloneHeaders() {
+		for _, value := range values {
+			b.WriteString(key)
+			b.WriteString(": ")
+			b.WriteString(value)
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteByte('\n')
+	if wrapper.body != nil && wrapper.body.Len() > 0 {
+		b.Write(wrapper.body.Bytes())
+	}
+	packet := b.String()
+	c.Set("USAGE_CLIENT_RESPONSE", packet)
+	return packet, true
+}
+
+func logCPASentClientResponseFromMiddleware(c *gin.Context, packet string) {
+	if c == nil || strings.TrimSpace(packet) == "" {
+		return
+	}
+	provider := strings.TrimSpace(c.GetString("cpa.request_provider"))
+	model := strings.TrimSpace(c.GetString("cpa.request_model"))
+	if provider == "" && model == "" {
+		return
+	}
+	if provider == "" {
+		provider = "-"
+	}
+	if model == "" {
+		model = "-"
+	}
+	account := "-"
+	if c.Request != nil {
+		account = strings.TrimSpace(c.Request.Header.Get("Authorization"))
+		if account == "" {
+			account = "-"
+		}
+	}
+	entry := log.NewEntry(log.StandardLogger())
+	if c.Request != nil {
+		if requestID := logging.GetRequestID(c.Request.Context()); requestID != "" {
+			entry = log.WithField("request_id", requestID)
+		} else if requestID := logging.GetGinRequestID(c); requestID != "" {
+			entry = log.WithField("request_id", requestID)
+		}
+	}
+	entry.Infof(
+		"\n================ CPA发送客户端响应 ================\n"+
+			"[6/6][%s][%s] CPA发送给客户端\n"+
+			"请求模型: %s\n"+
+			"---------------- CPA发送给客户端 ----------------\n"+
+			"%s\n"+
+			"==================================================",
+		provider, account, model, packet,
+	)
 }
 
 func buildCapturedRawRequest(req *http.Request, info *RequestInfo) string {
@@ -88,7 +171,7 @@ func buildCapturedRawRequest(req *http.Request, info *RequestInfo) string {
 		protoMajor = 1
 	}
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "%s %s HTTP/%d.%d\n", info.Method, path, protoMajor, protoMinor)
+	fmt.Fprintf(&builder, "%s %s %s\n", info.Method, path, formatHTTPProto(protoMajor, protoMinor))
 	if req.Host != "" {
 		builder.WriteString("Host: ")
 		builder.WriteString(req.Host)
@@ -106,7 +189,14 @@ func buildCapturedRawRequest(req *http.Request, info *RequestInfo) string {
 		}
 	}
 	if req.ContentLength >= 0 {
-		if _, exists := info.Headers["Content-Length"]; !exists {
+		hasContentLength := false
+		for key := range info.Headers {
+			if strings.EqualFold(key, "Content-Length") {
+				hasContentLength = true
+				break
+			}
+		}
+		if !hasContentLength {
 			builder.WriteString("Content-Length: ")
 			builder.WriteString(fmt.Sprintf("%d", req.ContentLength))
 			builder.WriteByte('\n')
@@ -115,6 +205,16 @@ func buildCapturedRawRequest(req *http.Request, info *RequestInfo) string {
 	builder.WriteByte('\n')
 	builder.Write(info.Body)
 	return builder.String()
+}
+
+func formatHTTPProto(major, minor int) string {
+	if major <= 0 {
+		return "HTTP/1.1"
+	}
+	if major == 2 && minor == 0 {
+		return "HTTP/2"
+	}
+	return fmt.Sprintf("HTTP/%d.%d", major, minor)
 }
 
 func shouldSkipMethodForRequestLogging(req *http.Request) bool {

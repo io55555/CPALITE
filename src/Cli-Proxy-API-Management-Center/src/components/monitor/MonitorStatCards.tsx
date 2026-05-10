@@ -2,17 +2,9 @@ import { useMemo, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Line } from 'react-chartjs-2';
 import {
-  IconDiamond,
-  IconDollarSign,
-  IconSatellite,
-  IconTimer,
-  IconTrendingUp
-} from '@/components/ui/icons';
-import {
   calculateRecentPerMinuteRates,
   calculateTotalCost,
   collectUsageDetails,
-  formatCompactNumber,
   formatPerMinuteValue,
   formatUsd,
   type ModelPrice,
@@ -25,11 +17,10 @@ import styles from '@/pages/MonitoringCenterPage.module.scss';
 interface StatCardData {
   key: string;
   label: ReactNode;
-  icon: ReactNode;
   accent: string;
   accentSoft: string;
   accentBorder: string;
-  value: string;
+  value: ReactNode;
   trend: SparklineBundle | null;
 }
 
@@ -84,23 +75,42 @@ export function MonitorStatCards({
   }, [usage]);
   const cacheRatio =
     tokenBreakdown.input > 0 ? `${((tokenBreakdown.cached / tokenBreakdown.input) * 100).toFixed(2)}%` : '0.00%';
-  const requestLabel = (
-    <span className={styles.statLabelWithMeta}>
-      <span>{t('usage_stats.total_requests')}</span>
+  const requestTotal = usage?.total_requests ?? 0;
+  const successCount = usage?.success_count ?? 0;
+  const failureCount = usage?.failure_count ?? 0;
+  const successRate = requestTotal > 0 ? `${((successCount / requestTotal) * 100).toFixed(2)}%` : '0.00%';
+  const tokenTotal = usage?.total_tokens ?? 0;
+  const tokenPercent = (value: number) =>
+    tokenTotal > 0 ? `${((value / tokenTotal) * 100).toFixed(2)}%` : '0.00%';
+  const requestValue = (
+    <span className={styles.statValueWithMeta}>
+      <span>{loading ? '-' : requestTotal.toLocaleString()}</span>
       <span>
         (
-        <span className={styles.statSuccessText}>成功{(usage?.success_count ?? 0).toLocaleString()}</span>
+        <span className={styles.statSuccessText}>成功{successCount.toLocaleString()}</span>
         {' '}
-        <span className={styles.statFailureText}>失败{(usage?.failure_count ?? 0).toLocaleString()}</span>
+        <span className={styles.statFailureText}>失败{failureCount.toLocaleString()}</span>
+        {' '}
+        成功率{successRate}
         )
       </span>
     </span>
   );
-  const tokenLabel = (
-    <span className={styles.statLabelWithMeta}>
-      <span>总token数</span>
+  const tokenValue = (
+    <span className={styles.statValueWithMeta}>
+      <span>{loading ? '-' : tokenTotal.toLocaleString()}</span>
       <span>
-        (输入{tokenBreakdown.input.toLocaleString()} 输出{tokenBreakdown.output.toLocaleString()} 缓存{cacheRatio})
+        (
+        输入{tokenBreakdown.input.toLocaleString()}
+        {' '}
+        <span className={styles.statSuccessText}>{tokenPercent(tokenBreakdown.input)}</span>
+        {' '}
+        输出{tokenBreakdown.output.toLocaleString()}
+        {' '}
+        <span className={styles.statFailureText}>{tokenPercent(tokenBreakdown.output)}</span>
+        {' '}
+        缓存{cacheRatio}
+        )
       </span>
     </span>
   );
@@ -108,28 +118,25 @@ export function MonitorStatCards({
   const statsCards: StatCardData[] = [
     {
       key: 'requests',
-      label: requestLabel,
-      icon: <IconSatellite size={16} />,
+      label: t('usage_stats.total_requests'),
       accent: '#8b8680',
       accentSoft: 'rgba(139, 134, 128, 0.18)',
       accentBorder: 'rgba(139, 134, 128, 0.35)',
-      value: loading ? '-' : (usage?.total_requests ?? 0).toLocaleString(),
+      value: requestValue,
       trend: sparklines.requests
     },
     {
       key: 'tokens',
-      label: tokenLabel,
-      icon: <IconDiamond size={16} />,
+      label: '总Token数',
       accent: '#8b5cf6',
       accentSoft: 'rgba(139, 92, 246, 0.18)',
       accentBorder: 'rgba(139, 92, 246, 0.35)',
-      value: loading ? '-' : formatCompactNumber(usage?.total_tokens ?? 0),
+      value: tokenValue,
       trend: sparklines.tokens
     },
     {
       key: 'rpm',
       label: timeRange === 'all' ? t('usage_stats.rpm_30m') : 'RPM',
-      icon: <IconTimer size={16} />,
       accent: '#22c55e',
       accentSoft: 'rgba(34, 197, 94, 0.18)',
       accentBorder: 'rgba(34, 197, 94, 0.32)',
@@ -139,7 +146,6 @@ export function MonitorStatCards({
     {
       key: 'tpm',
       label: timeRange === 'all' ? t('usage_stats.tpm_30m') : 'TPM',
-      icon: <IconTrendingUp size={16} />,
       accent: '#f97316',
       accentSoft: 'rgba(249, 115, 22, 0.18)',
       accentBorder: 'rgba(249, 115, 22, 0.32)',
@@ -149,7 +155,6 @@ export function MonitorStatCards({
     {
       key: 'cost',
       label: t('usage_stats.total_cost'),
-      icon: <IconDollarSign size={16} />,
       accent: '#f59e0b',
       accentSoft: 'rgba(245, 158, 11, 0.18)',
       accentBorder: 'rgba(245, 158, 11, 0.32)',
@@ -174,7 +179,6 @@ export function MonitorStatCards({
         >
           <div className={styles.statCardHeader}>
             <span className={styles.statLabel}>{card.label}</span>
-            <span className={styles.statIconBadge}>{card.icon}</span>
           </div>
           <div className={styles.statValue}>{card.value}</div>
           <div className={styles.statTrend}>

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFilesApi } from '@/services/api/authFiles';
+import { authRefreshQueueApi } from '@/services/api/authRefreshQueue';
 import type { AuthFileItem } from '@/types/authFile';
+import type { AuthRefreshQueueResponse } from '@/types/authRefreshQueue';
 import {
   ArcElement,
   BarController,
@@ -19,6 +21,10 @@ import {
 } from 'chart.js';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { AuthRefreshQueueCountdownCard } from '@/components/credentialCenter/AuthRefreshQueueCountdownCard';
+import { CodexCredentialPoolStatsCard } from '@/components/credentialCenter/CodexCredentialPoolStatsCard';
+import { CodexCredentialQuotaCard } from '@/components/credentialCenter/CodexCredentialQuotaCard';
+import { CredentialStatsCard } from '@/components/credentialCenter/CredentialStatsCard';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useConfigStore, useThemeStore } from '@/stores';
@@ -95,6 +101,9 @@ export function MonitoringCenterPage() {
     loadUsage,
   } = useUsageData({ timeRange });
   const [authFiles, setAuthFiles] = useState<AuthFileItem[]>([]);
+  const [authRefreshQueue, setAuthRefreshQueue] = useState<AuthRefreshQueueResponse | null>(null);
+  const [authRefreshQueueLoading, setAuthRefreshQueueLoading] = useState(false);
+  const [authRefreshQueueError, setAuthRefreshQueueError] = useState<string | null>(null);
 
   const loadAuthFiles = useCallback(async () => {
     const res = await authFilesApi.list();
@@ -103,18 +112,32 @@ export function MonitoringCenterPage() {
     setAuthFiles(files);
   }, []);
 
+  const loadAuthRefreshQueue = useCallback(async () => {
+    setAuthRefreshQueueLoading(true);
+    try {
+      const payload = await authRefreshQueueApi.list();
+      setAuthRefreshQueue(payload);
+      setAuthRefreshQueueError(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t('credential_center.refresh_queue_load_error');
+      setAuthRefreshQueueError(message || t('credential_center.refresh_queue_load_error'));
+    } finally {
+      setAuthRefreshQueueLoading(false);
+    }
+  }, [t]);
+
   const handleRefresh = useCallback(async () => {
-    await Promise.all([loadUsage(), loadAuthFiles()]);
-  }, [loadAuthFiles, loadUsage]);
+    await Promise.all([loadUsage(), loadAuthFiles(), loadAuthRefreshQueue()]);
+  }, [loadAuthFiles, loadAuthRefreshQueue, loadUsage]);
 
   useHeaderRefresh(handleRefresh);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadAuthFiles().catch(() => {});
+      void Promise.all([loadAuthFiles(), loadAuthRefreshQueue()]).catch(() => {});
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadAuthFiles]);
+  }, [loadAuthFiles, loadAuthRefreshQueue]);
 
   useEffect(() => {
     try {
@@ -255,6 +278,40 @@ export function MonitoringCenterPage() {
           fixedHeight
           onRefresh={handleRefresh}
           lastRefreshedAt={lastRefreshedAt}
+        />
+      </div>
+
+      <div className={styles.fullWidthSection}>
+        <AuthRefreshQueueCountdownCard
+          queue={authRefreshQueue?.queue ?? []}
+          loading={authRefreshQueueLoading}
+          error={authRefreshQueueError}
+          generatedAt={authRefreshQueue?.generated_at ?? null}
+          onRefresh={loadAuthRefreshQueue}
+        />
+      </div>
+
+      <div className={styles.middleGrid}>
+        <CredentialStatsCard
+          usage={filteredUsage as UsagePayload | null}
+          loading={loading}
+          modelPrices={modelPrices}
+          authFiles={authFiles}
+          openaiProviders={config?.openaiCompatibility || []}
+        />
+        <CodexCredentialQuotaCard
+          usage={usage as UsagePayload | null}
+          loading={loading}
+          modelPrices={modelPrices}
+          authFiles={authFiles}
+        />
+      </div>
+
+      <div className={styles.fullWidthSection}>
+        <CodexCredentialPoolStatsCard
+          usage={usage as UsagePayload | null}
+          modelPrices={modelPrices}
+          authFiles={authFiles}
         />
       </div>
     </div>

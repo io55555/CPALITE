@@ -11,7 +11,7 @@ import {
 } from '@/services/api/usageService';
 import { useAuthStore, useUsageServiceStore } from '@/stores';
 import { detectApiBaseFromLocation } from '@/utils/connection';
-import { clearModelPrices, loadModelPrices, saveModelPrices, type ModelPrice } from '@/utils/usage';
+import { clearModelPrices, loadModelPrices, normalizeUsageData, saveModelPrices, type ModelPrice } from '@/utils/usage';
 
 export interface UsagePayload {
   total_requests?: number;
@@ -152,7 +152,7 @@ export function useUsageData(): UseUsageDataReturn {
           ? await usageServiceApi.getUsage(usageServiceBase, managementKey)
           : await apiClient.get<UsagePayload>('/usage');
       if (requestIdRef.current !== requestId) return;
-      setUsage(payload ?? null);
+      setUsage((normalizeUsageData(payload) as UsagePayload | null) ?? null);
       setLastRefreshedAt(new Date());
     } catch (err) {
       if (requestIdRef.current !== requestId) return;

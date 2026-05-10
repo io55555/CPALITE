@@ -94,6 +94,29 @@ const extractPacketBody = (packet: string): string => {
   return trimmed.slice(separatorMatch.index! + separatorMatch[0].length).trim();
 };
 
+const extractNamedSection = (content: string, title: string): string => {
+  const marker = `=== ${title} ===`;
+  const start = content.indexOf(marker);
+  if (start < 0) return '';
+  const from = start + marker.length;
+  const next = content.indexOf('=== ', from);
+  return content.slice(from, next >= 0 ? next : undefined).trim();
+};
+
+const firstNonEmpty = (...values: string[]): string => {
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+};
+
+const parseHTTPStatusCode = (packet: string, fallback?: number | null): number | null => {
+  const match = packet.match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})/m);
+  if (match?.[1]) return Number(match[1]);
+  return fallback && fallback > 0 ? fallback : null;
+};
+
 const extractFailureMessageFromJson = (text: string): string => {
   try {
     const parsed = JSON.parse(text) as {
@@ -107,7 +130,20 @@ const extractFailureMessageFromJson = (text: string): string => {
       return direct.trim();
     }
   } catch {
-    // 原始响应不一定是 JSON。
+    // 响应体可能不是 JSON。
+  }
+  return '';
+};
+
+const extractFailureLine = (text: string): string => {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  const lines = trimmed.split(/\r?\n/);
+  for (const prefix of ['Failure Message:', 'Error:']) {
+    const line = lines.find((item) => item.trim().startsWith(prefix));
+    if (line) {
+      return line.slice(line.indexOf(prefix) + prefix.length).trim();
+    }
   }
   return '';
 };
@@ -119,11 +155,27 @@ const summarizeFailureReason = (
   const trimmed = message.trim();
   if (!trimmed) return '';
   const lower = trimmed.toLowerCase();
+  if (trimmed.includes('未知失败原因') && trimmed.includes('未捕获到上游错误正文')) {
+    return '';
+  }
 
   const withDetail = (label: string) => (trimmed ? `${label}: ${trimmed}` : label);
 
+  if (lower.includes('missing provider baseurl') || lower.includes('missing provider base url')) {
+    return withDetail('上游 baseURL 配置错误');
+  }
+  if (
+    lower.includes('missing provider api key') ||
+    lower.includes('missing api key') ||
+    lower.includes('api_key required') ||
+    lower.includes('api key required') ||
+    lower.includes('no api key')
+  ) {
+    return withDetail('无 API Key');
+  }
   if (
     lower.includes('proxy error') ||
+    lower.includes('proxy_or_network_error') ||
     lower.includes('dial tcp') ||
     lower.includes('connectex') ||
     lower.includes('connection refused') ||
@@ -134,7 +186,7 @@ const summarizeFailureReason = (
     lower.includes('tls handshake') ||
     lower.includes('eof')
   ) {
-    return withDetail('网络或代理故障');
+    return withDetail('网络故障或代理 IP 故障');
   }
   if (
     lower.includes('missing auth') ||
@@ -143,15 +195,7 @@ const summarizeFailureReason = (
     lower.includes('credential unavailable') ||
     lower.includes('no available auth')
   ) {
-    return withDetail('无账号或无可用凭证');
-  }
-  if (
-    lower.includes('missing api key') ||
-    lower.includes('api_key required') ||
-    lower.includes('api key required') ||
-    lower.includes('no api key')
-  ) {
-    return withDetail('无 API Key');
+    return withDetail('无可用账号');
   }
   if (
     lower.includes('wrong api key') ||
@@ -178,20 +222,17 @@ const summarizeFailureReason = (
     lower.includes('insufficient balance') ||
     lower.includes('credit')
   ) {
-    return withDetail('额度耗尽或余额不足');
+    return withDetail('账号额度不足');
   }
   if (
     statusCode === 429 ||
     lower.includes('rate limit') ||
     lower.includes('too many requests')
   ) {
-    return withDetail('速率限制或临时限流');
+    return withDetail('触发限流');
   }
   if (statusCode === 401 || statusCode === 403 || lower.includes('forbidden') || lower.includes('unauthorized')) {
-    return withDetail('鉴权失败或权限受限');
-  }
-  if (lower.includes('baseurl') || lower.includes('base url')) {
-    return withDetail('提供商 baseURL 配置异常');
+    return withDetail('鉴权失败');
   }
   return trimmed;
 };
@@ -203,26 +244,104 @@ const summarizeMissingFailureReason = (
   if (!row) return '';
   const statusCode = row.failureStatusCode ?? null;
   if (statusCode === 401 || statusCode === 403) {
-    return '鉴权失败、无账号或 API Key 无效。';
+    return '鉴权失败，账号或 API Key 无效';
   }
   if (statusCode === 404) {
-    return '无匹配模型或上游接口路径不存在。';
+    return '无匹配模型或上游接口不存在';
   }
   if (statusCode === 407) {
-    return '代理认证失败或代理配置不可用。';
+    return '代理服务器认证失败';
   }
   if (statusCode === 408 || statusCode === 504) {
-    return '网络超时或代理 IP 故障。';
+    return '网络超时或代理 IP 故障';
   }
   if (statusCode === 429) {
-    return '速率限制、额度耗尽或临时限流。';
+    return '触发限流或账号额度不足';
   }
   if (statusCode !== null && statusCode >= 500) {
-    return '上游服务异常、网络故障或代理 IP 故障。';
+    return '上游服务异常或代理 IP 故障';
   }
-  const provider = row.provider && row.provider !== '-' ? row.provider : row.source;
-  const credential = credentialInfo?.name || row.authIndex;
-  return `失败记录未带回精确错误正文，请检查 ${provider || '当前渠道'} 的账号/API Key、代理 IP、模型匹配和额度状态；凭证：${credential || '-'}`;
+  if (
+    row.firstByteLatencyMs === 0 &&
+    row.inputTokens === 0 &&
+    row.outputTokens === 0 &&
+    row.totalTokens === 0
+  ) {
+    return '网络故障、代理 IP 故障或上游连接失败：请求未收到可解析的上游响应正文';
+  }
+  if (row.sourceType === 'openai' && row.model && row.model !== '-') {
+    return `OpenAI 兼容上游请求失败：请检查账号/API Key、代理 IP、baseURL 与模型 ${row.model} 是否匹配`;
+  }
+  const statusMessage = credentialInfo?.statusMessage?.trim();
+  if (statusMessage) {
+    return `凭证当前状态异常: ${statusMessage}`;
+  }
+  return '请求失败：当前历史记录缺少上游错误正文，无法进一步区分账号、API Key、代理 IP 或模型配置';
+};
+
+const isProxyOrNetworkFailure = (row: RequestEventRow): boolean => {
+  const text = `${row.failureMessage ?? ''}\n${row.rawResponse ?? ''}`.toLowerCase();
+  return (
+    text.includes('proxy_or_network_error') ||
+    text.includes('proxy') ||
+    text.includes('dial tcp') ||
+    text.includes('connectex') ||
+    text.includes('connection refused') ||
+    text.includes('connection reset') ||
+    text.includes('i/o timeout') ||
+    text.includes('no such host') ||
+    text.includes('tls handshake')
+  );
+};
+
+const statusRulerActionLabel = (detail: string): string => {
+  const action = detail.match(/动作:\s*([^\r\n]+)/)?.[1]?.trim() ?? '';
+  if (action.includes('禁用')) return '禁用';
+  if (action.includes('冷却')) return '冷却';
+  return action || '';
+};
+
+const formatResultLabel = (row: RequestEventRow): string => {
+  if (!row.failed) return '成功';
+  const status = parseHTTPStatusCode(
+    extractNamedSection(row.rawResponse ?? '', '供应商返回CPA的完整数据包') || (row.rawResponse ?? ''),
+    row.failureStatusCode ?? null
+  );
+  const base = isProxyOrNetworkFailure(row) && !status ? '失败 ip' : `失败${status ? ` ${status}` : ''}`;
+  const rulerAction = statusRulerActionLabel(extractNamedSection(row.rawResponse ?? '', '触发status-rulers'));
+  return rulerAction ? `${base} ${rulerAction}` : base;
+};
+
+const requestPathFromEndpoint = (endpoint: string): string => {
+  const trimmed = endpoint.trim();
+  if (!trimmed || trimmed === '-') return '/v1/chat/completions';
+  const parts = trimmed.split(/\s+/);
+  if (parts.length >= 2 && parts[1].startsWith('/')) return parts[1];
+  return trimmed.startsWith('/') ? trimmed : '/v1/chat/completions';
+};
+
+const buildFallbackRequestPacket = (row: RequestEventRow): string =>
+  [
+    `POST ${requestPathFromEndpoint(row.endpoint)} HTTP/2`,
+    'content-type: application/json',
+    '',
+    JSON.stringify({ model: row.model === '-' ? undefined : row.model }),
+    '',
+    '# 该历史记录未保存完整请求体；以上仅保留请求包格式，完整失败记录如下。',
+    JSON.stringify(row, null, 2),
+  ].join('\n');
+
+const buildFallbackResponsePacket = (row: RequestEventRow, message: string): string => {
+  const status = row.failureStatusCode && row.failureStatusCode > 0 ? row.failureStatusCode : 502;
+  return [
+    `HTTP/1.1 ${status}`,
+    'content-type: text/plain; charset=utf-8',
+    '',
+    message || 'unknown failure',
+    '',
+    '# 该历史记录未保存完整响应体；以上仅保留响应包格式，完整失败记录如下。',
+    JSON.stringify(row, null, 2),
+  ].join('\n');
 };
 
 export interface RequestEventsDetailsCardProps {
@@ -329,6 +448,7 @@ export function RequestEventsDetailsCard({
   const { t, i18n } = useTranslation();
   const { showConfirmation, showNotification } = useNotificationStore();
   const deleteUsageRecords = useUsageStatsStore((state) => state.deleteUsageRecords);
+  const deleteAllUsageRecords = useUsageStatsStore((state) => state.deleteAllUsageRecords);
 
   const [modelFilter, setModelFilter] = useState(ALL_FILTER);
   const [sourceFilter, setSourceFilter] = useState(ALL_FILTER);
@@ -342,6 +462,7 @@ export function RequestEventsDetailsCard({
   const [selectedFailureLogText, setSelectedFailureLogText] = useState('');
   const [selectedFailureLogLoading, setSelectedFailureLogLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedRowIds, setSelectedRowIds] = useState<Record<string, true>>({});
   const [nextRefreshAtMs, setNextRefreshAtMs] = useState<number | null>(null);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
 
@@ -648,6 +769,21 @@ export function RequestEventsDetailsCard({
   );
 
   const renderedRows = useMemo(() => filteredRows.slice(0, MAX_RENDERED_EVENTS), [filteredRows]);
+  const selectableRenderedRows = useMemo(
+    () => renderedRows.filter((row) => row.backendId),
+    [renderedRows]
+  );
+  const selectedRenderedIds = useMemo(
+    () => selectableRenderedRows.map((row) => row.backendId!).filter((id) => selectedRowIds[id]),
+    [selectableRenderedRows, selectedRowIds]
+  );
+  const selectedFilteredIds = useMemo(
+    () => filteredRows.map((row) => row.backendId).filter((id): id is string => Boolean(id && selectedRowIds[id])),
+    [filteredRows, selectedRowIds]
+  );
+  const allRenderedSelected =
+    selectableRenderedRows.length > 0 && selectedRenderedIds.length === selectableRenderedRows.length;
+  const hasRenderedSelection = selectedRenderedIds.length > 0;
 
   const hasActiveFilters =
     effectiveModelFilter !== ALL_FILTER ||
@@ -659,6 +795,52 @@ export function RequestEventsDetailsCard({
     setSourceFilter(ALL_FILTER);
     setResultFilter(ALL_FILTER);
   };
+
+  useEffect(() => {
+    const validIds = new Set(rows.map((row) => row.backendId).filter(Boolean));
+    setSelectedRowIds((current) => {
+      let changed = false;
+      const next: Record<string, true> = {};
+      Object.keys(current).forEach((id) => {
+        if (validIds.has(id)) {
+          next[id] = true;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [rows]);
+
+  const toggleSelectAllRendered = useCallback(() => {
+    setSelectedRowIds((current) => {
+      const next = { ...current };
+      if (allRenderedSelected) {
+        selectableRenderedRows.forEach((row) => {
+          delete next[row.backendId!];
+        });
+      } else {
+        selectableRenderedRows.forEach((row) => {
+          next[row.backendId!] = true;
+        });
+      }
+      return next;
+    });
+  }, [allRenderedSelected, selectableRenderedRows]);
+
+  const toggleSelectRow = useCallback((row: RequestEventRow) => {
+    const id = row.backendId;
+    if (!id) return;
+    setSelectedRowIds((current) => {
+      const next = { ...current };
+      if (next[id]) {
+        delete next[id];
+      } else {
+        next[id] = true;
+      }
+      return next;
+    });
+  }, []);
 
   const handleExportCsv = () => {
     if (!filteredRows.length) return;
@@ -759,6 +941,7 @@ export function RequestEventsDetailsCard({
           setDeletingId(backendId);
           try {
             await deleteUsageRecords([backendId]);
+            await onRefresh?.();
             showNotification(t('usage_stats.request_events_delete_success'), 'success');
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : '';
@@ -773,8 +956,70 @@ export function RequestEventsDetailsCard({
         },
       });
     },
-    [deleteUsageRecords, showConfirmation, showNotification, t]
+    [deleteUsageRecords, onRefresh, showConfirmation, showNotification, t]
   );
+
+  const deleteRowsByIds = useCallback(
+    (ids: string[], confirmMessage: string) => {
+      const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+      if (!uniqueIds.length) return;
+      showConfirmation({
+        title: '删除请求事件',
+        message: confirmMessage,
+        confirmText: t('common.confirm'),
+        variant: 'danger',
+        onConfirm: async () => {
+          try {
+            await deleteUsageRecords(uniqueIds);
+            await onRefresh?.();
+            setSelectedRowIds((current) => {
+              const next = { ...current };
+              uniqueIds.forEach((id) => {
+                delete next[id];
+              });
+              return next;
+            });
+            showNotification(`已删除 ${uniqueIds.length} 条请求事件`, 'success');
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : '';
+            showNotification(`删除请求事件失败${message ? `: ${message}` : ''}`, 'error');
+            throw err;
+          }
+        },
+      });
+    },
+    [deleteUsageRecords, onRefresh, showConfirmation, showNotification, t]
+  );
+
+  const handleDeleteSelectedRows = useCallback(() => {
+    deleteRowsByIds(selectedFilteredIds, `确定删除已勾选的 ${selectedFilteredIds.length} 条请求事件吗？`);
+  }, [deleteRowsByIds, selectedFilteredIds]);
+
+  const handleDeleteCurrentPageRows = useCallback(() => {
+    const ids = renderedRows.map((row) => row.backendId).filter((id): id is string => Boolean(id));
+    deleteRowsByIds(ids, `确定删除当前页显示的 ${ids.length} 条请求事件吗？`);
+  }, [deleteRowsByIds, renderedRows]);
+
+  const handleDeleteAllRows = useCallback(() => {
+    showConfirmation({
+      title: '删除全部请求事件',
+      message: '确定删除所有请求事件吗？该操作会清空已持久化的 usage 记录。',
+      confirmText: t('common.confirm'),
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteAllUsageRecords();
+          setSelectedRowIds({});
+          showNotification('已删除所有请求事件', 'success');
+          await onRefresh?.();
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : '';
+          showNotification(`删除所有请求事件失败${message ? `: ${message}` : ''}`, 'error');
+          throw err;
+        }
+      },
+    });
+  }, [deleteAllUsageRecords, onRefresh, showConfirmation, showNotification, t]);
 
   const selectedCredentialInfo = useMemo(() => {
     if (!selectedFailureRow) return null;
@@ -810,6 +1055,13 @@ export function RequestEventsDetailsCard({
   }, [selectedFailureLogText, selectedFailureRow]);
   const selectedFailureMessage = useMemo(() => {
     if (!selectedFailureRow) return '';
+    const upstreamResponse =
+      extractNamedSection(selectedFailureCapturedResponse, '供应商返回CPA的完整数据包') ||
+      selectedFailureCapturedResponse;
+    const status = parseHTTPStatusCode(upstreamResponse, selectedFailureRow.failureStatusCode ?? null);
+    if (status) {
+      return `供应商响应${status}`;
+    }
     const directFailure = selectedFailureRow.failureMessage?.trim();
     const directFailureSummary = summarizeFailureReason(
       directFailure || '',
@@ -818,22 +1070,19 @@ export function RequestEventsDetailsCard({
     if (directFailureSummary) {
       return directFailureSummary;
     }
-    const responseBody = extractPacketBody(selectedFailureCapturedResponse);
+    const responseBody = extractPacketBody(upstreamResponse);
     const responseMessage =
       extractFailureMessageFromJson(responseBody) ||
-      extractFailureMessageFromJson(selectedFailureCapturedResponse) ||
+      extractFailureMessageFromJson(upstreamResponse) ||
+      extractFailureLine(upstreamResponse) ||
       responseBody ||
-      selectedFailureCapturedResponse.trim();
+      upstreamResponse.trim();
     const responseSummary = summarizeFailureReason(
       responseMessage,
       selectedFailureRow.failureStatusCode ?? null
     );
     if (responseSummary) {
       return responseSummary.length > 2000 ? `${responseSummary.slice(0, 2000)}...` : responseSummary;
-    }
-    const statusMessage = selectedCredentialInfo?.statusMessage?.trim();
-    if (statusMessage) {
-      return `未捕获到该次请求的精确失败原因，以下为当前凭证状态：${statusMessage}`;
     }
     return summarizeMissingFailureReason(selectedFailureRow, selectedCredentialInfo ?? undefined);
   }, [selectedCredentialInfo, selectedFailureCapturedResponse, selectedFailureRow]);
@@ -876,43 +1125,53 @@ export function RequestEventsDetailsCard({
   }, [selectedFailureRow]);
   const selectedFailureRequestPacket = useMemo(() => {
     if (!selectedFailureRow) return '';
+    const client = extractNamedSection(selectedFailureCapturedRequest, '客户端发给CPA的完整数据包');
+    if (client) return client;
     if (selectedFailureCapturedRequest) return selectedFailureCapturedRequest;
-    return [
-      '# 未捕获完整原始请求包，以下为当前可还原的请求上下文',
-      `Timestamp: ${selectedFailureRow.timestamp}`,
-      `Endpoint: ${selectedFailureRow.endpoint}`,
-      `Request ID: ${selectedFailureRow.requestId ?? '-'}`,
-      `Model: ${selectedFailureRow.model}`,
-      `Provider: ${selectedFailureRow.provider}`,
-      `Source: ${selectedFailureRow.source}`,
-      `Source Raw: ${selectedFailureRow.sourceRaw}`,
-      `Auth Type: ${selectedFailureRow.authType}`,
-      `Auth Index: ${selectedFailureRow.authIndex}`,
-    ].join('\n');
+    return buildFallbackRequestPacket(selectedFailureRow);
   }, [selectedFailureCapturedRequest, selectedFailureRow]);
+  const selectedFailureUpstreamRequestPacket = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    return extractNamedSection(selectedFailureCapturedRequest, 'CPA发给供应商的完整数据包');
+  }, [selectedFailureCapturedRequest, selectedFailureRow]);
+  const selectedFailureUpstreamResponsePacket = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    return firstNonEmpty(
+      extractNamedSection(selectedFailureCapturedResponse, '供应商返回CPA的完整数据包'),
+      selectedFailureCapturedResponse
+    );
+  }, [selectedFailureCapturedResponse, selectedFailureRow]);
+  const selectedFailureStatusRulers = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    return extractNamedSection(selectedFailureCapturedResponse, '触发status-rulers');
+  }, [selectedFailureCapturedResponse, selectedFailureRow]);
   const selectedFailureResponsePacket = useMemo(() => {
     if (!selectedFailureRow) return '';
+    const client = extractNamedSection(selectedFailureCapturedResponse, 'CPA发送给客户端的完整数据包');
+    if (client) return client;
     if (selectedFailureCapturedResponse) return selectedFailureCapturedResponse;
-    return [
-      '# 未捕获完整原始响应包，以下为当前可还原的失败说明',
-      `Endpoint: ${selectedFailureRow.endpoint}`,
-      `Request ID: ${selectedFailureRow.requestId ?? '-'}`,
-      `Provider: ${selectedFailureRow.provider}`,
-      `Source: ${selectedFailureRow.source}`,
-      `Auth Type: ${selectedFailureRow.authType}`,
-      `Auth Index: ${selectedFailureRow.authIndex}`,
-      `Failure Message: ${selectedFailureMessage || 'unknown failure'}`,
-    ].join('\n');
+    return buildFallbackResponsePacket(selectedFailureRow, selectedFailureMessage);
   }, [selectedFailureCapturedResponse, selectedFailureMessage, selectedFailureRow]);
   const selectedFailureNote = useMemo(() => {
-    if (selectedFailureCapturedRequest || selectedFailureCapturedResponse) {
+    if (
+      selectedFailureCapturedRequest ||
+      selectedFailureCapturedResponse ||
+      selectedFailureUpstreamRequestPacket ||
+      selectedFailureUpstreamResponsePacket
+    ) {
       return '以下内容为该失败事件捕获到的原始请求/响应数据。';
     }
     if (selectedCredentialInfo?.statusMessage?.trim()) {
       return '该事件未捕获到完整原始包，失败说明已回退到请求记录与当前凭证状态。';
     }
     return '该事件未捕获到完整原始包，失败说明为当前可还原的最接近信息。';
-  }, [selectedCredentialInfo, selectedFailureCapturedRequest, selectedFailureCapturedResponse]);
+  }, [
+    selectedCredentialInfo,
+    selectedFailureCapturedRequest,
+    selectedFailureCapturedResponse,
+    selectedFailureUpstreamRequestPacket,
+    selectedFailureUpstreamResponsePacket,
+  ]);
 
   return (
     <Card
@@ -920,6 +1179,30 @@ export function RequestEventsDetailsCard({
       className={fixedHeight ? styles.requestEventsFixedCard : undefined}
       extra={
         <div className={styles.requestEventsActions}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleDeleteSelectedRows}
+            disabled={selectedFilteredIds.length === 0}
+          >
+            删除勾选条目
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleDeleteCurrentPageRows}
+            disabled={renderedRows.length === 0}
+          >
+            删除当前页条目
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleDeleteAllRows}
+            disabled={rows.length === 0}
+          >
+            删除所有条目
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -1051,6 +1334,7 @@ export function RequestEventsDetailsCard({
           <div className={styles.requestEventsTableWrapper}>
             <table className={`${styles.table} ${styles.requestEventsTable}`}>
               <colgroup>
+                <col className={styles.requestEventsSelectCol} />
                 <col className={styles.requestEventsActionCol} />
                 <col className={styles.requestEventsTimestampCol} />
                 <col className={styles.requestEventsModelCol} />
@@ -1069,6 +1353,19 @@ export function RequestEventsDetailsCard({
               </colgroup>
               <thead>
                 <tr>
+                  <th className={styles.requestEventsSelectCell}>
+                    <input
+                      type="checkbox"
+                      checked={allRenderedSelected}
+                      ref={(element) => {
+                        if (element) {
+                          element.indeterminate = hasRenderedSelection && !allRenderedSelected;
+                        }
+                      }}
+                      onChange={toggleSelectAllRendered}
+                      aria-label="全选或反选当前页请求事件"
+                    />
+                  </th>
                   <th aria-label={t('usage_stats.request_events_delete_action')} />
                   <th>{t('usage_stats.request_events_timestamp')}</th>
                   <th>{t('usage_stats.model_name')}</th>
@@ -1089,6 +1386,15 @@ export function RequestEventsDetailsCard({
               <tbody>
                 {renderedRows.map((row) => (
                   <tr key={row.id}>
+                    <td className={styles.requestEventsSelectCell}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(row.backendId && selectedRowIds[row.backendId])}
+                        disabled={!row.backendId}
+                        onChange={() => toggleSelectRow(row)}
+                        aria-label="勾选请求事件"
+                      />
+                    </td>
                     <td className={styles.requestEventsDeleteCell}>
                       <button
                         type="button"
@@ -1119,10 +1425,10 @@ export function RequestEventsDetailsCard({
                           onClick={() => setSelectedFailureRow(row)}
                           aria-label={t('usage_stats.request_events_failure_log_view')}
                         >
-                          {t('stats.failure')}
+                          {formatResultLabel(row)}
                         </button>
                       ) : (
-                        <span className={styles.requestEventsResultSuccess}>{t('stats.success')}</span>
+                        <span className={styles.requestEventsResultSuccess}>{formatResultLabel(row)}</span>
                       )}
                     </td>
                     {hasTimingData && (
@@ -1238,14 +1544,39 @@ export function RequestEventsDetailsCard({
             ) : null}
 
             <div className={styles.requestEventsFailureMessageBlock}>
-              <div className={styles.requestEventsFailureMetaLabel}>原始请求包</div>
+              <div className={styles.requestEventsFailureMetaLabel}>客户端发给CPA的完整数据包</div>
               <pre className={styles.requestEventsFailurePacket}>
                 {selectedFailureRequestPacket}
               </pre>
             </div>
 
+            {selectedFailureUpstreamRequestPacket && (
+              <div className={styles.requestEventsFailureMessageBlock}>
+                <div className={styles.requestEventsFailureMetaLabel}>CPA发给供应商的完整数据包</div>
+                <pre className={styles.requestEventsFailurePacket}>
+                  {selectedFailureUpstreamRequestPacket}
+                </pre>
+              </div>
+            )}
+
             <div className={styles.requestEventsFailureMessageBlock}>
-              <div className={styles.requestEventsFailureMetaLabel}>原始响应包</div>
+              <div className={styles.requestEventsFailureMetaLabel}>供应商返回CPA的完整数据包</div>
+              <pre className={styles.requestEventsFailurePacket}>
+                {selectedFailureUpstreamResponsePacket || selectedFailureResponsePacket}
+              </pre>
+            </div>
+
+            {selectedFailureStatusRulers && (
+              <div className={styles.requestEventsFailureMessageBlock}>
+                <div className={styles.requestEventsFailureMetaLabel}>触发status-rulers</div>
+                <pre className={styles.requestEventsFailurePacket}>
+                  {selectedFailureStatusRulers}
+                </pre>
+              </div>
+            )}
+
+            <div className={styles.requestEventsFailureMessageBlock}>
+              <div className={styles.requestEventsFailureMetaLabel}>CPA发送给客户端的完整数据包</div>
               <pre className={styles.requestEventsFailurePacket}>
                 {selectedFailureResponsePacket}
               </pre>

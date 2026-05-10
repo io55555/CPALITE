@@ -26,7 +26,9 @@ const (
 	apiWebsocketTimelineKey = "API_WEBSOCKET_TIMELINE"
 	usageRawRequestKey      = "USAGE_RAW_REQUEST"
 	usageRawResponseKey     = "USAGE_RAW_RESPONSE"
+	usageStatusRulersKey    = "USAGE_STATUS_RULERS"
 	creditsUsedKey          = "__antigravity_credits_used__"
+	usageRawPacketMaxBytes  = 256 * 1024
 )
 
 // UpstreamRequestLog captures the outbound upstream request details for logging.
@@ -60,7 +62,7 @@ func RecordUsageRawRequest(ctx context.Context, raw string) {
 	if ginCtx == nil || strings.TrimSpace(raw) == "" {
 		return
 	}
-	ginCtx.Set(usageRawRequestKey, raw)
+	ginCtx.Set(usageRawRequestKey, truncateUsageRawPacket(raw))
 }
 
 func RecordUsageRawResponse(ctx context.Context, raw string) {
@@ -68,7 +70,7 @@ func RecordUsageRawResponse(ctx context.Context, raw string) {
 	if ginCtx == nil || strings.TrimSpace(raw) == "" {
 		return
 	}
-	ginCtx.Set(usageRawResponseKey, raw)
+	ginCtx.Set(usageRawResponseKey, truncateUsageRawPacket(raw))
 }
 
 func UsageRawPackets(ctx context.Context) (string, string) {
@@ -91,6 +93,97 @@ func UsageRawPackets(ctx context.Context) (string, string) {
 		}
 	}
 	return valueString(usageRawRequestKey), valueString(usageRawResponseKey)
+}
+
+func RecordUsageStatusRulers(ctx context.Context, detail string) {
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil || strings.TrimSpace(detail) == "" {
+		return
+	}
+	ginCtx.Set(usageStatusRulersKey, truncateUsageRawPacket(detail))
+}
+
+func UsageStatusRulers(ctx context.Context) string {
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil {
+		return ""
+	}
+	value, exists := ginCtx.Get(usageStatusRulersKey)
+	if !exists {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func BuildDownstreamRawRequest(ctx context.Context, body []byte) string {
+	if ctx == nil {
+		return string(body)
+	}
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil || ginCtx.Request == nil {
+		return string(body)
+	}
+	req := ginCtx.Request
+	path := "/"
+	if req.URL != nil && req.URL.RequestURI() != "" {
+		path = req.URL.RequestURI()
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s %s\n", req.Method, path, formatHTTPProto(req.ProtoMajor, req.ProtoMinor))
+	writeDownstreamHeaders(&b, req, len(body))
+	b.WriteByte('\n')
+	b.Write(body)
+	return b.String()
+}
+
+func writeDownstreamHeaders(b *strings.Builder, req *http.Request, bodyLen int) {
+	if b == nil || req == nil {
+		return
+	}
+	if req.Host != "" {
+		fmt.Fprintf(b, "Host: %s\n", req.Host)
+	}
+	hasContentLength := false
+	for key := range req.Header {
+		if strings.EqualFold(key, "Content-Length") {
+			hasContentLength = true
+			break
+		}
+	}
+	_ = req.Header.Write(b)
+	if !hasContentLength {
+		contentLength := req.ContentLength
+		if contentLength <= 0 && bodyLen > 0 {
+			contentLength = int64(bodyLen)
+		}
+		if contentLength > 0 {
+			fmt.Fprintf(b, "Content-Length: %d\n", contentLength)
+		}
+	}
+}
+
+func truncateUsageRawPacket(value string) string {
+	if len(value) <= usageRawPacketMaxBytes {
+		return value
+	}
+	return value[:usageRawPacketMaxBytes]
+}
+
+func formatHTTPProto(major, minor int) string {
+	if major <= 0 {
+		return "HTTP/1.1"
+	}
+	if major == 2 && minor == 0 {
+		return "HTTP/2"
+	}
+	return fmt.Sprintf("HTTP/%d.%d", major, minor)
 }
 
 func APIRequestResponsePackets(ctx context.Context) (string, string) {

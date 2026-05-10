@@ -42,6 +42,7 @@ func newUsageQueryCache() *usageQueryCacheStore {
 
 type deleteUsageRequest struct {
 	IDs []string `json:"ids"`
+	All bool     `json:"all"`
 }
 
 type usageQueueRecord []byte
@@ -184,6 +185,23 @@ func (h *Handler) DeleteUsageRecords(c *gin.Context) {
 		return
 	}
 
+	if body.All {
+		if clearStore, ok := store.(interface {
+			DeleteAll(context.Context) (usage.DeleteResult, error)
+		}); ok {
+			result, err := clearStore.DeleteAll(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete usage records"})
+				return
+			}
+			usageQueryCache = newUsageQueryCache()
+			c.JSON(http.StatusOK, result)
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "usage store does not support delete all"})
+		return
+	}
+
 	ids := make([]string, 0, len(body.IDs))
 	seen := make(map[string]struct{}, len(body.IDs))
 	for _, id := range body.IDs {
@@ -207,6 +225,7 @@ func (h *Handler) DeleteUsageRecords(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete usage records"})
 		return
 	}
+	usageQueryCache = newUsageQueryCache()
 	c.JSON(http.StatusOK, result)
 }
 

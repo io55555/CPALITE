@@ -14,6 +14,7 @@ import (
 	proxyconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
@@ -25,6 +26,9 @@ func newTestServer(t *testing.T) *Server {
 	gin.SetMode(gin.TestMode)
 
 	tmpDir := t.TempDir()
+	t.Cleanup(func() {
+		_ = usage.CloseDefaultStore()
+	})
 	authDir := filepath.Join(tmpDir, "auth")
 	if err := os.MkdirAll(authDir, 0o700); err != nil {
 		t.Fatalf("failed to create auth dir: %v", err)

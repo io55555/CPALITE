@@ -93,8 +93,8 @@ passthrough-headers: false
 request-retry: 3
 
 # Maximum number of different credentials to try for one failed request.
-# Set to 0 to keep legacy behavior (try all available credentials).
-max-retry-credentials: 0
+# Default: 10. Increase if one request should scan more candidate keys before returning failure.
+max-retry-credentials: 10
 
 # Maximum wait time in seconds for a cooled-down credential before triggering a retry.
 max-retry-interval: 30
@@ -106,6 +106,10 @@ disable-cooling: false
 # This protects fill-first routing from repeatedly selecting the same key when its proxy is down.
 # Default: 300 seconds.
 proxy-failure-cooldown-seconds: 300
+
+# Maximum proxy failure cooldown after consecutive proxy/network failures.
+# Default: 600 seconds.
+proxy-failure-max-cooldown-seconds: 600
 
 # disable-image-generation supports: false (default), true, or "chat".
 # - true: disable image_generation everywhere (also returns 404 for /v1/images/generations and /v1/images/edits).

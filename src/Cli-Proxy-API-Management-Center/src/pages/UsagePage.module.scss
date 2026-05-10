@@ -1082,8 +1082,12 @@
 }
 
 .requestEventsTable {
-  min-width: 1640px;
+  min-width: 1688px;
   table-layout: fixed;
+}
+
+.requestEventsSelectCol {
+  width: 44px;
 }
 
 .requestEventsActionCol {
@@ -1121,6 +1125,18 @@
 .requestEventsDeleteCell {
   width: 36px;
   text-align: center;
+}
+
+.requestEventsSelectCell {
+  width: 36px;
+  text-align: center;
+
+  input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+  }
 }
 
 .requestEventsDeleteButton {

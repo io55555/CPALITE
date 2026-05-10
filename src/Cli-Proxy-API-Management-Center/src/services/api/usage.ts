@@ -24,6 +24,15 @@ export const usageApi = {
     }),
 
   /**
+   * 删除全部 usage 记录
+   */
+  deleteAllUsage: () =>
+    apiClient.delete<UsageDeleteResponse>('/usage', {
+      timeout: USAGE_TIMEOUT_MS,
+      data: { all: true },
+    }),
+
+  /**
    * 计算密钥成功/失败统计，必要时会先获取 usage 数据
    */
   async getKeyStats(usageData?: unknown): Promise<KeyStats> {

@@ -428,6 +428,27 @@ func (s *SQLiteStore) Delete(ctx context.Context, ids []string) (DeleteResult, e
 	return result, nil
 }
 
+func (s *SQLiteStore) DeleteAll(ctx context.Context) (DeleteResult, error) {
+	var result DeleteResult
+	if s == nil || s.db == nil {
+		return result, nil
+	}
+	s.mu.Lock()
+	result.Deleted += int64(len(s.pending))
+	s.pending = nil
+	s.mu.Unlock()
+	res, err := s.db.ExecContext(ctx, "DELETE FROM usage_records")
+	if err != nil {
+		return result, fmt.Errorf("usage sqlite delete all: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return result, fmt.Errorf("usage sqlite delete all rows affected: %w", err)
+	}
+	result.Deleted += rows
+	return result, nil
+}
+
 func (s *SQLiteStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil

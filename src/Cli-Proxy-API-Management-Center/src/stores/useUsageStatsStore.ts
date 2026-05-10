@@ -51,6 +51,7 @@ type UsageStatsState = {
   scopeKey: string;
   loadUsageStats: (options?: LoadUsageStatsOptions) => Promise<void>;
   deleteUsageRecords: (ids: string[]) => Promise<void>;
+  deleteAllUsageRecords: () => Promise<void>;
   clearUsageStats: () => void;
 };
 
@@ -374,6 +375,24 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
         usageDetailsByKey,
         deletedUsageIds,
       };
+    });
+  },
+
+  deleteAllUsageRecords: async () => {
+    await usageApi.deleteAllUsage();
+    usageRequestToken += 1;
+    inFlightUsageRequest = null;
+    set({
+      usage: null,
+      keyStats: createEmptyKeyStats(),
+      usageDetails: [],
+      usageDetailsByKey: {},
+      loadedRanges: [],
+      deletedUsageIds: {},
+      loading: false,
+      error: null,
+      lastRefreshedAt: Date.now(),
+      scopeKey: '',
     });
   },
 

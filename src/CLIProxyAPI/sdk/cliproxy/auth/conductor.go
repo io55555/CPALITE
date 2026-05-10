@@ -2798,6 +2798,10 @@ func isRequestInvalidError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var authFault interface{ AuthFault() bool }
+	if errors.As(err, &authFault) && authFault.AuthFault() {
+		return false
+	}
 	if isModelSupportError(err) {
 		return false
 	}
@@ -4164,7 +4168,8 @@ func debugLogAuthSelection(entry *log.Entry, auth *Auth, provider string, model 
 	switch accountType {
 	case "api_key":
 		if isOpenAICompatAPIKeyAuth(auth) {
-			entry.Infof("selected OpenAI compatible key | provider=%s model=%s auth=%s api_key=%s%s", provider, model, auth.ID, accountInfo, suffix)
+			entry.Debugf("[2/6][%s][api_key=%s auth=%s]CPA选择apikey或凭证账号(账号名 或 key)", provider, accountInfo, auth.ID)
+			entry.Debugf("selected OpenAI compatible key | provider=%s model=%s auth=%s api_key=%s%s", provider, model, auth.ID, accountInfo, suffix)
 			return
 		}
 		if log.IsLevelEnabled(log.DebugLevel) {

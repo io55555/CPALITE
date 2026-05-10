@@ -19,7 +19,6 @@ import { QuotaPage } from '@/pages/QuotaPage';
 import { MonitoringCenterPage } from '@/pages/MonitoringCenterPage';
 import { MonitoringCenterPage as MonitoringCenterSeakeePage } from '@/pages/MonitoringCenterSeakeePage';
 import { CodexInspectionPage as CodexInspectionSeakeePage } from '@/pages/CodexInspectionSeakeePage';
-import { CredentialCenterPage } from '@/pages/CredentialCenterPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SystemPage } from '@/pages/SystemPage';
@@ -78,7 +77,7 @@ const mainRoutes = [
   { path: '/monitor', element: <MonitoringCenterPage /> },
   { path: '/monitorseakee', element: <MonitoringCenterSeakeePage /> },
   { path: '/monitorseakee/codex-inspection', element: <CodexInspectionSeakeePage /> },
-  { path: '/credential-center', element: <CredentialCenterPage /> },
+  { path: '/credential-center', element: <Navigate to="/monitor" replace /> },
   { path: '/config', element: <ConfigPage /> },
   { path: '/logs', element: <LogsPage /> },
   { path: '/system', element: <SystemPage /> },

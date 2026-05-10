@@ -17,12 +17,14 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
+	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -537,6 +539,7 @@ func appendAPIResponse(c *gin.Context, data []byte) {
 func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	providers, normalizedModel, errMsg := h.getRequestDetails(modelName)
 	if errMsg != nil {
+		publishRequestValidationFailureUsage(ctx, handlerType, modelName, rawJSON, errMsg)
 		return nil, nil, errMsg
 	}
 	reqMeta := requestExecutionMetadata(ctx)
@@ -557,6 +560,7 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
+	logCPAReceivedClientRequest(ctx, strings.Join(providers, ","), normalizedModel, rawJSON)
 	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
 	if err != nil {
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
@@ -588,6 +592,7 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	providers, normalizedModel, errMsg := h.getRequestDetails(modelName)
 	if errMsg != nil {
+		publishRequestValidationFailureUsage(ctx, handlerType, modelName, rawJSON, errMsg)
 		return nil, nil, errMsg
 	}
 	reqMeta := requestExecutionMetadata(ctx)
@@ -635,16 +640,47 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 }
 
 func publishAuthSelectionFailureUsage(ctx context.Context, provider, model string, rawJSON []byte, status int, err error) {
-	rawRequest := buildDownstreamRawRequest(ctx, rawJSON)
+	rawRequest := truncateUsagePacket(buildDownstreamRawRequest(ctx, rawJSON))
 	errText := ""
 	if err != nil {
 		errText = err.Error()
 	}
-	rawResponse := fmt.Sprintf("HTTP/1.1 %d %s\nContent-Type: application/json\n\n%s", status, http.StatusText(status), string(BuildErrorResponseBody(status, errText)))
+	rawResponse := truncateUsagePacket(fmt.Sprintf("HTTP/1.1 %d %s\nContent-Type: application/json\n\n%s", status, http.StatusText(status), string(BuildErrorResponseBody(status, errText))))
 	coreusage.PublishRecord(ctx, coreusage.Record{
 		Provider:    provider,
 		Model:       model,
 		Source:      "auth-selection",
+		RequestedAt: time.Now(),
+		Failed:      true,
+		RawRequest:  rawRequest,
+		RawResponse: rawResponse,
+		Fail: coreusage.Failure{
+			StatusCode: status,
+			Body:       errText,
+		},
+	})
+}
+
+func publishRequestValidationFailureUsage(ctx context.Context, provider, model string, rawJSON []byte, msg *interfaces.ErrorMessage) {
+	if msg == nil {
+		return
+	}
+	status := msg.StatusCode
+	if status <= 0 {
+		status = http.StatusBadGateway
+	}
+	errText := http.StatusText(status)
+	if msg.Error != nil {
+		if trimmed := strings.TrimSpace(msg.Error.Error()); trimmed != "" {
+			errText = trimmed
+		}
+	}
+	rawRequest := truncateUsagePacket(buildDownstreamRawRequest(ctx, rawJSON))
+	rawResponse := truncateUsagePacket(fmt.Sprintf("HTTP/1.1 %d %s\nContent-Type: application/json\n\n%s", status, http.StatusText(status), string(BuildErrorResponseBody(status, errText))))
+	coreusage.PublishRecord(ctx, coreusage.Record{
+		Provider:    strings.TrimSpace(provider),
+		Model:       strings.TrimSpace(model),
+		Source:      "request-validation",
 		RequestedAt: time.Now(),
 		Failed:      true,
 		RawRequest:  rawRequest,
@@ -670,11 +706,126 @@ func buildDownstreamRawRequest(ctx context.Context, body []byte) string {
 		path = req.URL.RequestURI()
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s HTTP/%d.%d\n", req.Method, path, req.ProtoMajor, req.ProtoMinor)
+	fmt.Fprintf(&b, "%s %s %s\n", req.Method, path, formatHTTPProto(req.ProtoMajor, req.ProtoMinor))
+	if req.Host != "" {
+		fmt.Fprintf(&b, "Host: %s\n", req.Host)
+	}
+	hasContentLength := false
+	for key := range req.Header {
+		if strings.EqualFold(key, "Content-Length") {
+			hasContentLength = true
+			break
+		}
+	}
 	_ = req.Header.Write(&b)
+	if !hasContentLength {
+		contentLength := req.ContentLength
+		if contentLength <= 0 && len(body) > 0 {
+			contentLength = int64(len(body))
+		}
+		if contentLength > 0 {
+			fmt.Fprintf(&b, "Content-Length: %d\n", contentLength)
+		}
+	}
 	b.WriteByte('\n')
 	b.Write(body)
 	return b.String()
+}
+
+func logCPAReceivedClientRequest(ctx context.Context, provider, model string, body []byte) {
+	entry := logEntryWithRequestID(ctx)
+	raw := buildDownstreamRawRequest(ctx, body)
+	bearer := ""
+	if ctx != nil {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
+			bearer = strings.TrimSpace(ginCtx.Request.Header.Get("Authorization"))
+			ginCtx.Set("cpa.request_model", model)
+			ginCtx.Set("cpa.request_provider", provider)
+		}
+	}
+	account := bearer
+	if account == "" {
+		account = "-"
+	}
+	entry.Infof(
+		"\n================ CPA收到客户端请求 ================\n"+
+			"[1/6][%s][%s] CPA收到curl请求\n"+
+			"客户端Bearerkey: %s\n"+
+			"请求模型: %s\n"+
+			"---------------- 客户端发给CPA ----------------\n"+
+			"%s\n"+
+			"==================================================",
+		provider, account, bearer, model, raw,
+	)
+}
+
+func logEntryWithRequestID(ctx context.Context) *log.Entry {
+	if ctx == nil {
+		return log.NewEntry(log.StandardLogger())
+	}
+	if reqID := logging.GetRequestID(ctx); reqID != "" {
+		return log.WithField("request_id", reqID)
+	}
+	return log.NewEntry(log.StandardLogger())
+}
+
+func logCPASentClientResponse(c *gin.Context, status int, body []byte) {
+	if c == nil {
+		return
+	}
+	provider := "-"
+	model := "-"
+	account := "-"
+	if rawModel := strings.TrimSpace(c.GetString("cpa.request_model")); rawModel != "" {
+		model = rawModel
+	}
+	if rawProvider := strings.TrimSpace(c.GetString("cpa.request_provider")); rawProvider != "" {
+		provider = rawProvider
+	}
+	if c.Request != nil {
+		account = strings.TrimSpace(c.Request.Header.Get("Authorization"))
+		if account == "" {
+			account = "-"
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "HTTP/1.1 %d %s\n", status, http.StatusText(status))
+	_ = c.Writer.Header().Write(&b)
+	b.WriteByte('\n')
+	b.Write(body)
+	c.Set("USAGE_CLIENT_RESPONSE", b.String())
+	internalusage.FlushPendingRecords(c)
+	var ctx context.Context
+	if c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	logEntryWithRequestID(ctx).Infof(
+		"\n================ CPA发送客户端响应 ================\n"+
+			"[6/6][%s][%s] CPA发送给客户端\n"+
+			"请求模型: %s\n"+
+			"---------------- CPA发送给客户端 ----------------\n"+
+			"%s\n"+
+			"==================================================",
+		provider, account, model, b.String(),
+	)
+}
+
+func truncateUsagePacket(value string) string {
+	const max = 256 * 1024
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
+}
+
+func formatHTTPProto(major, minor int) string {
+	if major <= 0 {
+		return "HTTP/1.1"
+	}
+	if major == 2 && minor == 0 {
+		return "HTTP/2"
+	}
+	return fmt.Sprintf("HTTP/%d.%d", major, minor)
 }
 
 // ExecuteStreamWithAuthManager executes a streaming request via the core auth manager.
@@ -683,6 +834,7 @@ func buildDownstreamRawRequest(ctx context.Context, body []byte) string {
 func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
 	providers, normalizedModel, errMsg := h.getRequestDetails(modelName)
 	if errMsg != nil {
+		publishRequestValidationFailureUsage(ctx, handlerType, modelName, rawJSON, errMsg)
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		errChan <- errMsg
 		close(errChan)
@@ -706,6 +858,7 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
+	logCPAReceivedClientRequest(ctx, strings.Join(providers, ","), normalizedModel, rawJSON)
 	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 	if err != nil {
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
@@ -1091,6 +1244,7 @@ func (h *BaseAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.Erro
 	if !c.Writer.Written() {
 		c.Writer.Header().Set("Content-Type", "application/json")
 	}
+	logCPASentClientResponse(c, status, body)
 	c.Status(status)
 	_, _ = c.Writer.Write(body)
 }

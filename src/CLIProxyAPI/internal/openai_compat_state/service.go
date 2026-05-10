@@ -438,7 +438,7 @@ func logOpenAICompatStateChange(before, after State, model string) {
 		"model":    strings.TrimSpace(model),
 		"status":   after.Status,
 		"reason":   after.StatusMessage,
-	}).Infof("OpenAI兼容API Key状态变更: %s -> %s", describeOpenAICompatState(before), describeOpenAICompatState(after))
+	}).Debugf("OpenAI兼容API Key状态变更: %s -> %s", describeOpenAICompatState(before), describeOpenAICompatState(after))
 }
 
 func describeOpenAICompatState(st State) string {

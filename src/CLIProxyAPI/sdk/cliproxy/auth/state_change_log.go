@@ -20,7 +20,7 @@ func logAuthStateTransition(ctx context.Context, before, after *Auth) {
 	})
 	if before == nil {
 		if after.Disabled || after.Status == StatusDisabled || authCooldownSeconds(after, time.Now()) > 0 {
-			entry.Infof("凭证状态初始化: %s", describeAuthRuntimeState(after, time.Now()))
+			entry.Debugf("凭证状态初始化: %s", describeAuthRuntimeState(after, time.Now()))
 		}
 		return
 	}
@@ -33,7 +33,7 @@ func logAuthStateTransition(ctx context.Context, before, after *Auth) {
 		cooldownBucket(before.NextRetryAfter, now) != cooldownBucket(after.NextRetryAfter, now) ||
 		before.Quota.Exceeded != after.Quota.Exceeded ||
 		cooldownBucket(before.Quota.NextRecoverAt, now) != cooldownBucket(after.Quota.NextRecoverAt, now) {
-		entry.Infof("凭证状态变更: %s -> %s", beforeState, afterState)
+		entry.Debugf("凭证状态变更: %s -> %s", beforeState, afterState)
 	}
 	logModelStateTransitions(entry, before, after, now)
 }
@@ -53,7 +53,7 @@ func logModelStateTransitions(entry *log.Entry, before, after *Auth, now time.Ti
 		if !modelStateChangedForLog(beforeState, afterState, now) {
 			continue
 		}
-		entry.WithField("model", model).Infof(
+		entry.WithField("model", model).Debugf(
 			"模型凭证状态变更: %s -> %s",
 			describeModelRuntimeState(beforeState, now),
 			describeModelRuntimeState(afterState, now),

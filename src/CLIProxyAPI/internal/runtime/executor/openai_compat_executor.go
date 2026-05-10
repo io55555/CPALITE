@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -29,6 +30,8 @@ type OpenAICompatExecutor struct {
 	provider string
 	cfg      *config.Config
 }
+
+var openAICompatProxyFailureBackoff sync.Map
 
 // NewOpenAICompatExecutor creates an executor bound to a provider key (e.g., "openrouter").
 func NewOpenAICompatExecutor(provider string, cfg *config.Config) *OpenAICompatExecutor {
@@ -75,11 +78,20 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 
 	reporter := helps.NewUsageReporter(ctx, e.Identifier(), baseModel, auth)
+	reporter.DeferFailureUntilClientResponse()
 	defer reporter.TrackFailure(ctx, &err)
+	if raw := helps.BuildDownstreamRawRequest(ctx, opts.OriginalRequest); strings.TrimSpace(raw) != "" {
+		helps.RecordUsageRawRequest(ctx, raw)
+		reporter.SetRawRequest(formatOpenAICompatUsageRequests(raw, ""))
+	}
 
 	baseURL, apiKey := e.resolveCredentials(auth)
 	if baseURL == "" {
 		err = statusErr{code: http.StatusUnauthorized, msg: "missing provider baseURL"}
+		return
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		err = statusErr{code: http.StatusUnauthorized, msg: "missing provider api key"}
 		return
 	}
 
@@ -128,7 +140,10 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs)
 	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
-	helps.RecordUsageRawRequest(ctx, rawRequest)
+	clientRawRequest := helps.BuildDownstreamRawRequest(ctx, opts.OriginalRequest)
+	usageRawRequest := formatOpenAICompatUsageRequests(clientRawRequest, rawRequest)
+	helps.RecordUsageRawRequest(ctx, usageRawRequest)
+	reporter.SetRawRequest(usageRawRequest)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -146,13 +161,19 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		AuthType:  authType,
 		AuthValue: authValue,
 	})
-
 	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
-		helps.RecordUsageRawResponse(ctx, formatOpenAICompatTransportFailure(err))
-		e.markProxyFailure(auth, apiKey, req.Model, err, rawRequest)
+		rawTransportFailure := formatOpenAICompatTransportFailure(err)
+		rulerDetail := e.markProxyFailure(auth, apiKey, req.Model, err, rawRequest)
+		if strings.TrimSpace(rulerDetail) == "" {
+			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未收到供应商HTTP响应，未执行status-rulers")
+		}
+		usageRawResponse := formatOpenAICompatUsageResponses(rawTransportFailure, rulerDetail, formatOpenAICompatClientResponse(http.StatusBadGateway, http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}}, []byte(rawTransportFailure)))
+		helps.RecordUsageRawResponse(ctx, usageRawResponse)
+		reporter.SetRawResponse(usageRawResponse)
+		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawTransportFailure, rulerDetail)
 		return resp, err
 	}
 	defer func() {
@@ -166,9 +187,16 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
-		helps.RecordUsageRawResponse(ctx, rawResponse)
-		e.applyKeyStatusRulers(auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		rulerDetail, rulerMatched := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
+		if strings.TrimSpace(rulerDetail) == "" {
+			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未匹配status-rulers规则")
+		}
+		clientRawResponse := formatOpenAICompatClientResponse(httpResp.StatusCode, httpResp.Header, b)
+		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
+		helps.RecordUsageRawResponse(ctx, usageRawResponse)
+		reporter.SetRawResponse(usageRawResponse)
+		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
+		err = statusErr{code: httpResp.StatusCode, msg: string(b), authFault: rulerMatched}
 		reporter.PublishFailure(ctx, err)
 		return resp, err
 	}
@@ -178,6 +206,12 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		return resp, err
 	}
 	helps.AppendAPIResponseChunk(ctx, e.cfg, body)
+	rawResponse := openai_compat_state.BuildRawResponse(httpResp, body)
+	rulerDetail := formatOpenAICompatNoStatusRulerDetail("上游响应成功，未触发status-rulers")
+	helps.RecordUsageRawResponse(ctx, formatOpenAICompatUsageResponses(rawResponse, rulerDetail, ""))
+	reporter.SetRawResponse(formatOpenAICompatUsageResponses(rawResponse, rulerDetail, ""))
+	logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
+	e.resetProxyFailureBackoff(auth, apiKey, req.Model)
 	reporter.Publish(ctx, helps.ParseOpenAIUsage(body))
 	// Ensure we at least record the request even if upstream doesn't return usage
 	reporter.EnsurePublished(ctx)
@@ -192,11 +226,20 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 
 	reporter := helps.NewUsageReporter(ctx, e.Identifier(), baseModel, auth)
+	reporter.DeferFailureUntilClientResponse()
 	defer reporter.TrackFailure(ctx, &err)
+	if raw := helps.BuildDownstreamRawRequest(ctx, opts.OriginalRequest); strings.TrimSpace(raw) != "" {
+		helps.RecordUsageRawRequest(ctx, raw)
+		reporter.SetRawRequest(formatOpenAICompatUsageRequests(raw, ""))
+	}
 
 	baseURL, apiKey := e.resolveCredentials(auth)
 	if baseURL == "" {
 		err = statusErr{code: http.StatusUnauthorized, msg: "missing provider baseURL"}
+		return nil, err
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		err = statusErr{code: http.StatusUnauthorized, msg: "missing provider api key"}
 		return nil, err
 	}
 
@@ -241,7 +284,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Cache-Control", "no-cache")
 	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
-	helps.RecordUsageRawRequest(ctx, rawRequest)
+	clientRawRequest := helps.BuildDownstreamRawRequest(ctx, opts.OriginalRequest)
+	usageRawRequest := formatOpenAICompatUsageRequests(clientRawRequest, rawRequest)
+	helps.RecordUsageRawRequest(ctx, usageRawRequest)
+	reporter.SetRawRequest(usageRawRequest)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -259,13 +305,19 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		AuthType:  authType,
 		AuthValue: authValue,
 	})
-
 	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
-		helps.RecordUsageRawResponse(ctx, formatOpenAICompatTransportFailure(err))
-		e.markProxyFailure(auth, apiKey, req.Model, err, rawRequest)
+		rawTransportFailure := formatOpenAICompatTransportFailure(err)
+		rulerDetail := e.markProxyFailure(auth, apiKey, req.Model, err, rawRequest)
+		if strings.TrimSpace(rulerDetail) == "" {
+			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未收到供应商HTTP响应，未执行status-rulers")
+		}
+		usageRawResponse := formatOpenAICompatUsageResponses(rawTransportFailure, rulerDetail, formatOpenAICompatClientResponse(http.StatusBadGateway, http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}}, []byte(rawTransportFailure)))
+		helps.RecordUsageRawResponse(ctx, usageRawResponse)
+		reporter.SetRawResponse(usageRawResponse)
+		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawTransportFailure, rulerDetail)
 		return nil, err
 	}
 	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
@@ -274,9 +326,16 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
-		helps.RecordUsageRawResponse(ctx, rawResponse)
-		e.applyKeyStatusRulers(auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		rulerDetail, rulerMatched := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
+		if strings.TrimSpace(rulerDetail) == "" {
+			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未匹配status-rulers规则")
+		}
+		clientRawResponse := formatOpenAICompatClientResponse(httpResp.StatusCode, http.Header{"Content-Type": []string{"application/json"}}, b)
+		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
+		helps.RecordUsageRawResponse(ctx, usageRawResponse)
+		reporter.SetRawResponse(usageRawResponse)
+		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
+		err = statusErr{code: httpResp.StatusCode, msg: string(b), authFault: rulerMatched}
 		reporter.PublishFailure(ctx, err)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
@@ -354,6 +413,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 			}
 		}
 		// Ensure we record the request if no usage chunk was ever seen
+		e.resetProxyFailureBackoff(auth, apiKey, req.Model)
 		reporter.EnsurePublished(ctx)
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
@@ -438,15 +498,20 @@ func (e *OpenAICompatExecutor) resolveCompatConfig(auth *cliproxyauth.Auth) *con
 	return nil
 }
 
-func (e *OpenAICompatExecutor) applyKeyStatusRulers(auth *cliproxyauth.Auth, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) {
+func (e *OpenAICompatExecutor) applyKeyStatusRulers(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) (string, bool) {
 	service := openai_compat_state.DefaultService()
 	compat := e.resolveCompatConfig(auth)
 	if service == nil || compat == nil || strings.TrimSpace(apiKey) == "" {
-		return
+		return "", false
 	}
-	if _, matched := service.ApplyRulersForModel(*compat, apiKey, model, status, body, rawRequest, rawResponse); !matched {
+	if st, matched := service.ApplyRulersForModel(*compat, apiKey, model, status, body, rawRequest, rawResponse); matched {
+		detail := formatOpenAICompatStatusRulerDetail(compat.Name, apiKey, model, status, st)
+		helps.RecordUsageStatusRulers(ctx, detail)
+		return detail, true
+	} else {
 		service.MarkErrorForModel(compat.Name, apiKey, model, string(body), rawRequest, rawResponse)
 	}
+	return "", false
 }
 
 func (e *OpenAICompatExecutor) providerName(auth *cliproxyauth.Auth) string {
@@ -464,22 +529,62 @@ func (e *OpenAICompatExecutor) providerName(auth *cliproxyauth.Auth) string {
 	return strings.TrimSpace(e.provider)
 }
 
-func (e *OpenAICompatExecutor) markProxyFailure(auth *cliproxyauth.Auth, apiKey, model string, err error, rawRequest string) {
+func (e *OpenAICompatExecutor) markProxyFailure(auth *cliproxyauth.Auth, apiKey, model string, err error, rawRequest string) string {
 	if err == nil || !isProxyFailureMessage(err.Error()) {
-		return
+		return ""
 	}
 	providerName := e.providerName(auth)
 	if providerName == "" || strings.TrimSpace(apiKey) == "" {
-		return
+		return ""
 	}
-	cooldown := 300 * time.Second
-	if e.cfg != nil && e.cfg.ProxyFailureCooldownSeconds > 0 {
-		cooldown = time.Duration(e.cfg.ProxyFailureCooldownSeconds) * time.Second
-	}
+	cooldown := e.nextProxyFailureCooldown(providerName, apiKey, model)
 	rawResponse := formatOpenAICompatTransportFailure(err)
 	if service := openai_compat_state.DefaultService(); service != nil {
-		service.MarkFrozenForModel(providerName, apiKey, model, err.Error(), rawRequest, rawResponse, cooldown)
+		st := service.MarkFrozenForModel(providerName, apiKey, model, err.Error(), rawRequest, rawResponse, cooldown)
+		return formatOpenAICompatStatusRulerDetail(providerName, apiKey, model, 0, st)
 	}
+	return ""
+}
+
+func (e *OpenAICompatExecutor) nextProxyFailureCooldown(provider, apiKey, model string) time.Duration {
+	base := 300 * time.Second
+	maxCooldown := 600 * time.Second
+	if e.cfg != nil {
+		if e.cfg.ProxyFailureCooldownSeconds > 0 {
+			base = time.Duration(e.cfg.ProxyFailureCooldownSeconds) * time.Second
+		}
+		if e.cfg.ProxyFailureMaxCooldownSeconds > 0 {
+			maxCooldown = time.Duration(e.cfg.ProxyFailureMaxCooldownSeconds) * time.Second
+		}
+	}
+	if maxCooldown < base {
+		maxCooldown = base
+	}
+	key := openAICompatProxyBackoffKey(provider, apiKey, model)
+	count := 1
+	if raw, ok := openAICompatProxyFailureBackoff.Load(key); ok {
+		if previous, okInt := raw.(int); okInt && previous > 0 {
+			count = previous + 1
+		}
+	}
+	openAICompatProxyFailureBackoff.Store(key, count)
+	cooldown := time.Duration(count) * base
+	if cooldown > maxCooldown {
+		return maxCooldown
+	}
+	return cooldown
+}
+
+func (e *OpenAICompatExecutor) resetProxyFailureBackoff(auth *cliproxyauth.Auth, apiKey, model string) {
+	provider := e.providerName(auth)
+	if provider == "" || strings.TrimSpace(apiKey) == "" {
+		return
+	}
+	openAICompatProxyFailureBackoff.Delete(openAICompatProxyBackoffKey(provider, apiKey, model))
+}
+
+func openAICompatProxyBackoffKey(provider, apiKey, model string) string {
+	return strings.ToLower(strings.TrimSpace(provider)) + "\x00" + strings.TrimSpace(apiKey) + "\x00" + strings.TrimSpace(model)
 }
 
 func formatOpenAICompatTransportFailure(err error) string {
@@ -493,10 +598,125 @@ func formatOpenAICompatTransportFailure(err error) string {
 	}, "\n")
 }
 
+func formatOpenAICompatUsageRequests(clientRaw, upstreamRaw string) string {
+	return joinOpenAICompatUsageSections([]string{
+		"=== 客户端发给CPA的完整数据包 ===\n" + strings.TrimSpace(clientRaw),
+		"=== CPA发给供应商的完整数据包 ===\n" + strings.TrimSpace(upstreamRaw),
+	})
+}
+
+func formatOpenAICompatUsageResponses(upstreamRaw, rulerDetail, clientRaw string) string {
+	return joinOpenAICompatUsageSections([]string{
+		"=== 供应商返回CPA的完整数据包 ===\n" + strings.TrimSpace(upstreamRaw),
+		"=== 触发status-rulers ===\n" + strings.TrimSpace(rulerDetail),
+		"=== CPA发送给客户端的完整数据包 ===\n" + strings.TrimSpace(clientRaw),
+	})
+}
+
+func joinOpenAICompatUsageSections(sections []string) string {
+	var kept []string
+	for _, section := range sections {
+		if strings.TrimSpace(section) == "" || strings.HasSuffix(strings.TrimSpace(section), "===") {
+			continue
+		}
+		kept = append(kept, strings.TrimSpace(section))
+	}
+	return strings.Join(kept, "\n\n")
+}
+
+func formatOpenAICompatClientResponse(status int, headers http.Header, body []byte) string {
+	if status <= 0 {
+		status = http.StatusBadGateway
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "HTTP/1.1 %d %s\n", status, http.StatusText(status))
+	if headers == nil {
+		headers = http.Header{"Content-Type": []string{"application/json"}}
+	}
+	_ = headers.Write(&b)
+	b.WriteByte('\n')
+	b.Write(body)
+	return b.String()
+}
+
+func formatOpenAICompatStatusRulerDetail(provider, apiKey, model string, status int, st openai_compat_state.State) string {
+	action := "标记异常"
+	switch st.Status {
+	case openai_compat_state.StatusDisabled:
+		action = "禁用"
+	case openai_compat_state.StatusFrozen:
+		action = "冷却"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "规则: %s\n", strings.TrimSpace(st.StatusMessage))
+	fmt.Fprintf(&b, "动作: %s\n", action)
+	fmt.Fprintf(&b, "上游状态码: %d\n", status)
+	fmt.Fprintf(&b, "影响范围: provider=%s model=%s api_key=%s\n", strings.TrimSpace(provider), strings.TrimSpace(model), util.HideAPIKey(apiKey))
+	if st.Status == openai_compat_state.StatusFrozen && !st.FrozenUntil.IsZero() {
+		fmt.Fprintf(&b, "冷却至: %s\n", st.FrozenUntil.Format(time.RFC3339))
+	}
+	return b.String()
+}
+
+func formatOpenAICompatNoStatusRulerDetail(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "未匹配status-rulers规则"
+	}
+	return "结果: " + message
+}
+
+func formatOpenAICompatAuthForLog(auth *cliproxyauth.Auth, apiKey string) string {
+	if auth == nil {
+		return util.HideAPIKey(apiKey)
+	}
+	accountType, accountInfo := auth.AccountInfo()
+	if accountInfo == "" {
+		accountInfo = apiKey
+	}
+	if accountType == "" {
+		accountType = "apikey"
+	}
+	return fmt.Sprintf("%s=%s auth=%s", accountType, accountInfo, auth.ID)
+}
+
+func logOpenAICompatAttemptTrace(ctx context.Context, provider string, auth *cliproxyauth.Auth, apiKey, rawRequest, rawResponse, rulerDetail string) {
+	authText := formatOpenAICompatAuthForLog(auth, apiKey)
+	helps.LogWithRequestID(ctx).Infof(
+		"\n================ OpenAI兼容请求链路 ================\n"+
+			"[2/6][%s][%s] CPA选择apikey或凭证账号\n"+
+			"[3/6][%s][%s] CPA发送请求给供应商\n%s\n"+
+			"---------------- 供应商响应 ----------------\n"+
+			"[4/6][%s][%s] 供应商返回CPA\n%s\n"+
+			"---------------- status-rulers ----------------\n"+
+			"[5/6][%s][%s] %s\n"+
+			"====================================================",
+		provider, authText,
+		provider, authText, strings.TrimSpace(rawRequest),
+		provider, authText, strings.TrimSpace(rawResponse),
+		provider, authText, strings.TrimSpace(rulerDetail),
+	)
+}
+
 func isProxyFailureMessage(message string) bool {
 	lower := strings.ToLower(strings.TrimSpace(message))
 	if lower == "" {
 		return false
+	}
+	for _, signal := range []string{
+		"tls handshake timeout",
+		"i/o timeout",
+		"deadline exceeded",
+		"no such host",
+		"connection refused",
+		"connection reset",
+		"connectex",
+		"no connection could be made",
+		"network is unreachable",
+	} {
+		if strings.Contains(lower, signal) {
+			return true
+		}
 	}
 	hasProxySignal := strings.Contains(lower, "socks connect") ||
 		strings.Contains(lower, "proxyconnect") ||
@@ -536,6 +756,7 @@ type statusErr struct {
 	code       int
 	msg        string
 	retryAfter *time.Duration
+	authFault  bool
 }
 
 func (e statusErr) Error() string {
@@ -546,3 +767,4 @@ func (e statusErr) Error() string {
 }
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
+func (e statusErr) AuthFault() bool            { return e.authFault }

@@ -80,6 +80,9 @@ type Config struct {
 	// ProxyFailureCooldownSeconds controls how long an auth/model is cooled down after a per-key proxy connection failure.
 	// Default: 300 seconds.
 	ProxyFailureCooldownSeconds int `yaml:"proxy-failure-cooldown-seconds" json:"proxy-failure-cooldown-seconds"`
+	// ProxyFailureMaxCooldownSeconds caps progressive proxy failure cooldown.
+	// Default: 600 seconds.
+	ProxyFailureMaxCooldownSeconds int `yaml:"proxy-failure-max-cooldown-seconds" json:"proxy-failure-max-cooldown-seconds"`
 
 	// AuthAutoRefreshWorkers overrides the size of the core auth auto-refresh worker pool.
 	// When <= 0, the default worker count is used.
@@ -655,6 +658,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
 	cfg.ProxyFailureCooldownSeconds = 300
+	cfg.ProxyFailureMaxCooldownSeconds = 600
 	cfg.DisableImageGeneration = DisableImageGenerationOff
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
@@ -724,10 +728,19 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	}
 
 	if cfg.MaxRetryCredentials < 0 {
-		cfg.MaxRetryCredentials = 0
+		cfg.MaxRetryCredentials = 10
+	}
+	if cfg.MaxRetryCredentials == 0 {
+		cfg.MaxRetryCredentials = 10
 	}
 	if cfg.ProxyFailureCooldownSeconds <= 0 {
 		cfg.ProxyFailureCooldownSeconds = 300
+	}
+	if cfg.ProxyFailureMaxCooldownSeconds <= 0 {
+		cfg.ProxyFailureMaxCooldownSeconds = 600
+	}
+	if cfg.ProxyFailureMaxCooldownSeconds < cfg.ProxyFailureCooldownSeconds {
+		cfg.ProxyFailureMaxCooldownSeconds = cfg.ProxyFailureCooldownSeconds
 	}
 
 	// Sanitize Gemini API key configuration and migrate legacy entries.

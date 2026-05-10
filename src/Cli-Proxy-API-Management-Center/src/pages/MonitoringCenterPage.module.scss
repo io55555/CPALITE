@@ -6,7 +6,7 @@
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
   position: relative;
 }
 
@@ -19,8 +19,8 @@
 }
 
 .pageTitle {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 500;
   color: var(--text-primary);
   margin: 0;
 }
@@ -104,7 +104,7 @@
 
 .statsGrid {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   grid-template-columns: repeat(5, minmax(0, 1fr));
 
   @include tablet {
@@ -122,18 +122,15 @@
   --accent-border: rgba($primary-color, 0.3);
 
   position: relative;
-  padding: 14px;
-  background:
-    radial-gradient(120% 140% at 12% 0%, var(--accent-soft) 0%, rgba(0, 0, 0, 0) 62%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)),
-    var(--bg-primary);
-  border-radius: $radius-lg;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border-radius: $radius-sm;
   border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 136px;
-  box-shadow: var(--shadow-lg);
+  gap: 6px;
+  min-height: 88px;
+  box-shadow: none;
   overflow: hidden;
 
   &::before {
@@ -141,7 +138,7 @@
     position: absolute;
     top: 0;
     left: 0;
-    height: 3px;
+    height: 2px;
     width: 100%;
     background: linear-gradient(90deg, var(--accent), rgba(0, 0, 0, 0));
     opacity: 0.92;
@@ -152,21 +149,13 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
 }
 
 .statLabel {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-tertiary);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.statLabelWithMeta {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: baseline;
+  font-weight: 400;
 }
 
 .statSuccessText {
@@ -177,33 +166,34 @@
   color: #dc2626;
 }
 
-.statIconBadge {
-  width: 30px;
-  height: 30px;
-  border-radius: $radius-md;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: var(--accent);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
-  flex-shrink: 0;
-}
-
 .statValue {
-  font-size: 26px;
-  font-weight: 800;
+  font-size: 20px;
+  font-weight: 500;
   color: var(--text-primary);
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
 
+.statValueWithMeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: baseline;
+  font-size: 20px;
+  line-height: 1.15;
+
+  > span:last-child {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+}
+
 .statTrend {
   margin-top: auto;
   background: var(--bg-tertiary);
-  border-radius: $radius-md;
-  padding: 6px;
-  height: 42px;
+  border-radius: $radius-sm;
+  padding: 3px;
+  height: 28px;
   border: 1px solid var(--border-color);
 }
 

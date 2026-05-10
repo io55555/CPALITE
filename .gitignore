@@ -22,6 +22,8 @@ src--*/
 进度*.txt
 opencode.json*
 /tui.json
+CPA.exe
+build/
 
 # Python
 __pycache__/
