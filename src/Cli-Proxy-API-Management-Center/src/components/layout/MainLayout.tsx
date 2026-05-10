@@ -396,6 +396,7 @@ export function MainLayout() {
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
     { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },
     { path: '/monitor', label: t('nav.monitoring_center'), icon: sidebarIcons.monitoring },
+    { path: '/monitorseakee', label: '监控中心seakee', icon: sidebarIcons.monitoring },
     { path: '/credential-center', label: t('nav.credential_center'), icon: sidebarIcons.credentialCenter },
     ...(config?.loggingToFile
       ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }]

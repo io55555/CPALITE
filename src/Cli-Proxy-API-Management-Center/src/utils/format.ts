@@ -13,6 +13,9 @@ const resolveDefaultLocale = (): string | undefined => {
   return fromNavigator || undefined;
 };
 
+const API_KEY_MASK_REGEX =
+  /\b(?:sk-[A-Za-z0-9_-]{8,}|sk-ant-[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]{24,})\b/g;
+
 /**
  * 隐藏 API Key 中间部分，仅保留前后两位
  */
@@ -30,6 +33,15 @@ export function maskApiKey(key: string): string {
   const masked = '*'.repeat(maskedLength);
 
   return `${start}${masked}${end}`;
+}
+
+/**
+ * 将文本中的 API Key 片段替换为脱敏显示
+ */
+export function maskSensitiveText(value: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  return trimmed.replace(API_KEY_MASK_REGEX, (match) => maskApiKey(match));
 }
 
 /**

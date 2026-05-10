@@ -17,6 +17,8 @@ import { AuthFilesOAuthModelAliasEditPage } from '@/pages/AuthFilesOAuthModelAli
 import { OAuthPage } from '@/pages/OAuthPage';
 import { QuotaPage } from '@/pages/QuotaPage';
 import { MonitoringCenterPage } from '@/pages/MonitoringCenterPage';
+import { MonitoringCenterPage as MonitoringCenterSeakeePage } from '@/pages/MonitoringCenterSeakeePage';
+import { CodexInspectionPage as CodexInspectionSeakeePage } from '@/pages/CodexInspectionSeakeePage';
 import { CredentialCenterPage } from '@/pages/CredentialCenterPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
@@ -74,6 +76,8 @@ const mainRoutes = [
   { path: '/oauth', element: <OAuthPage /> },
   { path: '/quota', element: <QuotaPage /> },
   { path: '/monitor', element: <MonitoringCenterPage /> },
+  { path: '/monitorseakee', element: <MonitoringCenterSeakeePage /> },
+  { path: '/monitorseakee/codex-inspection', element: <CodexInspectionSeakeePage /> },
   { path: '/credential-center', element: <CredentialCenterPage /> },
   { path: '/config', element: <ConfigPage /> },
   { path: '/logs', element: <LogsPage /> },

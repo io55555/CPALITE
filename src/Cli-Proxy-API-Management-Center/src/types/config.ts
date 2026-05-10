@@ -12,11 +12,27 @@ export interface QuotaExceededConfig {
   antigravityCredits?: boolean;
 }
 
+export interface AuthPoolCleanConfig {
+  baseUrl?: string;
+  token?: string;
+  targetType?: string;
+  workers?: number;
+  deleteWorkers?: number;
+  timeout?: number;
+  retries?: number;
+  userAgent?: string;
+  usedPercentThreshold?: number;
+  sampleSize?: number;
+}
+
 export interface Config {
   debug?: boolean;
   proxyUrl?: string;
   requestRetry?: number;
   quotaExceeded?: QuotaExceededConfig;
+  clean?: AuthPoolCleanConfig;
+  usageStatisticsEnabled?: boolean;
+  redisUsageQueueRetentionSeconds?: number;
   requestLog?: boolean;
   loggingToFile?: boolean;
   logsMaxTotalSizeMb?: number;
