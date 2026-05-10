@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	_ "modernc.org/sqlite"
@@ -227,6 +227,10 @@ func (s *Service) SetEnabled(provider, apiKey string, enabled bool) State {
 }
 
 func (s *Service) ApplyRulers(provider config.OpenAICompatibility, apiKey string, status int, body []byte, rawRequest, rawResponse string) (State, bool) {
+	return s.ApplyRulersForModel(provider, apiKey, "", status, body, rawRequest, rawResponse)
+}
+
+func (s *Service) ApplyRulersForModel(provider config.OpenAICompatibility, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) (State, bool) {
 	if s == nil {
 		return State{}, false
 	}
@@ -236,7 +240,7 @@ func (s *Service) ApplyRulers(provider config.OpenAICompatibility, apiKey string
 		}
 		action := strings.ToLower(strings.TrimSpace(ruler.Action))
 		now := time.Now()
-		st := s.update(provider.Name, apiKey, func(st *State) {
+		st := s.updateForModel(provider.Name, apiKey, model, func(st *State) {
 			st.Enabled = action != "disable"
 			st.StatusMessage = strings.TrimSpace(ruler.Name)
 			st.LastError = truncateRaw(string(body))
@@ -260,7 +264,11 @@ func (s *Service) ApplyRulers(provider config.OpenAICompatibility, apiKey string
 }
 
 func (s *Service) MarkError(provider, apiKey, message, rawRequest, rawResponse string) State {
-	return s.update(provider, apiKey, func(st *State) {
+	return s.MarkErrorForModel(provider, apiKey, "", message, rawRequest, rawResponse)
+}
+
+func (s *Service) MarkErrorForModel(provider, apiKey, model, message, rawRequest, rawResponse string) State {
+	return s.updateForModel(provider, apiKey, model, func(st *State) {
 		st.Status = StatusError
 		st.StatusMessage = message
 		st.LastError = message
@@ -270,7 +278,11 @@ func (s *Service) MarkError(provider, apiKey, message, rawRequest, rawResponse s
 }
 
 func (s *Service) MarkFrozen(provider, apiKey, message, rawRequest, rawResponse string, duration time.Duration) State {
-	return s.update(provider, apiKey, func(st *State) {
+	return s.MarkFrozenForModel(provider, apiKey, "", message, rawRequest, rawResponse, duration)
+}
+
+func (s *Service) MarkFrozenForModel(provider, apiKey, model, message, rawRequest, rawResponse string, duration time.Duration) State {
+	return s.updateForModel(provider, apiKey, model, func(st *State) {
 		if duration <= 0 {
 			duration = 5 * time.Minute
 		}
@@ -375,6 +387,10 @@ func clearOpenAICompatAuthRuntimeState(auth *cliproxyauth.Auth) {
 }
 
 func (s *Service) update(provider, apiKey string, mutate func(*State)) State {
+	return s.updateForModel(provider, apiKey, "", mutate)
+}
+
+func (s *Service) updateForModel(provider, apiKey, model string, mutate func(*State)) State {
 	if s == nil {
 		return State{}
 	}
@@ -395,7 +411,7 @@ func (s *Service) update(provider, apiKey string, mutate func(*State)) State {
 	s.states[key] = st
 	s.dirty[key] = st
 	s.mu.Unlock()
-	logOpenAICompatStateChange(before, st)
+	logOpenAICompatStateChange(before, st, model)
 	select {
 	case s.wake <- struct{}{}:
 	default:
@@ -403,7 +419,7 @@ func (s *Service) update(provider, apiKey string, mutate func(*State)) State {
 	return visibleState(st, now)
 }
 
-func logOpenAICompatStateChange(before, after State) {
+func logOpenAICompatStateChange(before, after State, model string) {
 	if strings.TrimSpace(after.APIKey) == "" {
 		return
 	}
@@ -419,6 +435,9 @@ func logOpenAICompatStateChange(before, after State) {
 	log.WithFields(log.Fields{
 		"provider": after.ProviderName,
 		"api_key":  after.APIKey,
+		"model":    strings.TrimSpace(model),
+		"status":   after.Status,
+		"reason":   after.StatusMessage,
 	}).Infof("OpenAI兼容API Key状态变更: %s -> %s", describeOpenAICompatState(before), describeOpenAICompatState(after))
 }
 

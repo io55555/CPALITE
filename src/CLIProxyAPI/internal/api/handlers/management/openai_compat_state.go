@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/openai_compat_state"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor/helps"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 type patchOpenAICompatKeyStateRequest struct {
@@ -299,7 +299,7 @@ func (h *Handler) testOpenAICompatKey(ctx context.Context, body testOpenAICompat
 	resp, err := client.Do(req.WithContext(ctxTimeout))
 	if err != nil {
 		if service := h.currentOpenAICompatKeyState(); service != nil {
-			service.MarkError(provider.Name, apiKey, err.Error(), rawRequest, "")
+			service.MarkErrorForModel(provider.Name, apiKey, model, err.Error(), rawRequest, "")
 			h.refreshOpenAICompatKeyRuntime(ctx, provider.Name, apiKey)
 		}
 		return gin.H{"ok": false, "error": err.Error(), "provider_name": provider.Name, "api_key": apiKey}
@@ -309,8 +309,8 @@ func (h *Handler) testOpenAICompatKey(ctx context.Context, body testOpenAICompat
 	rawResponse := openai_compat_state.BuildRawResponse(resp, b)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if service := h.currentOpenAICompatKeyState(); service != nil {
-			if _, matched := service.ApplyRulers(*provider, apiKey, resp.StatusCode, b, rawRequest, rawResponse); !matched {
-				service.MarkError(provider.Name, apiKey, string(b), rawRequest, rawResponse)
+			if _, matched := service.ApplyRulersForModel(*provider, apiKey, model, resp.StatusCode, b, rawRequest, rawResponse); !matched {
+				service.MarkErrorForModel(provider.Name, apiKey, model, string(b), rawRequest, rawResponse)
 			}
 			h.refreshOpenAICompatKeyRuntime(ctx, provider.Name, apiKey)
 		}

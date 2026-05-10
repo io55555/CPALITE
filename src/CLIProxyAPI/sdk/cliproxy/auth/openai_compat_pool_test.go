@@ -6,10 +6,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
-	internalconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
 type openAICompatPoolExecutor struct {
@@ -761,6 +762,64 @@ func TestManagerExecute_OpenAICompatSchedulerKeepsAuthWithoutRegistryModelsEligi
 		t.Fatalf("execute error = %v, want scheduler to use auth without registry model snapshot", err)
 	}
 	if got := string(resp.Payload); got != "normal-key-without-registry-models|llama-3.1-8b-instant" {
+		t.Fatalf("payload = %q", got)
+	}
+}
+
+func TestManagerExecute_OpenAICompatUsesNormalKeyWhenOtherKeysBlockedWithoutRegistryModels(t *testing.T) {
+	cfg := &internalconfig.Config{
+		OpenAICompatibility: []internalconfig.OpenAICompatibility{{
+			Name: "pool",
+			Models: []internalconfig.OpenAICompatibilityModel{
+				{Name: "llama-3.1-8b-instant"},
+			},
+		}},
+	}
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(cfg)
+	executor := &authScopedOpenAICompatPoolExecutor{id: "pool"}
+	m.RegisterExecutor(executor)
+
+	commonAttrs := func(key string) map[string]string {
+		return map[string]string{
+			"api_key":      key,
+			"compat_name":  "pool",
+			"provider_key": "pool",
+		}
+	}
+	auths := []*Auth{
+		{ID: "disabled-key", Provider: "pool", Status: StatusDisabled, Disabled: true, Attributes: commonAttrs("disabled")},
+		{ID: "cooldown-key", Provider: "pool", Status: StatusActive, Attributes: commonAttrs("cooldown")},
+		{ID: "normal-key", Provider: "pool", Status: StatusActive, Attributes: commonAttrs("normal")},
+	}
+	for _, auth := range auths {
+		if _, err := m.Register(context.Background(), auth); err != nil {
+			t.Fatalf("register %s: %v", auth.ID, err)
+		}
+	}
+	nextRetry := time.Now().Add(time.Minute)
+	m.mu.Lock()
+	cooldown := m.auths["cooldown-key"]
+	cooldown.Unavailable = true
+	cooldown.NextRetryAfter = nextRetry
+	cooldown.Quota = QuotaState{Exceeded: true, NextRecoverAt: nextRetry}
+	cooldown.ModelStates = map[string]*ModelState{
+		"llama-3.1-8b-instant": {
+			Status:         StatusError,
+			Unavailable:    true,
+			NextRetryAfter: nextRetry,
+			Quota:          QuotaState{Exceeded: true, NextRecoverAt: nextRetry},
+		},
+	}
+	cooldownSnapshot := cooldown.Clone()
+	m.mu.Unlock()
+	m.scheduler.upsertAuth(cooldownSnapshot)
+
+	resp, err := m.Execute(context.Background(), []string{"pool"}, cliproxyexecutor.Request{Model: "llama-3.1-8b-instant"}, cliproxyexecutor.Options{})
+	if err != nil {
+		t.Fatalf("execute error = %v, want normal OpenAI-compatible key to remain selectable", err)
+	}
+	if got := string(resp.Payload); got != "normal-key|llama-3.1-8b-instant" {
 		t.Fatalf("payload = %q", got)
 	}
 }

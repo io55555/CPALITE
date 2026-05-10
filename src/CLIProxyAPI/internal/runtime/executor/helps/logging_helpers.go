@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
@@ -369,6 +369,9 @@ func RecordAPIWebsocketError(ctx context.Context, cfg *config.Config, stage stri
 }
 
 func ginContextFrom(ctx context.Context) *gin.Context {
+	if ctx == nil {
+		return nil
+	}
 	ginCtx, _ := ctx.Value("gin").(*gin.Context)
 	return ginCtx
 }
