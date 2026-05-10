@@ -113,6 +113,8 @@ func (s *SQLiteStore) initSchema(ctx context.Context) error {
 	thinking_effort TEXT NOT NULL DEFAULT '',
 	raw_request TEXT NOT NULL DEFAULT '',
 	raw_response TEXT NOT NULL DEFAULT '',
+	failure_status_code INTEGER NOT NULL DEFAULT 0,
+	failure_message TEXT NOT NULL DEFAULT '',
 	input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
 	output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
 	reasoning_tokens INTEGER NOT NULL DEFAULT 0 CHECK (reasoning_tokens >= 0),
@@ -122,6 +124,8 @@ func (s *SQLiteStore) initSchema(ctx context.Context) error {
 )`,
 		`ALTER TABLE usage_records ADD COLUMN raw_request TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE usage_records ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_records ADD COLUMN failure_status_code INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_records ADD COLUMN failure_message TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_timestamp ON usage_records(timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_api_model ON usage_records(api_key, endpoint, provider, model)`,
 	}
@@ -201,9 +205,9 @@ func (s *SQLiteStore) flush(ctx context.Context) {
 INSERT INTO usage_records (
 	id, timestamp, api_key, provider, model, source, auth_index, auth_type, endpoint, request_id,
 	latency_ms, first_byte_latency_ms, generation_ms, thinking_effort,
-	raw_request, raw_response,
+	raw_request, raw_response, failure_status_code, failure_message,
 	input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `)
 	if err != nil {
 		_ = tx.Rollback()
@@ -253,6 +257,8 @@ func execInsert(stmt *sql.Stmt, record Record) error {
 		strings.TrimSpace(record.ThinkingEffort),
 		truncateUsageRaw(record.RawRequest),
 		truncateUsageRaw(record.RawResponse),
+		max(record.FailureStatusCode, 0),
+		truncateUsageRaw(strings.TrimSpace(record.FailureMessage)),
 		tokens.InputTokens,
 		tokens.OutputTokens,
 		tokens.ReasoningTokens,
@@ -275,11 +281,11 @@ func (s *SQLiteStore) Query(ctx context.Context, rng QueryRange) (APIUsage, erro
 		limit = defaultQueryLimit
 	}
 	query := `
-SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
+SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response, failure_status_code, failure_message,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM (
-SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
+SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response, failure_status_code, failure_message,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM usage_records`
@@ -330,6 +336,8 @@ FROM usage_records`
 			&detail.ThinkingEffort,
 			&detail.RawRequest,
 			&detail.RawResponse,
+			&detail.FailureStatusCode,
+			&detail.FailureMessage,
 			&detail.LatencyMs,
 			&detail.FirstByteLatencyMs,
 			&detail.GenerationMs,
@@ -468,6 +476,8 @@ func addRecordToUsage(result APIUsage, record Record) {
 		ThinkingEffort:     strings.TrimSpace(record.ThinkingEffort),
 		RawRequest:         truncateUsageRaw(record.RawRequest),
 		RawResponse:        truncateUsageRaw(record.RawResponse),
+		FailureStatusCode:  max(record.FailureStatusCode, 0),
+		FailureMessage:     truncateUsageRaw(strings.TrimSpace(record.FailureMessage)),
 		Tokens:             nonNegativeTokenStats(record.Tokens),
 		Failed:             record.Failed,
 	}

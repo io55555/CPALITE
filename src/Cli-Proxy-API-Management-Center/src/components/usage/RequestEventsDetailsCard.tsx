@@ -64,6 +64,8 @@ type RequestEventRow = {
   cacheHitRatio: number | null;
   rawRequest?: string;
   rawResponse?: string;
+  failureStatusCode?: number;
+  failureMessage?: string;
 };
 
 const extractLogSection = (content: string, title: string, nextTitle?: string): string => {
@@ -72,6 +74,116 @@ const extractLogSection = (content: string, title: string, nextTitle?: string): 
   const from = start + title.length;
   const end = nextTitle ? content.indexOf(nextTitle, from) : -1;
   return content.slice(from, end >= 0 ? end : undefined).trim();
+};
+
+const extractPacketBody = (packet: string): string => {
+  const trimmed = packet.trim();
+  if (!trimmed) return '';
+  const separatorMatch = trimmed.match(/\r?\n\r?\n/);
+  if (!separatorMatch) return trimmed;
+  return trimmed.slice(separatorMatch.index! + separatorMatch[0].length).trim();
+};
+
+const extractFailureMessageFromJson = (text: string): string => {
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: { message?: unknown; code?: unknown; type?: unknown };
+      message?: unknown;
+      error_message?: unknown;
+    };
+    const direct =
+      parsed.error?.message ?? parsed.message ?? parsed.error_message ?? parsed.error?.code ?? parsed.error?.type;
+    if (typeof direct === 'string' && direct.trim()) {
+      return direct.trim();
+    }
+  } catch {
+    // 原始响应不一定是 JSON。
+  }
+  return '';
+};
+
+const summarizeFailureReason = (
+  message: string,
+  statusCode?: number | null
+): string => {
+  const trimmed = message.trim();
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+
+  const withDetail = (label: string) => (trimmed ? `${label}: ${trimmed}` : label);
+
+  if (
+    lower.includes('proxy error') ||
+    lower.includes('dial tcp') ||
+    lower.includes('connectex') ||
+    lower.includes('connection refused') ||
+    lower.includes('connection reset') ||
+    lower.includes('no such host') ||
+    lower.includes('i/o timeout') ||
+    lower.includes('context deadline exceeded') ||
+    lower.includes('tls handshake') ||
+    lower.includes('eof')
+  ) {
+    return withDetail('网络或代理故障');
+  }
+  if (
+    lower.includes('missing auth') ||
+    lower.includes('no auth') ||
+    lower.includes('no credential') ||
+    lower.includes('credential unavailable') ||
+    lower.includes('no available auth')
+  ) {
+    return withDetail('无账号或无可用凭证');
+  }
+  if (
+    lower.includes('missing api key') ||
+    lower.includes('api_key required') ||
+    lower.includes('api key required') ||
+    lower.includes('no api key')
+  ) {
+    return withDetail('无 API Key');
+  }
+  if (
+    lower.includes('wrong api key') ||
+    lower.includes('invalid api key') ||
+    lower.includes('incorrect api key') ||
+    (lower.includes('api key') && lower.includes('unauthorized'))
+  ) {
+    return withDetail('API Key 无效');
+  }
+  if (
+    lower.includes('model') &&
+    (lower.includes('not found') ||
+      lower.includes('does not exist') ||
+      lower.includes('unsupported') ||
+      lower.includes('invalid') ||
+      lower.includes('unavailable') ||
+      lower.includes('unknown'))
+  ) {
+    return withDetail('无匹配模型或模型不可用');
+  }
+  if (
+    lower.includes('quota') ||
+    lower.includes('exhaust') ||
+    lower.includes('insufficient balance') ||
+    lower.includes('credit')
+  ) {
+    return withDetail('额度耗尽或余额不足');
+  }
+  if (
+    statusCode === 429 ||
+    lower.includes('rate limit') ||
+    lower.includes('too many requests')
+  ) {
+    return withDetail('速率限制或临时限流');
+  }
+  if (statusCode === 401 || statusCode === 403 || lower.includes('forbidden') || lower.includes('unauthorized')) {
+    return withDetail('鉴权失败或权限受限');
+  }
+  if (lower.includes('baseurl') || lower.includes('base url')) {
+    return withDetail('提供商 baseURL 配置异常');
+  }
+  return trimmed;
 };
 
 export interface RequestEventsDetailsCardProps {
@@ -381,6 +493,8 @@ export function RequestEventsDetailsCard({
         cacheHitRatio,
         rawRequest: detail.raw_request,
         rawResponse: detail.raw_response,
+        failureStatusCode: detail.failure_status_code,
+        failureMessage: detail.failure_message,
       };
     });
 
@@ -629,22 +743,61 @@ export function RequestEventsDetailsCard({
     if (!normalizedAuthIndex) return null;
     return authFileMap.get(normalizedAuthIndex) ?? null;
   }, [authFileMap, selectedFailureRow]);
+  const selectedFailureCapturedRequest = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    if (selectedFailureRow.rawRequest?.trim()) {
+      return selectedFailureRow.rawRequest;
+    }
+    if (selectedFailureLogText) {
+      const fromLog = extractLogSection(selectedFailureLogText, '=== API REQUEST ===', '=== API RESPONSE ===');
+      if (fromLog) {
+        return fromLog;
+      }
+    }
+    return '';
+  }, [selectedFailureLogText, selectedFailureRow]);
+  const selectedFailureCapturedResponse = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    if (selectedFailureRow.rawResponse?.trim()) {
+      return selectedFailureRow.rawResponse;
+    }
+    if (selectedFailureLogText) {
+      const fromLog = extractLogSection(selectedFailureLogText, '=== API RESPONSE ===');
+      if (fromLog) {
+        return fromLog;
+      }
+    }
+    return '';
+  }, [selectedFailureLogText, selectedFailureRow]);
   const selectedFailureMessage = useMemo(() => {
     if (!selectedFailureRow) return '';
-    const statusMessage = selectedCredentialInfo?.statusMessage?.trim();
-    if (statusMessage) return statusMessage;
-    const rawResponse = selectedFailureRow.rawResponse?.trim();
-    if (!rawResponse) return '';
-    const body = rawResponse.split(/\r?\n\r?\n/).slice(1).join('\n\n').trim() || rawResponse;
-    try {
-      const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
-      const message = parsed.error?.message ?? parsed.message;
-      if (typeof message === 'string' && message.trim()) return message.trim();
-    } catch {
-      // 原始响应不一定是 JSON，下面直接显示截断文本。
+    const directFailure = selectedFailureRow.failureMessage?.trim();
+    const directFailureSummary = summarizeFailureReason(
+      directFailure || '',
+      selectedFailureRow.failureStatusCode ?? null
+    );
+    if (directFailureSummary) {
+      return directFailureSummary;
     }
-    return body.length > 2000 ? `${body.slice(0, 2000)}...` : body;
-  }, [selectedCredentialInfo, selectedFailureRow]);
+    const responseBody = extractPacketBody(selectedFailureCapturedResponse);
+    const responseMessage =
+      extractFailureMessageFromJson(responseBody) ||
+      extractFailureMessageFromJson(selectedFailureCapturedResponse) ||
+      responseBody ||
+      selectedFailureCapturedResponse.trim();
+    const responseSummary = summarizeFailureReason(
+      responseMessage,
+      selectedFailureRow.failureStatusCode ?? null
+    );
+    if (responseSummary) {
+      return responseSummary.length > 2000 ? `${responseSummary.slice(0, 2000)}...` : responseSummary;
+    }
+    const statusMessage = selectedCredentialInfo?.statusMessage?.trim();
+    if (statusMessage) {
+      return `未捕获到该次请求的精确失败原因，以下为当前凭证状态：${statusMessage}`;
+    }
+    return '';
+  }, [selectedCredentialInfo, selectedFailureCapturedResponse, selectedFailureRow]);
   useEffect(() => {
     let cancelled = false;
     if (!selectedFailureRow?.requestId) {
@@ -684,15 +837,7 @@ export function RequestEventsDetailsCard({
   }, [selectedFailureRow]);
   const selectedFailureRequestPacket = useMemo(() => {
     if (!selectedFailureRow) return '';
-    if (selectedFailureRow.rawRequest?.trim()) {
-      return selectedFailureRow.rawRequest;
-    }
-    if (selectedFailureLogText) {
-      const fromLog = extractLogSection(selectedFailureLogText, '=== API REQUEST ===', '=== API RESPONSE ===');
-      if (fromLog) {
-        return fromLog;
-      }
-    }
+    if (selectedFailureCapturedRequest) return selectedFailureCapturedRequest;
     return [
       '# 未捕获完整原始请求包，以下为当前可还原的请求上下文',
       `Timestamp: ${selectedFailureRow.timestamp}`,
@@ -705,18 +850,10 @@ export function RequestEventsDetailsCard({
       `Auth Type: ${selectedFailureRow.authType}`,
       `Auth Index: ${selectedFailureRow.authIndex}`,
     ].join('\n');
-  }, [selectedFailureRow]);
+  }, [selectedFailureCapturedRequest, selectedFailureRow]);
   const selectedFailureResponsePacket = useMemo(() => {
     if (!selectedFailureRow) return '';
-    if (selectedFailureRow.rawResponse?.trim()) {
-      return selectedFailureRow.rawResponse;
-    }
-    if (selectedFailureLogText) {
-      const fromLog = extractLogSection(selectedFailureLogText, '=== API RESPONSE ===');
-      if (fromLog) {
-        return fromLog;
-      }
-    }
+    if (selectedFailureCapturedResponse) return selectedFailureCapturedResponse;
     return [
       '# 未捕获完整原始响应包，以下为当前可还原的失败说明',
       `Endpoint: ${selectedFailureRow.endpoint}`,
@@ -727,7 +864,16 @@ export function RequestEventsDetailsCard({
       `Auth Index: ${selectedFailureRow.authIndex}`,
       `Failure Message: ${selectedFailureMessage || 'unknown failure'}`,
     ].join('\n');
-  }, [selectedFailureMessage, selectedFailureRow]);
+  }, [selectedFailureCapturedResponse, selectedFailureMessage, selectedFailureRow]);
+  const selectedFailureNote = useMemo(() => {
+    if (selectedFailureCapturedRequest || selectedFailureCapturedResponse) {
+      return '以下内容为该失败事件捕获到的原始请求/响应数据。';
+    }
+    if (selectedCredentialInfo?.statusMessage?.trim()) {
+      return '该事件未捕获到完整原始包，失败说明已回退到请求记录与当前凭证状态。';
+    }
+    return '该事件未捕获到完整原始包，失败说明为当前可还原的最接近信息。';
+  }, [selectedCredentialInfo, selectedFailureCapturedRequest, selectedFailureCapturedResponse]);
 
   return (
     <Card
@@ -1067,7 +1213,7 @@ export function RequestEventsDetailsCard({
             </div>
 
             <div className={styles.requestEventsFailureNote}>
-              {t('usage_stats.request_events_failure_log_note')}
+              {selectedFailureNote}
             </div>
           </div>
         )}

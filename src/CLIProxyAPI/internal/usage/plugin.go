@@ -148,6 +148,8 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 		AuthType:           strings.TrimSpace(record.AuthType),
 		RawRequest:         record.RawRequest,
 		RawResponse:        rawResponse,
+		FailureStatusCode:  record.Fail.StatusCode,
+		FailureMessage:     strings.TrimSpace(record.Fail.Body),
 		Endpoint:           internallogging.GetEndpoint(ctx),
 		RequestID:          internallogging.GetRequestID(ctx),
 		LatencyMs:          latencyMs,

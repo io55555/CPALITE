@@ -30,6 +30,8 @@ type Record struct {
 	ThinkingEffort     string
 	RawRequest         string
 	RawResponse        string
+	FailureStatusCode  int
+	FailureMessage     string
 	Tokens             TokenStats
 	Failed             bool
 }
@@ -49,6 +51,8 @@ type RequestDetail struct {
 	ThinkingEffort     string     `json:"thinking_effort"`
 	RawRequest         string     `json:"raw_request,omitempty"`
 	RawResponse        string     `json:"raw_response,omitempty"`
+	FailureStatusCode  int        `json:"failure_status_code,omitempty"`
+	FailureMessage     string     `json:"failure_message,omitempty"`
 	Tokens             TokenStats `json:"tokens"`
 	Failed             bool       `json:"failed"`
 }

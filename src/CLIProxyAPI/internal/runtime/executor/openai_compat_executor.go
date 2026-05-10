@@ -151,7 +151,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
-		helps.RecordUsageRawResponse(ctx, "Proxy error: "+err.Error())
+		helps.RecordUsageRawResponse(ctx, formatOpenAICompatTransportFailure(err))
 		e.markProxyFailure(auth, apiKey, req.Model, err, rawRequest)
 		return resp, err
 	}
@@ -264,7 +264,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
-		helps.RecordUsageRawResponse(ctx, "Proxy error: "+err.Error())
+		helps.RecordUsageRawResponse(ctx, formatOpenAICompatTransportFailure(err))
 		e.markProxyFailure(auth, apiKey, req.Model, err, rawRequest)
 		return nil, err
 	}
@@ -476,10 +476,21 @@ func (e *OpenAICompatExecutor) markProxyFailure(auth *cliproxyauth.Auth, apiKey,
 	if e.cfg != nil && e.cfg.ProxyFailureCooldownSeconds > 0 {
 		cooldown = time.Duration(e.cfg.ProxyFailureCooldownSeconds) * time.Second
 	}
-	rawResponse := "Proxy error: " + err.Error()
+	rawResponse := formatOpenAICompatTransportFailure(err)
 	if service := openai_compat_state.DefaultService(); service != nil {
 		service.MarkFrozenForModel(providerName, apiKey, model, err.Error(), rawRequest, rawResponse, cooldown)
 	}
+}
+
+func formatOpenAICompatTransportFailure(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.Join([]string{
+		"# 未收到上游 HTTP 响应，连接在传输阶段失败",
+		"Failure Type: proxy_or_network_error",
+		"Failure Message: " + err.Error(),
+	}, "\n")
 }
 
 func isProxyFailureMessage(message string) bool {

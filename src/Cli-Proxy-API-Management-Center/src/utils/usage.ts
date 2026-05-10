@@ -84,6 +84,8 @@ export interface UsageDetail {
   thinking_effort?: string;
   raw_request?: string;
   raw_response?: string;
+  failure_status_code?: number;
+  failure_message?: string;
   failed: boolean;
   __modelName?: string;
   __timestampMs?: number;
@@ -309,6 +311,12 @@ const normalizeUsageRecordDetail = (
     ...(thinkingEffort ? { thinking_effort: thinkingEffort } : {}),
     raw_request: typeof detail.raw_request === 'string' ? detail.raw_request : undefined,
     raw_response: typeof detail.raw_response === 'string' ? detail.raw_response : undefined,
+    failure_status_code:
+      typeof detail.failure_status_code === 'number' && Number.isFinite(detail.failure_status_code)
+        ? detail.failure_status_code
+        : undefined,
+    failure_message:
+      typeof detail.failure_message === 'string' ? detail.failure_message : undefined,
     failed: detail.failed === true,
     __modelName: modelName,
     __endpoint: endpoint,
@@ -909,6 +917,13 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
           ...(thinkingEffort ? { thinking_effort: thinkingEffort } : {}),
           raw_request: typeof detailRaw.raw_request === 'string' ? detailRaw.raw_request : undefined,
           raw_response: typeof detailRaw.raw_response === 'string' ? detailRaw.raw_response : undefined,
+          failure_status_code:
+            typeof detailRaw.failure_status_code === 'number' &&
+            Number.isFinite(detailRaw.failure_status_code)
+              ? detailRaw.failure_status_code
+              : undefined,
+          failure_message:
+            typeof detailRaw.failure_message === 'string' ? detailRaw.failure_message : undefined,
           failed: detailRaw.failed === true,
           __modelName: modelName,
           __timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
