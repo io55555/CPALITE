@@ -162,6 +162,21 @@
   letter-spacing: 0.02em;
 }
 
+.statLabelWithMeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+}
+
+.statSuccessText {
+  color: #16a34a;
+}
+
+.statFailureText {
+  color: #dc2626;
+}
+
 .statIconBadge {
   width: 30px;
   height: 30px;

@@ -11,6 +11,7 @@ import {
 import {
   calculateRecentPerMinuteRates,
   calculateTotalCost,
+  collectUsageDetails,
   formatCompactNumber,
   formatPerMinuteValue,
   formatUsd,
@@ -23,7 +24,7 @@ import styles from '@/pages/MonitoringCenterPage.module.scss';
 
 interface StatCardData {
   key: string;
-  label: string;
+  label: ReactNode;
   icon: ReactNode;
   accent: string;
   accentSoft: string;
@@ -63,11 +64,51 @@ export function MonitorStatCards({
   );
   const totalCost = useMemo(() => calculateTotalCost(usage, modelPrices), [usage, modelPrices]);
   const hasPrices = Object.keys(modelPrices).length > 0;
+  const tokenBreakdown = useMemo(() => {
+    const details = collectUsageDetails(usage);
+    return details.reduce(
+      (sum, detail) => {
+        const input = Math.max(Number(detail.tokens?.input_tokens) || 0, 0);
+        const output = Math.max(Number(detail.tokens?.output_tokens) || 0, 0);
+        const cached = Math.max(
+          Math.max(Number(detail.tokens?.cached_tokens) || 0, 0),
+          Math.max(Number(detail.tokens?.cache_tokens) || 0, 0)
+        );
+        sum.input += input;
+        sum.output += output;
+        sum.cached += cached;
+        return sum;
+      },
+      { input: 0, output: 0, cached: 0 }
+    );
+  }, [usage]);
+  const cacheRatio =
+    tokenBreakdown.input > 0 ? `${((tokenBreakdown.cached / tokenBreakdown.input) * 100).toFixed(2)}%` : '0.00%';
+  const requestLabel = (
+    <span className={styles.statLabelWithMeta}>
+      <span>{t('usage_stats.total_requests')}</span>
+      <span>
+        (
+        <span className={styles.statSuccessText}>成功{(usage?.success_count ?? 0).toLocaleString()}</span>
+        {' '}
+        <span className={styles.statFailureText}>失败{(usage?.failure_count ?? 0).toLocaleString()}</span>
+        )
+      </span>
+    </span>
+  );
+  const tokenLabel = (
+    <span className={styles.statLabelWithMeta}>
+      <span>总token数</span>
+      <span>
+        (输入{tokenBreakdown.input.toLocaleString()} 输出{tokenBreakdown.output.toLocaleString()} 缓存{cacheRatio})
+      </span>
+    </span>
+  );
 
   const statsCards: StatCardData[] = [
     {
       key: 'requests',
-      label: t('usage_stats.total_requests'),
+      label: requestLabel,
       icon: <IconSatellite size={16} />,
       accent: '#8b8680',
       accentSoft: 'rgba(139, 134, 128, 0.18)',
@@ -77,7 +118,7 @@ export function MonitorStatCards({
     },
     {
       key: 'tokens',
-      label: t('usage_stats.total_tokens'),
+      label: tokenLabel,
       icon: <IconDiamond size={16} />,
       accent: '#8b5cf6',
       accentSoft: 'rgba(139, 92, 246, 0.18)',

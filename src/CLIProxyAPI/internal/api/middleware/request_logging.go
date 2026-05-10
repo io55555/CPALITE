@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -49,6 +50,9 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		if rawRequest := buildCapturedRawRequest(c.Request, requestInfo); strings.TrimSpace(rawRequest) != "" {
+			c.Set("USAGE_RAW_REQUEST", rawRequest)
+		}
 
 		// Create response writer wrapper
 		wrapper := NewResponseWriterWrapper(c.Writer, logger, requestInfo)
@@ -66,6 +70,51 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 			// In a real implementation, you might want to use a proper logger here
 		}
 	}
+}
+
+func buildCapturedRawRequest(req *http.Request, info *RequestInfo) string {
+	if req == nil || info == nil {
+		return ""
+	}
+	path := info.URL
+	if strings.TrimSpace(path) == "" && req.URL != nil {
+		path = req.URL.RequestURI()
+	}
+	if strings.TrimSpace(path) == "" {
+		path = "/"
+	}
+	protoMajor, protoMinor := req.ProtoMajor, req.ProtoMinor
+	if protoMajor == 0 {
+		protoMajor = 1
+	}
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "%s %s HTTP/%d.%d\n", info.Method, path, protoMajor, protoMinor)
+	if req.Host != "" {
+		builder.WriteString("Host: ")
+		builder.WriteString(req.Host)
+		builder.WriteByte('\n')
+	}
+	for key, values := range info.Headers {
+		if strings.EqualFold(key, "Host") {
+			continue
+		}
+		for _, value := range values {
+			builder.WriteString(key)
+			builder.WriteString(": ")
+			builder.WriteString(value)
+			builder.WriteByte('\n')
+		}
+	}
+	if req.ContentLength >= 0 {
+		if _, exists := info.Headers["Content-Length"]; !exists {
+			builder.WriteString("Content-Length: ")
+			builder.WriteString(fmt.Sprintf("%d", req.ContentLength))
+			builder.WriteByte('\n')
+		}
+	}
+	builder.WriteByte('\n')
+	builder.Write(info.Body)
+	return builder.String()
 }
 
 func shouldSkipMethodForRequestLogging(req *http.Request) bool {

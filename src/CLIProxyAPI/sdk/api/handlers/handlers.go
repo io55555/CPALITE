@@ -649,6 +649,10 @@ func publishAuthSelectionFailureUsage(ctx context.Context, provider, model strin
 		Failed:      true,
 		RawRequest:  rawRequest,
 		RawResponse: rawResponse,
+		Fail: coreusage.Failure{
+			StatusCode: status,
+			Body:       errText,
+		},
 	})
 }
 

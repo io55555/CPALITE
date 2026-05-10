@@ -71,7 +71,7 @@ func (h *Handler) GetUsageStatistics(c *gin.Context) {
 	}
 
 	store := h.currentUsageStore()
-	if store == nil && hasUsageRangeQuery(c) {
+	if store == nil {
 		store = h.ensureUsageStoreForMonitoring()
 	}
 	if store == nil {
@@ -152,13 +152,6 @@ func usageQueryCacheKey(rng usage.QueryRange) string {
 		end = rng.End.UTC().Format(time.RFC3339Nano)
 	}
 	return start + "|" + end + "|" + strconv.Itoa(rng.Limit)
-}
-
-func hasUsageRangeQuery(c *gin.Context) bool {
-	if c == nil {
-		return false
-	}
-	return strings.TrimSpace(c.Query("start")) != "" || strings.TrimSpace(c.Query("end")) != ""
 }
 
 func (h *Handler) ensureUsageStoreForMonitoring() usage.Store {

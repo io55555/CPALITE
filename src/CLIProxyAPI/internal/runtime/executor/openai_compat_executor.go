@@ -168,8 +168,8 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
 		helps.RecordUsageRawResponse(ctx, rawResponse)
 		e.applyKeyStatusRulers(auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
-		reporter.PublishFailure(ctx)
 		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		reporter.PublishFailure(ctx, err)
 		return resp, err
 	}
 	body, err := io.ReadAll(httpResp.Body)
@@ -276,11 +276,11 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
 		helps.RecordUsageRawResponse(ctx, rawResponse)
 		e.applyKeyStatusRulers(auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
-		reporter.PublishFailure(ctx)
+		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		reporter.PublishFailure(ctx, err)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
 		return nil, err
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)

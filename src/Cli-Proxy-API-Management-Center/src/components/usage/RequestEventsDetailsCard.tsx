@@ -69,9 +69,19 @@ type RequestEventRow = {
 };
 
 const extractLogSection = (content: string, title: string, nextTitle?: string): string => {
-  const start = content.indexOf(title);
+  let start = content.indexOf(title);
+  let titleLength = title.length;
+  if (start < 0 && title.endsWith(' ===')) {
+    const prefix = title.slice(0, -4);
+    const regex = new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\d+\\s+===`);
+    const match = content.match(regex);
+    if (match?.index !== undefined) {
+      start = match.index;
+      titleLength = match[0].length;
+    }
+  }
   if (start < 0) return '';
-  const from = start + title.length;
+  const from = start + titleLength;
   const end = nextTitle ? content.indexOf(nextTitle, from) : -1;
   return content.slice(from, end >= 0 ? end : undefined).trim();
 };
@@ -184,6 +194,35 @@ const summarizeFailureReason = (
     return withDetail('提供商 baseURL 配置异常');
   }
   return trimmed;
+};
+
+const summarizeMissingFailureReason = (
+  row: RequestEventRow | null,
+  credentialInfo?: CredentialInfo
+): string => {
+  if (!row) return '';
+  const statusCode = row.failureStatusCode ?? null;
+  if (statusCode === 401 || statusCode === 403) {
+    return '鉴权失败、无账号或 API Key 无效。';
+  }
+  if (statusCode === 404) {
+    return '无匹配模型或上游接口路径不存在。';
+  }
+  if (statusCode === 407) {
+    return '代理认证失败或代理配置不可用。';
+  }
+  if (statusCode === 408 || statusCode === 504) {
+    return '网络超时或代理 IP 故障。';
+  }
+  if (statusCode === 429) {
+    return '速率限制、额度耗尽或临时限流。';
+  }
+  if (statusCode !== null && statusCode >= 500) {
+    return '上游服务异常、网络故障或代理 IP 故障。';
+  }
+  const provider = row.provider && row.provider !== '-' ? row.provider : row.source;
+  const credential = credentialInfo?.name || row.authIndex;
+  return `失败记录未带回精确错误正文，请检查 ${provider || '当前渠道'} 的账号/API Key、代理 IP、模型匹配和额度状态；凭证：${credential || '-'}`;
 };
 
 export interface RequestEventsDetailsCardProps {
@@ -796,7 +835,7 @@ export function RequestEventsDetailsCard({
     if (statusMessage) {
       return `未捕获到该次请求的精确失败原因，以下为当前凭证状态：${statusMessage}`;
     }
-    return '';
+    return summarizeMissingFailureReason(selectedFailureRow, selectedCredentialInfo ?? undefined);
   }, [selectedCredentialInfo, selectedFailureCapturedResponse, selectedFailureRow]);
   useEffect(() => {
     let cancelled = false;
