@@ -128,6 +128,14 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 
 	latencyMs := durationMs(record.Latency)
 	detail := record.Detail
+	rawResponse := record.RawResponse
+	if strings.TrimSpace(rawResponse) == "" && strings.TrimSpace(record.Fail.Body) != "" {
+		if record.Fail.StatusCode > 0 {
+			rawResponse = strings.TrimSpace(record.Fail.Body)
+		} else {
+			rawResponse = strings.TrimSpace(record.Fail.Body)
+		}
+	}
 
 	return Record{
 		ID:                 uuid.NewString(),
@@ -139,7 +147,7 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),
 		AuthType:           strings.TrimSpace(record.AuthType),
 		RawRequest:         record.RawRequest,
-		RawResponse:        record.RawResponse,
+		RawResponse:        rawResponse,
 		Endpoint:           internallogging.GetEndpoint(ctx),
 		RequestID:          internallogging.GetRequestID(ctx),
 		LatencyMs:          latencyMs,

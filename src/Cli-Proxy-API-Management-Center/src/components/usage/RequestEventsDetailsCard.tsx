@@ -40,10 +40,12 @@ type RequestEventRow = {
   timestampMs: number;
   timestampLabel: string;
   model: string;
+  provider: string;
   sourceKey: string;
   sourceRaw: string;
   source: string;
   sourceType: string;
+  authType: string;
   authIndex: string;
   failed: boolean;
   firstByteLatencyMs: number | null;
@@ -343,10 +345,12 @@ export function RequestEventsDetailsCard({
         timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
         timestampLabel: date ? date.toLocaleString(i18n.language) : timestamp || '-',
         model,
+        provider: typeof detail.provider === 'string' && detail.provider.trim() ? detail.provider.trim() : '-',
         sourceKey,
         sourceRaw: sourceRaw || '-',
         source,
         sourceType,
+        authType: typeof detail.auth_type === 'string' && detail.auth_type.trim() ? detail.auth_type.trim() : '-',
         authIndex,
         failed: detail.failed === true,
         firstByteLatencyMs,
@@ -626,6 +630,36 @@ export function RequestEventsDetailsCard({
     }
     return body.length > 2000 ? `${body.slice(0, 2000)}...` : body;
   }, [selectedCredentialInfo, selectedFailureRow]);
+  const selectedFailureRequestPacket = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    if (selectedFailureRow.rawRequest?.trim()) {
+      return selectedFailureRow.rawRequest;
+    }
+    return [
+      '# 未捕获完整原始请求包，以下为当前可还原的请求上下文',
+      `Timestamp: ${selectedFailureRow.timestamp}`,
+      `Model: ${selectedFailureRow.model}`,
+      `Provider: ${selectedFailureRow.provider}`,
+      `Source: ${selectedFailureRow.source}`,
+      `Source Raw: ${selectedFailureRow.sourceRaw}`,
+      `Auth Type: ${selectedFailureRow.authType}`,
+      `Auth Index: ${selectedFailureRow.authIndex}`,
+    ].join('\n');
+  }, [selectedFailureRow]);
+  const selectedFailureResponsePacket = useMemo(() => {
+    if (!selectedFailureRow) return '';
+    if (selectedFailureRow.rawResponse?.trim()) {
+      return selectedFailureRow.rawResponse;
+    }
+    return [
+      '# 未捕获完整原始响应包，以下为当前可还原的失败说明',
+      `Provider: ${selectedFailureRow.provider}`,
+      `Source: ${selectedFailureRow.source}`,
+      `Auth Type: ${selectedFailureRow.authType}`,
+      `Auth Index: ${selectedFailureRow.authIndex}`,
+      `Failure Message: ${selectedFailureMessage || 'unknown failure'}`,
+    ].join('\n');
+  }, [selectedFailureMessage, selectedFailureRow]);
 
   return (
     <Card
@@ -910,6 +944,14 @@ export function RequestEventsDetailsCard({
                 </span>
                 <span className={styles.requestEventsFailureMetaValue}>{selectedFailureRow.model}</span>
               </div>
+              <div>
+                <span className={styles.requestEventsFailureMetaLabel}>Provider</span>
+                <span className={styles.requestEventsFailureMetaValue}>{selectedFailureRow.provider}</span>
+              </div>
+              <div>
+                <span className={styles.requestEventsFailureMetaLabel}>Source</span>
+                <span className={styles.requestEventsFailureMetaValue}>{selectedFailureRow.source}</span>
+              </div>
             </div>
 
             {selectedCredentialInfo?.name && (
@@ -933,14 +975,14 @@ export function RequestEventsDetailsCard({
             <div className={styles.requestEventsFailureMessageBlock}>
               <div className={styles.requestEventsFailureMetaLabel}>原始请求包</div>
               <pre className={styles.requestEventsFailurePacket}>
-                {selectedFailureRow.rawRequest || '当前暂无原始请求包。'}
+                {selectedFailureRequestPacket}
               </pre>
             </div>
 
             <div className={styles.requestEventsFailureMessageBlock}>
               <div className={styles.requestEventsFailureMetaLabel}>原始响应包</div>
               <pre className={styles.requestEventsFailurePacket}>
-                {selectedFailureRow.rawResponse || '当前暂无原始响应包。'}
+                {selectedFailureResponsePacket}
               </pre>
             </div>
 

@@ -93,11 +93,30 @@ func UsageRawPackets(ctx context.Context) (string, string) {
 	return valueString(usageRawRequestKey), valueString(usageRawResponseKey)
 }
 
+func APIRequestResponsePackets(ctx context.Context) (string, string) {
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil {
+		return "", ""
+	}
+	valueString := func(key string) string {
+		value, exists := ginCtx.Get(key)
+		if !exists {
+			return ""
+		}
+		switch v := value.(type) {
+		case string:
+			return v
+		case []byte:
+			return string(v)
+		default:
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	return valueString(apiRequestKey), valueString(apiResponseKey)
+}
+
 // RecordAPIRequest stores the upstream request metadata in Gin context for request logging.
 func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequestLog) {
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 	ginCtx := ginContextFrom(ctx)
 	if ginCtx == nil {
 		return
@@ -138,13 +157,13 @@ func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequ
 	attempts = append(attempts, attempt)
 	ginCtx.Set(apiAttemptsKey, attempts)
 	updateAggregatedRequest(ginCtx, attempts)
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 }
 
 // RecordAPIResponseMetadata captures upstream response status/header information for the latest attempt.
 func RecordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status int, headers http.Header) {
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 	ginCtx := ginContextFrom(ctx)
 	if ginCtx == nil {
 		return
@@ -164,11 +183,14 @@ func RecordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status i
 	}
 
 	updateAggregatedResponse(ginCtx, attempts)
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 }
 
 // RecordAPIResponseError adds an error entry for the latest attempt when no HTTP response is available.
 func RecordAPIResponseError(ctx context.Context, cfg *config.Config, err error) {
-	if cfg == nil || !cfg.RequestLog || err == nil {
+	if err == nil {
 		return
 	}
 	ginCtx := ginContextFrom(ctx)
@@ -189,13 +211,13 @@ func RecordAPIResponseError(ctx context.Context, cfg *config.Config, err error) 
 	attempt.errorWritten = true
 
 	updateAggregatedResponse(ginCtx, attempts)
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 }
 
 // AppendAPIResponseChunk appends an upstream response chunk to Gin context for request logging.
 func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byte) {
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 	data := bytes.TrimSpace(chunk)
 	if len(data) == 0 {
 		return
@@ -231,6 +253,9 @@ func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byt
 	attempt.prevWasSSEEvent = currentChunkIsSSEEvent
 
 	updateAggregatedResponse(ginCtx, attempts)
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 }
 
 // RecordAPIWebsocketRequest stores an upstream websocket request event in Gin context.

@@ -150,6 +150,22 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 		return usage.Record{Model: model, Detail: detail, Failed: failed, Fail: fail}
 	}
 	rawRequest, rawResponse := UsageRawPackets(r.ctx)
+	if rawRequest == "" || rawResponse == "" {
+		apiRequest, apiResponse := APIRequestResponsePackets(r.ctx)
+		if rawRequest == "" {
+			rawRequest = apiRequest
+		}
+		if rawResponse == "" {
+			rawResponse = apiResponse
+		}
+	}
+	if rawResponse == "" && strings.TrimSpace(fail.Body) != "" {
+		if fail.StatusCode > 0 {
+			rawResponse = fmt.Sprintf("HTTP/1.1 %d\n\n%s", fail.StatusCode, fail.Body)
+		} else {
+			rawResponse = fail.Body
+		}
+	}
 	return usage.Record{
 		Provider:    r.provider,
 		Model:       model,

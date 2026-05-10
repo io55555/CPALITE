@@ -293,7 +293,9 @@ const normalizeUsageRecordDetail = (
   return {
     ...(id ? { id } : {}),
     timestamp,
+    provider: typeof detail.provider === 'string' ? detail.provider.trim() : undefined,
     source,
+    auth_type: typeof detail.auth_type === 'string' ? detail.auth_type.trim() : undefined,
     auth_index: (detail.auth_index ?? detail.authIndex ?? detail.AuthIndex ?? null) as UsageDetail['auth_index'],
     ...(latencyMs !== null ? { latency_ms: latencyMs } : {}),
     ...(firstByteLatencyMs !== null ? { first_byte_latency_ms: firstByteLatencyMs } : {}),
@@ -301,6 +303,8 @@ const normalizeUsageRecordDetail = (
     tokens: normalizeUsageTokens(detail.tokens),
     thinking: normalizeUsageThinking(detail.thinking),
     ...(thinkingEffort ? { thinking_effort: thinkingEffort } : {}),
+    raw_request: typeof detail.raw_request === 'string' ? detail.raw_request : undefined,
+    raw_response: typeof detail.raw_response === 'string' ? detail.raw_response : undefined,
     failed: detail.failed === true,
     __modelName: modelName,
     __endpoint: endpoint,
