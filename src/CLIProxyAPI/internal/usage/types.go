@@ -37,6 +37,8 @@ type Record struct {
 type RequestDetail struct {
 	ID                 string     `json:"id"`
 	Timestamp          time.Time  `json:"timestamp"`
+	Endpoint           string     `json:"endpoint,omitempty"`
+	RequestID          string     `json:"request_id,omitempty"`
 	LatencyMs          int64      `json:"latency_ms"`
 	FirstByteLatencyMs int64      `json:"first_byte_latency_ms"`
 	GenerationMs       int64      `json:"generation_ms"`

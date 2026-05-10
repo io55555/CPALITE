@@ -150,15 +150,16 @@ const resolveCredentialMatch = (
   const originalSource = String(detail.__sourceRaw ?? '').trim();
   const provider = normalizeProviderName(detail.provider);
   const authType = String(detail.auth_type ?? '').trim().toLowerCase();
-  const isApiKeyUsage = authType === 'api_key' || authType === 'apikey';
+  const sourceCandidates = buildSourceCandidates(sourceRaw, sourceText, originalSource);
+  const providerKeyMatch =
+    openaiProviders.length > 0
+      ? findOpenAIApiKeyMatch(openaiProviders, provider, authIndex, sourceCandidates)
+      : null;
+  const isApiKeyUsage =
+    authType === 'api_key' || authType === 'apikey' || providerKeyMatch !== null;
 
   if (isApiKeyUsage && (sourceText || authIndex)) {
-    const keyMatch = findOpenAIApiKeyMatch(
-      openaiProviders,
-      provider,
-      authIndex,
-      buildSourceCandidates(sourceRaw, sourceText, originalSource)
-    );
+    const keyMatch = providerKeyMatch;
     if (keyMatch) {
       return {
         rowKey: `api_key:${keyMatch.providerName}:${keyMatch.apiKey}`,

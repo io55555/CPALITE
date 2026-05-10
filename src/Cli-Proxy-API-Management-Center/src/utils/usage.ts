@@ -63,6 +63,8 @@ export interface ModelPrice {
 export interface UsageDetail {
   id?: string;
   timestamp: string;
+  endpoint?: string;
+  request_id?: string;
   source: string;
   provider?: string;
   auth_type?: string;
@@ -293,6 +295,8 @@ const normalizeUsageRecordDetail = (
   return {
     ...(id ? { id } : {}),
     timestamp,
+    endpoint: typeof detail.endpoint === 'string' ? detail.endpoint.trim() : undefined,
+    request_id: typeof detail.request_id === 'string' ? detail.request_id.trim() : undefined,
     provider: typeof detail.provider === 'string' ? detail.provider.trim() : undefined,
     source,
     auth_type: typeof detail.auth_type === 'string' ? detail.auth_type.trim() : undefined,
@@ -887,6 +891,8 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
         details.push({
           ...(id ? { id } : {}),
           timestamp,
+          endpoint: typeof detailRaw.endpoint === 'string' ? detailRaw.endpoint.trim() : undefined,
+          request_id: typeof detailRaw.request_id === 'string' ? detailRaw.request_id.trim() : undefined,
           provider: typeof detailRaw.provider === 'string' ? detailRaw.provider.trim() : undefined,
           source: normalizeSource(detailRaw.source),
           __sourceRaw: typeof detailRaw.source === 'string' ? detailRaw.source.trim() : undefined,

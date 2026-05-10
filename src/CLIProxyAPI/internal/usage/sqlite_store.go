@@ -275,11 +275,11 @@ func (s *SQLiteStore) Query(ctx context.Context, rng QueryRange) (APIUsage, erro
 		limit = defaultQueryLimit
 	}
 	query := `
-SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
+SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM (
-SELECT id, timestamp, api_key, endpoint, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
+SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM usage_records`
@@ -311,6 +311,7 @@ FROM usage_records`
 		var timestampText string
 		var apiKey string
 		var endpoint string
+		var requestID string
 		var provider string
 		var model string
 		var failedInt int
@@ -320,6 +321,7 @@ FROM usage_records`
 			&timestampText,
 			&apiKey,
 			&endpoint,
+			&requestID,
 			&provider,
 			&model,
 			&detail.Source,
@@ -345,6 +347,8 @@ FROM usage_records`
 			return nil, fmt.Errorf("usage sqlite parse timestamp: %w", err)
 		}
 		detail.Timestamp = parsed.UTC()
+		detail.Endpoint = strings.TrimSpace(endpoint)
+		detail.RequestID = strings.TrimSpace(requestID)
 		detail.LatencyMs = nonNegative(detail.LatencyMs)
 		detail.FirstByteLatencyMs = nonNegative(detail.FirstByteLatencyMs)
 		detail.GenerationMs = nonNegative(detail.GenerationMs)
@@ -455,6 +459,8 @@ func addRecordToUsage(result APIUsage, record Record) {
 		LatencyMs:          nonNegative(record.LatencyMs),
 		FirstByteLatencyMs: nonNegative(record.FirstByteLatencyMs),
 		GenerationMs:       nonNegative(record.GenerationMs),
+		Endpoint:           strings.TrimSpace(record.Endpoint),
+		RequestID:          strings.TrimSpace(record.RequestID),
 		Provider:           strings.TrimSpace(record.Provider),
 		Source:             strings.TrimSpace(record.Source),
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),

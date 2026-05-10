@@ -10,6 +10,7 @@ import { IconMinus } from '@/components/ui/icons';
 import { getAuthFileStatusMessage } from '@/features/authFiles/constants';
 import { useInterval } from '@/hooks/useInterval';
 import { authFilesApi } from '@/services/api/authFiles';
+import { logsApi } from '@/services/api/logs';
 import { useNotificationStore, useUsageStatsStore } from '@/stores';
 import type { GeminiKeyConfig, ProviderKeyConfig, OpenAIProviderConfig } from '@/types';
 import type { AuthFileItem } from '@/types/authFile';
@@ -36,6 +37,8 @@ const MAX_RENDERED_EVENTS = 500;
 type RequestEventRow = {
   id: string;
   backendId: string | null;
+  requestId: string | null;
+  endpoint: string;
   timestamp: string;
   timestampMs: number;
   timestampLabel: string;
@@ -61,6 +64,14 @@ type RequestEventRow = {
   cacheHitRatio: number | null;
   rawRequest?: string;
   rawResponse?: string;
+};
+
+const extractLogSection = (content: string, title: string, nextTitle?: string): string => {
+  const start = content.indexOf(title);
+  if (start < 0) return '';
+  const from = start + title.length;
+  const end = nextTitle ? content.indexOf(nextTitle, from) : -1;
+  return content.slice(from, end >= 0 ? end : undefined).trim();
 };
 
 export interface RequestEventsDetailsCardProps {
@@ -177,6 +188,8 @@ export function RequestEventsDetailsCard({
   );
   const [localAuthFiles, setLocalAuthFiles] = useState<AuthFileItem[]>([]);
   const [selectedFailureRow, setSelectedFailureRow] = useState<RequestEventRow | null>(null);
+  const [selectedFailureLogText, setSelectedFailureLogText] = useState('');
+  const [selectedFailureLogLoading, setSelectedFailureLogLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [nextRefreshAtMs, setNextRefreshAtMs] = useState<number | null>(null);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
@@ -341,6 +354,8 @@ export function RequestEventsDetailsCard({
       return {
         id: backendId ?? `${timestamp}-${model}-${sourceKey}-${authIndex}-${index}`,
         backendId,
+        requestId: typeof detail.request_id === 'string' && detail.request_id.trim() ? detail.request_id.trim() : null,
+        endpoint: typeof detail.endpoint === 'string' && detail.endpoint.trim() ? detail.endpoint.trim() : '-',
         timestamp,
         timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
         timestampLabel: date ? date.toLocaleString(i18n.language) : timestamp || '-',
@@ -630,14 +645,59 @@ export function RequestEventsDetailsCard({
     }
     return body.length > 2000 ? `${body.slice(0, 2000)}...` : body;
   }, [selectedCredentialInfo, selectedFailureRow]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedFailureRow?.requestId) {
+      setSelectedFailureLogText('');
+      setSelectedFailureLogLoading(false);
+      return;
+    }
+    if (selectedFailureRow.rawRequest?.trim() && selectedFailureRow.rawResponse?.trim()) {
+      setSelectedFailureLogText('');
+      setSelectedFailureLogLoading(false);
+      return;
+    }
+    setSelectedFailureLogLoading(true);
+    setSelectedFailureLogText('');
+    void logsApi
+      .downloadRequestLogById(selectedFailureRow.requestId)
+      .then(async (response) => {
+        const blob = response.data as Blob;
+        const text = await blob.text();
+        if (!cancelled) {
+          setSelectedFailureLogText(text);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedFailureLogText('');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSelectedFailureLogLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFailureRow]);
   const selectedFailureRequestPacket = useMemo(() => {
     if (!selectedFailureRow) return '';
     if (selectedFailureRow.rawRequest?.trim()) {
       return selectedFailureRow.rawRequest;
     }
+    if (selectedFailureLogText) {
+      const fromLog = extractLogSection(selectedFailureLogText, '=== API REQUEST ===', '=== API RESPONSE ===');
+      if (fromLog) {
+        return fromLog;
+      }
+    }
     return [
       '# 未捕获完整原始请求包，以下为当前可还原的请求上下文',
       `Timestamp: ${selectedFailureRow.timestamp}`,
+      `Endpoint: ${selectedFailureRow.endpoint}`,
+      `Request ID: ${selectedFailureRow.requestId ?? '-'}`,
       `Model: ${selectedFailureRow.model}`,
       `Provider: ${selectedFailureRow.provider}`,
       `Source: ${selectedFailureRow.source}`,
@@ -651,8 +711,16 @@ export function RequestEventsDetailsCard({
     if (selectedFailureRow.rawResponse?.trim()) {
       return selectedFailureRow.rawResponse;
     }
+    if (selectedFailureLogText) {
+      const fromLog = extractLogSection(selectedFailureLogText, '=== API RESPONSE ===');
+      if (fromLog) {
+        return fromLog;
+      }
+    }
     return [
       '# 未捕获完整原始响应包，以下为当前可还原的失败说明',
+      `Endpoint: ${selectedFailureRow.endpoint}`,
+      `Request ID: ${selectedFailureRow.requestId ?? '-'}`,
       `Provider: ${selectedFailureRow.provider}`,
       `Source: ${selectedFailureRow.source}`,
       `Auth Type: ${selectedFailureRow.authType}`,
@@ -945,6 +1013,14 @@ export function RequestEventsDetailsCard({
                 <span className={styles.requestEventsFailureMetaValue}>{selectedFailureRow.model}</span>
               </div>
               <div>
+                <span className={styles.requestEventsFailureMetaLabel}>Endpoint</span>
+                <span className={styles.requestEventsFailureMetaValue}>{selectedFailureRow.endpoint}</span>
+              </div>
+              <div>
+                <span className={styles.requestEventsFailureMetaLabel}>Request ID</span>
+                <span className={styles.requestEventsFailureMetaValue}>{selectedFailureRow.requestId ?? '-'}</span>
+              </div>
+              <div>
                 <span className={styles.requestEventsFailureMetaLabel}>Provider</span>
                 <span className={styles.requestEventsFailureMetaValue}>{selectedFailureRow.provider}</span>
               </div>
@@ -971,6 +1047,10 @@ export function RequestEventsDetailsCard({
                 {selectedFailureMessage || t('usage_stats.request_events_failure_log_empty')}
               </div>
             </div>
+
+            {selectedFailureLogLoading ? (
+              <div className={styles.requestEventsFailureNote}>正在补充读取完整请求日志…</div>
+            ) : null}
 
             <div className={styles.requestEventsFailureMessageBlock}>
               <div className={styles.requestEventsFailureMetaLabel}>原始请求包</div>
