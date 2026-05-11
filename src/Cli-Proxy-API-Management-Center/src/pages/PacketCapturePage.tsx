@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { IconTrash2 } from '@/components/ui/icons';
@@ -13,6 +13,7 @@ import {
   type PacketTrigger,
 } from '@/services/api/packetCapture';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { downloadBlob } from '@/utils/download';
 import styles from './PacketCapturePage.module.scss';
 
 const ALL = '__all__';
@@ -262,6 +263,7 @@ function SuggestInput({ value, options, onChange, placeholder }: SuggestInputPro
 export function PacketCapturePage() {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const config = useConfigStore((state) => state.config);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [records, setRecords] = useState<PacketRecordSummary[]>([]);
   const [rules, setRules] = useState<PacketRule[]>([]);
@@ -392,6 +394,21 @@ export function PacketCapturePage() {
     if (!editingRule) return;
     await packetCaptureApi.saveRule(editingRule);
     setEditingRule(null);
+    await load();
+  };
+
+  const exportRules = async () => {
+    const response = await packetCaptureApi.exportRules();
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+    downloadBlob({
+      filename: `packet-filter-rules-${new Date().toISOString().slice(0, 10)}.json`,
+      blob,
+    });
+  };
+
+  const importRules = async (file: File | null) => {
+    if (!file) return;
+    await packetCaptureApi.importRules(file);
     await load();
   };
 
@@ -566,7 +583,28 @@ export function PacketCapturePage() {
         </div>
       </Card>
 
-      <Card title="过滤规则" extra={<Button size="sm" onClick={() => setEditingRule(defaultRule)}>添加规则</Button>}>
+      <Card
+        title="过滤规则"
+        extra={
+          <div className={styles.actions}>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className={styles.hiddenFileInput}
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                void importRules(file).finally(() => {
+                  event.target.value = '';
+                });
+              }}
+            />
+            <Button size="sm" variant="secondary" onClick={() => void exportRules()} disabled={rules.length === 0}>导出规则</Button>
+            <Button size="sm" variant="secondary" onClick={() => importInputRef.current?.click()}>导入规则</Button>
+            <Button size="sm" onClick={() => setEditingRule(defaultRule)}>添加规则</Button>
+          </div>
+        }
+      >
         <div className={styles.ruleGrid}>
           {rules.map((rule) => (
             <div className={styles.ruleItem} key={rule.id}>

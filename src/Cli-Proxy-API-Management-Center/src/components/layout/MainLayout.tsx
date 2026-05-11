@@ -396,12 +396,12 @@ export function MainLayout() {
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
     { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },
     { path: '/monitor', label: t('nav.monitoring_center'), icon: sidebarIcons.monitoring },
-    { path: '/packet-capture', label: '抓包/过滤', icon: sidebarIcons.logs },
     { path: '/monitorseakee', label: '监控中心seakee', icon: sidebarIcons.monitoring },
+    { path: '/packet-capture', label: '抓包/过滤', icon: sidebarIcons.logs },
     ...(config?.loggingToFile
       ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }]
       : []),
-    { path: '/system', label: t('nav.system_info'), icon: sidebarIcons.system },
+    { path: '/system', label: '中心信息', icon: sidebarIcons.system },
   ];
   const navOrder = navItems.map((item) => item.path);
   const getRouteOrder = (pathname: string) => {

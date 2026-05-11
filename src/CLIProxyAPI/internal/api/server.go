@@ -340,6 +340,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		wsRoutes:            make(map[string]struct{}),
 	}
 	s.wsAuthEnabled.Store(cfg.WebsocketAuth)
+	s.configurePacketCaptureRulesProvider()
 	// Save initial YAML snapshot
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
 	s.applyAccessConfig(nil, cfg)
@@ -440,6 +441,48 @@ func (s *Server) homeHeartbeatMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func (s *Server) configurePacketCaptureRulesProvider() {
+	packetcapture.SetDefaultRulesProvider(func(context.Context) ([]packetcapture.Rule, error) {
+		if s == nil || s.cfg == nil {
+			return nil, nil
+		}
+		return configPacketRulesToRuntimeRules(s.cfg.PacketCapture.FilterRules), nil
+	})
+}
+
+func configPacketRulesToRuntimeRules(in []config.PacketFilterRule) []packetcapture.Rule {
+	out := make([]packetcapture.Rule, 0, len(in))
+	for _, rule := range in {
+		out = append(out, packetcapture.Rule{
+			ID:              rule.ID,
+			Name:            rule.Name,
+			Enabled:         rule.Enabled,
+			RecordHistory:   rule.RecordHistory,
+			Priority:        rule.Priority,
+			Provider:        rule.Provider,
+			ProviderKeyword: rule.ProviderKeyword,
+			Model:           rule.Model,
+			ModelKeyword:    rule.ModelKeyword,
+			Packet:          rule.Packet,
+			Part:            rule.Part,
+			JSONPath:        rule.JSONPath,
+			Header:          rule.Header,
+			Operator:        rule.Operator,
+			Value:           rule.Value,
+			ValueNumber:     rule.ValueNumber,
+			Action:          rule.Action,
+			Replacement:     rule.Replacement,
+			ReplaceLimit:    rule.ReplaceLimit,
+			CooldownSeconds: rule.CooldownSeconds,
+			Target:          rule.Target,
+			Notes:           rule.Notes,
+			CreatedAt:       rule.CreatedAt,
+			UpdatedAt:       rule.UpdatedAt,
+		})
+	}
+	return out
 }
 
 // setupRoutes configures the API routes for the server.
@@ -774,6 +817,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/packet-capture/records/:id", s.mgmt.GetPacketCapture)
 		mgmt.DELETE("/packet-capture/records", s.mgmt.DeletePacketCaptures)
 		mgmt.GET("/packet-capture/rules", s.mgmt.ListPacketFilterRules)
+		mgmt.GET("/packet-capture/rules/export", s.mgmt.ExportPacketFilterRules)
+		mgmt.POST("/packet-capture/rules/import", s.mgmt.ImportPacketFilterRules)
 		mgmt.PUT("/packet-capture/rules", s.mgmt.PutPacketFilterRule)
 		mgmt.PATCH("/packet-capture/rules", s.mgmt.PutPacketFilterRule)
 		mgmt.DELETE("/packet-capture/rules/:id", s.mgmt.DeletePacketFilterRule)

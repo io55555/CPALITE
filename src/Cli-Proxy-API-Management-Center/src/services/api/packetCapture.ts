@@ -78,6 +78,13 @@ export const packetCaptureApi = {
   deleteRecords: (ids: string[]) => apiClient.delete('/packet-capture/records', { data: { ids } }),
   deleteAllRecords: () => apiClient.delete('/packet-capture/records', { data: { all: true } }),
   listRules: () => apiClient.get<PacketRule[]>('/packet-capture/rules'),
+  exportRules: () =>
+    apiClient.getRaw('/packet-capture/rules/export', { responseType: 'blob' }),
+  importRules: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient.postForm<{ imported: number }>('/packet-capture/rules/import', formData);
+  },
   saveRule: (rule: PacketRule) => apiClient.put<PacketRule>('/packet-capture/rules', rule),
   deleteRule: (id: string) => apiClient.delete(`/packet-capture/rules/${id}`),
   listTriggers: (params?: { limit?: number }) =>

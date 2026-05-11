@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,8 +31,9 @@ type pendingCaptureRecord struct {
 const pendingCaptureKey = "PACKET_CAPTURE_PENDING_RECORDS"
 
 var (
-	defaultMu      sync.RWMutex
-	defaultService *Service
+	defaultMu            sync.RWMutex
+	defaultService       *Service
+	defaultRulesProvider func(context.Context) ([]Rule, error)
 )
 
 func InitDefaultInLogDir(logDir string) error {
@@ -62,10 +64,17 @@ func DefaultStore() *Store {
 	return nil
 }
 
+func SetDefaultRulesProvider(provider func(context.Context) ([]Rule, error)) {
+	defaultMu.Lock()
+	defaultRulesProvider = provider
+	defaultMu.Unlock()
+}
+
 func CloseDefault() error {
 	defaultMu.Lock()
 	previous := defaultService
 	defaultService = nil
+	defaultRulesProvider = nil
 	defaultMu.Unlock()
 	if previous == nil || previous.store == nil {
 		return nil
@@ -451,7 +460,7 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 	if store == nil {
 		return packet, nil, nil
 	}
-	rules, err := store.EnabledRules(context.Background())
+	rules, err := enabledRules(context.Background(), store)
 	if err != nil || len(rules) == 0 {
 		return packet, nil, nil
 	}
@@ -487,6 +496,36 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 		}
 	}
 	return current, nil, triggers
+}
+
+func enabledRules(ctx context.Context, store *Store) ([]Rule, error) {
+	defaultMu.RLock()
+	provider := defaultRulesProvider
+	defaultMu.RUnlock()
+	if provider != nil {
+		rules, err := provider(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]Rule, 0, len(rules))
+		for _, rule := range rules {
+			if rule.Enabled {
+				out = append(out, rule)
+			}
+		}
+		sortRules(out)
+		return out, nil
+	}
+	return store.EnabledRules(ctx)
+}
+
+func sortRules(rules []Rule) {
+	sort.SliceStable(rules, func(i, j int) bool {
+		if rules[i].Priority != rules[j].Priority {
+			return rules[i].Priority < rules[j].Priority
+		}
+		return rules[i].UpdatedAt.After(rules[j].UpdatedAt)
+	})
 }
 
 func contextString(ctx context.Context, key string) string {

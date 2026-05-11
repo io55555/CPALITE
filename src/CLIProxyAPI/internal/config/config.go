@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	log "github.com/sirupsen/logrus"
@@ -159,7 +160,41 @@ type Config struct {
 	// Payload defines default and override rules for provider payload parameters.
 	Payload PayloadConfig `yaml:"payload" json:"payload"`
 
+	// PacketCapture stores packet filter rules in config.yaml; packet records remain in sqlite.
+	PacketCapture PacketCaptureConfig `yaml:"packet-capture" json:"packet-capture"`
+
 	legacyMigrationPending bool `yaml:"-" json:"-"`
+}
+
+type PacketCaptureConfig struct {
+	FilterRules []PacketFilterRule `yaml:"filter-rules" json:"filter-rules"`
+}
+
+type PacketFilterRule struct {
+	ID              string    `yaml:"id,omitempty" json:"id"`
+	Name            string    `yaml:"name" json:"name"`
+	Enabled         bool      `yaml:"enabled" json:"enabled"`
+	RecordHistory   bool      `yaml:"record-history" json:"record_history"`
+	Priority        int       `yaml:"priority" json:"priority"`
+	Provider        string    `yaml:"provider,omitempty" json:"provider,omitempty"`
+	ProviderKeyword string    `yaml:"provider-keyword,omitempty" json:"provider_keyword,omitempty"`
+	Model           string    `yaml:"model,omitempty" json:"model,omitempty"`
+	ModelKeyword    string    `yaml:"model-keyword,omitempty" json:"model_keyword,omitempty"`
+	Packet          string    `yaml:"packet" json:"packet"`
+	Part            string    `yaml:"part" json:"part"`
+	JSONPath        string    `yaml:"json-path,omitempty" json:"json_path,omitempty"`
+	Header          string    `yaml:"header,omitempty" json:"header,omitempty"`
+	Operator        string    `yaml:"operator" json:"operator"`
+	Value           string    `yaml:"value,omitempty" json:"value,omitempty"`
+	ValueNumber     float64   `yaml:"value-number,omitempty" json:"value_number,omitempty"`
+	Action          string    `yaml:"action" json:"action"`
+	Replacement     string    `yaml:"replacement,omitempty" json:"replacement,omitempty"`
+	ReplaceLimit    int       `yaml:"replace-limit,omitempty" json:"replace_limit,omitempty"`
+	CooldownSeconds int       `yaml:"cooldown-seconds,omitempty" json:"cooldown_seconds,omitempty"`
+	Target          string    `yaml:"target,omitempty" json:"target,omitempty"`
+	Notes           string    `yaml:"notes,omitempty" json:"notes,omitempty"`
+	CreatedAt       time.Time `yaml:"created-at,omitempty" json:"created_at"`
+	UpdatedAt       time.Time `yaml:"updated-at,omitempty" json:"updated_at"`
 }
 
 // ClaudeHeaderDefaults configures default header values injected into Claude API requests.
