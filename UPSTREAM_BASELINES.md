@@ -2,7 +2,7 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: a44e5eb1ab419c33ab8bfad2b9e4794ad6ece1c5
+- commit: 1fca942b9c2c5bbdf78334eb4744a098983a05e9
 
 ## Cli-Proxy-API-Management-Center
 - branch: main
