@@ -1,0 +1,293 @@
+@use '../styles/variables' as *;
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header,
+.actions,
+.filters,
+.formActions,
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.header {
+  justify-content: space-between;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.captureTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switchTrack {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.switchTrack::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 0.16s ease, background-color 0.16s ease;
+}
+
+.switch input:checked + .switchTrack {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+}
+
+.switch input:checked + .switchTrack::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.switchText {
+  white-space: nowrap;
+}
+
+.filters {
+  margin-bottom: 12px;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  overflow-x: auto;
+}
+
+.filters > * {
+  flex: 0 0 150px;
+}
+
+.tableWrap {
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th,
+.table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: top;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.success {
+  color: var(--success-color);
+  font-weight: 700;
+}
+
+.failed {
+  color: var(--error-color);
+  font-weight: 700;
+}
+
+.packetBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.packetBlock h3,
+.subTitle {
+  margin: 0;
+  font-size: 14px;
+}
+
+.packetBlock pre {
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-secondary);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.ruleGrid,
+.triggerList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ruleItem,
+.triggerItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-secondary);
+}
+
+.ruleItem span,
+.triggerItem span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.subTitle {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.triggerHeader,
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.triggerHeader {
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.triggerHeader .subTitle {
+  margin: 0;
+}
+
+.triggerHeader .actions {
+  margin-left: auto;
+  flex-wrap: nowrap;
+}
+
+.triggerHeader .actions > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.triggerHeader .actions button {
+  min-width: max-content;
+}
+
+.ruleName {
+  font-weight: 400;
+  color: var(--text-primary);
+}
+
+.rowActions {
+  flex-wrap: nowrap;
+}
+
+.triggerItem {
+  align-items: center;
+}
+
+.triggerItem > span {
+  min-width: 82px;
+}
+
+.triggerItem > span:last-of-type {
+  flex: 1;
+  min-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pagination {
+  justify-content: flex-end;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  color: var(--error-color);
+  border-color: var(--error-color);
+}
+
+.errorText {
+  margin: 0;
+  color: var(--error-color);
+}
+
+.ruleForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ruleForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.full,
+.formActions {
+  grid-column: 1 / -1;
+}
+
+.formActions {
+  justify-content: flex-end;
+}

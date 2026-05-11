@@ -34,6 +34,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -297,6 +298,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	for _, mw := range optionState.extraMiddleware {
 		engine.Use(mw)
 	}
+	engine.Use(middleware.PacketCaptureMiddleware())
 
 	// Add request logging middleware (positioned after recovery, before auth)
 	// Resolve logs directory relative to the configuration file directory.
@@ -359,14 +361,14 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		if err := usage.InitDefaultStoreInLogDir(logDir); err != nil {
 			log.WithError(err).Warn("usage store unavailable")
 		}
-	}
-	if len(cfg.OpenAICompatibility) > 0 {
-		if err := openai_compat_state.InitDefault(filepath.Join(logDir, "openai_compat_key_state.db")); err != nil {
-			log.WithError(err).Warn("openai compatibility key state unavailable")
+		if err := packetcapture.InitDefaultInLogDir(logDir); err != nil {
+			log.WithError(err).Warn("packet capture store unavailable")
 		}
 	}
+	s.ensureOpenAICompatKeyState(cfg)
 	s.mgmt.SetUsageStore(usage.DefaultStore())
 	s.mgmt.SetOpenAICompatKeyState(openai_compat_state.DefaultService())
+	s.applyOpenAICompatKeyStateToAuths(context.Background())
 	if optionState.postAuthHook != nil {
 		s.mgmt.SetPostAuthHook(optionState.postAuthHook)
 	}
@@ -765,6 +767,18 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/usage", s.mgmt.DeleteFwindyUsage)
 		mgmt.GET("/usage/statistics", s.mgmt.GetUsageStatistics)
 		mgmt.DELETE("/usage/records", s.mgmt.DeleteUsageRecords)
+		mgmt.GET("/packet-capture/state", s.mgmt.GetPacketCaptureState)
+		mgmt.PUT("/packet-capture/state", s.mgmt.PutPacketCaptureState)
+		mgmt.PATCH("/packet-capture/state", s.mgmt.PutPacketCaptureState)
+		mgmt.GET("/packet-capture/records", s.mgmt.ListPacketCaptures)
+		mgmt.GET("/packet-capture/records/:id", s.mgmt.GetPacketCapture)
+		mgmt.DELETE("/packet-capture/records", s.mgmt.DeletePacketCaptures)
+		mgmt.GET("/packet-capture/rules", s.mgmt.ListPacketFilterRules)
+		mgmt.PUT("/packet-capture/rules", s.mgmt.PutPacketFilterRule)
+		mgmt.PATCH("/packet-capture/rules", s.mgmt.PutPacketFilterRule)
+		mgmt.DELETE("/packet-capture/rules/:id", s.mgmt.DeletePacketFilterRule)
+		mgmt.GET("/packet-capture/triggers", s.mgmt.ListPacketFilterTriggers)
+		mgmt.DELETE("/packet-capture/triggers", s.mgmt.DeletePacketFilterTriggers)
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
 		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)
 		mgmt.POST("/auth-files", s.mgmt.UploadAuthFile)
@@ -1252,9 +1266,57 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	_ = usage.CloseDefaultStore()
 	_ = openai_compat_state.CloseDefault()
+	_ = packetcapture.CloseDefault()
 
 	log.Debug("API server stopped")
 	return nil
+}
+
+func (s *Server) ensureOpenAICompatKeyState(cfg *config.Config) *openai_compat_state.Service {
+	if cfg == nil || len(cfg.OpenAICompatibility) == 0 {
+		return openai_compat_state.DefaultService()
+	}
+	if service := openai_compat_state.DefaultService(); service != nil {
+		return service
+	}
+	logDir := logging.ResolveLogDirectory(cfg)
+	if err := openai_compat_state.InitDefault(filepath.Join(logDir, "openai_compat_key_state.db")); err != nil {
+		log.WithError(err).Warn("openai compatibility key state unavailable")
+		return nil
+	}
+	return openai_compat_state.DefaultService()
+}
+
+func (s *Server) applyOpenAICompatKeyStateToAuths(ctx context.Context) {
+	if s == nil || s.handlers == nil || s.handlers.AuthManager == nil {
+		return
+	}
+	service := openai_compat_state.DefaultService()
+	if service == nil {
+		return
+	}
+	for _, authEntry := range s.handlers.AuthManager.List() {
+		if !isOpenAICompatRuntimeAuth(authEntry) {
+			continue
+		}
+		service.ApplyToAuth(authEntry)
+		_, _ = s.handlers.AuthManager.Update(auth.WithSkipPersist(ctx), authEntry)
+		s.handlers.AuthManager.RefreshSchedulerEntry(authEntry.ID)
+	}
+}
+
+func isOpenAICompatRuntimeAuth(authEntry *auth.Auth) bool {
+	if authEntry == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(authEntry.Provider), "openai-compatibility") {
+		return true
+	}
+	if authEntry.Attributes == nil {
+		return false
+	}
+	return strings.TrimSpace(authEntry.Attributes["compat_name"]) != "" ||
+		(strings.TrimSpace(authEntry.Attributes["provider_key"]) != "" && strings.TrimSpace(authEntry.Attributes["api_key"]) != "")
 }
 
 // corsMiddleware returns a Gin middleware handler that adds CORS headers
@@ -1406,6 +1468,11 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 		s.mgmt.SetConfig(cfg)
 		s.mgmt.SetAuthManager(s.handlers.AuthManager)
 	}
+	s.ensureOpenAICompatKeyState(cfg)
+	if s.mgmt != nil {
+		s.mgmt.SetOpenAICompatKeyState(openai_compat_state.DefaultService())
+	}
+	s.applyOpenAICompatKeyStateToAuths(context.Background())
 
 	// Notify Amp module only when Amp config has changed.
 	ampConfigChanged := oldCfg == nil || !reflect.DeepEqual(oldCfg.AmpCode, cfg.AmpCode)

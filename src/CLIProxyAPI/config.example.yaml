@@ -120,6 +120,14 @@ disable-image-generation: false
 # When > 0, overrides the default worker count (16).
 # auth-auto-refresh-workers: 16
 
+# Built-in cron task for quota/balance recovery checks.
+# The task refreshes non-disabled accounts/API keys that are in quota-exceeded
+# or quota-related unavailable states, then moves recovered credentials back
+# into the candidate pool. Default interval is 600 seconds; worker count default
+# is 4 and is capped at 16. Values <= 0 use the built-in defaults.
+quota-recovery-refresh-interval-seconds: 600
+quota-recovery-refresh-workers: 4
+
 # Quota exceeded behavior
 quota-exceeded:
   switch-project: true # Whether to automatically switch to another project when a quota is exceeded

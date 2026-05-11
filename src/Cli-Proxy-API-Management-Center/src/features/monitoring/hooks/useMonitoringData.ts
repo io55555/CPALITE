@@ -301,6 +301,7 @@ export type MonitoringFailureRow = {
 
 export type MonitoringEventRow = {
   id: string;
+  usageRecordId?: string;
   timestamp: string;
   timestampMs: number;
   dayKey: string;
@@ -331,6 +332,10 @@ export type MonitoringEventRow = {
   cachedTokens: number;
   totalTokens: number;
   totalCost: number;
+  rawRequest?: string;
+  rawResponse?: string;
+  failureStatusCode?: number;
+  failureMessage?: string;
   taskKey: string;
   searchText: string;
 };
@@ -1378,7 +1383,8 @@ const buildEventRows = (
       const taskKey = `${detail.timestamp}|${sourceKey}|${authIndex}`;
 
       return {
-        id: `${detail.timestamp}-${detail.__modelName || '-'}-${sourceKey}-${authIndex}-${index}`,
+        id: detail.id || `${detail.timestamp}-${detail.__modelName || '-'}-${sourceKey}-${authIndex}-${index}`,
+        usageRecordId: detail.id,
         timestamp: detail.timestamp,
         timestampMs,
         dayKey,
@@ -1409,6 +1415,10 @@ const buildEventRows = (
         cachedTokens,
         totalTokens,
         totalCost,
+        rawRequest: typeof detail.raw_request === 'string' ? detail.raw_request : '',
+        rawResponse: typeof detail.raw_response === 'string' ? detail.raw_response : '',
+        failureStatusCode: typeof detail.failure_status_code === 'number' ? detail.failure_status_code : undefined,
+        failureMessage: typeof detail.failure_message === 'string' ? detail.failure_message : '',
         taskKey,
         searchText: buildSearchText(
           detail.__modelName,

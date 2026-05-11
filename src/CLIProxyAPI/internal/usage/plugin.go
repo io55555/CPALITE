@@ -118,13 +118,15 @@ func (p *LoggerPlugin) HandleUsage(ctx context.Context, record coreusage.Record)
 	if p == nil || p.recorder == nil {
 		return
 	}
+	normalized := normalizeRecord(ctx, record)
+
 	store := p.recorder.Store()
 	if store == nil {
 		return
 	}
 	insertCtx, cancel := context.WithTimeout(context.Background(), insertTimeout)
 	defer cancel()
-	if err := store.Insert(insertCtx, normalizeRecord(ctx, record)); err != nil {
+	if err := store.Insert(insertCtx, normalized); err != nil {
 		log.Warnf("usage: insert failed: %v", err)
 	}
 }

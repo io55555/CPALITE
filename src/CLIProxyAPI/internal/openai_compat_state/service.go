@@ -277,6 +277,21 @@ func (s *Service) MarkErrorForModel(provider, apiKey, model, message, rawRequest
 	})
 }
 
+func (s *Service) MarkDisabledForModel(provider, apiKey, model, message, rawRequest, rawResponse string) State {
+	return s.updateForModel(provider, apiKey, model, func(st *State) {
+		st.Enabled = false
+		st.Status = StatusDisabled
+		st.StatusMessage = strings.TrimSpace(message)
+		if st.StatusMessage == "" {
+			st.StatusMessage = "disabled by packet filter"
+		}
+		st.LastError = st.StatusMessage
+		st.FrozenUntil = time.Time{}
+		st.RawRequest = truncateRaw(rawRequest)
+		st.RawResponse = truncateRaw(rawResponse)
+	})
+}
+
 func (s *Service) MarkFrozen(provider, apiKey, message, rawRequest, rawResponse string, duration time.Duration) State {
 	return s.MarkFrozenForModel(provider, apiKey, "", message, rawRequest, rawResponse, duration)
 }

@@ -11,8 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -32,6 +35,8 @@ type OpenAICompatExecutor struct {
 }
 
 var openAICompatProxyFailureBackoff sync.Map
+
+const packetFilterDisabledAPIKeyKey = "PACKET_FILTER_DISABLED_API_KEY"
 
 // NewOpenAICompatExecutor creates an executor bound to a provider key (e.g., "openrouter").
 func NewOpenAICompatExecutor(provider string, cfg *config.Config) *OpenAICompatExecutor {
@@ -140,6 +145,10 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs)
 	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
+	rawRequest, err = e.applyUpstreamRequestPacketFilters(ctx, auth, apiKey, req.Model, rawRequest, &translated, httpReq)
+	if err != nil {
+		return resp, err
+	}
 	clientRawRequest := helps.BuildDownstreamRawRequest(ctx, opts.OriginalRequest)
 	usageRawRequest := formatOpenAICompatUsageRequests(clientRawRequest, rawRequest)
 	helps.RecordUsageRawRequest(ctx, usageRawRequest)
@@ -187,6 +196,10 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
+		rawResponse, err = e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, req.Model, rawResponse, &b)
+		if err != nil {
+			return resp, err
+		}
 		rulerDetail, rulerMatched := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
 		if strings.TrimSpace(rulerDetail) == "" {
 			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未匹配status-rulers规则")
@@ -207,6 +220,10 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	helps.AppendAPIResponseChunk(ctx, e.cfg, body)
 	rawResponse := openai_compat_state.BuildRawResponse(httpResp, body)
+	rawResponse, err = e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, req.Model, rawResponse, &body)
+	if err != nil {
+		return resp, err
+	}
 	rulerDetail := formatOpenAICompatNoStatusRulerDetail("上游响应成功，未触发status-rulers")
 	helps.RecordUsageRawResponse(ctx, formatOpenAICompatUsageResponses(rawResponse, rulerDetail, ""))
 	reporter.SetRawResponse(formatOpenAICompatUsageResponses(rawResponse, rulerDetail, ""))
@@ -284,6 +301,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Cache-Control", "no-cache")
 	rawRequest := openai_compat_state.BuildRawRequest(httpReq, translated)
+	rawRequest, err = e.applyUpstreamRequestPacketFilters(ctx, auth, apiKey, req.Model, rawRequest, &translated, httpReq)
+	if err != nil {
+		return nil, err
+	}
 	clientRawRequest := helps.BuildDownstreamRawRequest(ctx, opts.OriginalRequest)
 	usageRawRequest := formatOpenAICompatUsageRequests(clientRawRequest, rawRequest)
 	helps.RecordUsageRawRequest(ctx, usageRawRequest)
@@ -326,6 +347,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		rawResponse := openai_compat_state.BuildRawResponse(httpResp, b)
+		rawResponse, err = e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, req.Model, rawResponse, &b)
+		if err != nil {
+			return nil, err
+		}
 		rulerDetail, rulerMatched := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
 		if strings.TrimSpace(rulerDetail) == "" {
 			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未匹配status-rulers规则")
@@ -499,6 +524,11 @@ func (e *OpenAICompatExecutor) resolveCompatConfig(auth *cliproxyauth.Auth) *con
 }
 
 func (e *OpenAICompatExecutor) applyKeyStatusRulers(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) (string, bool) {
+	if packetFilterDisabledAPIKey(ctx) {
+		detail := "结果: 已由抓包/过滤规则禁用API Key，跳过重复执行status-rulers"
+		helps.RecordUsageStatusRulers(ctx, detail)
+		return detail, true
+	}
 	service := openai_compat_state.DefaultService()
 	compat := e.resolveCompatConfig(auth)
 	if service == nil || compat == nil || strings.TrimSpace(apiKey) == "" {
@@ -527,6 +557,126 @@ func (e *OpenAICompatExecutor) providerName(auth *cliproxyauth.Auth) string {
 		}
 	}
 	return strings.TrimSpace(e.provider)
+}
+
+func (e *OpenAICompatExecutor) applyUpstreamRequestPacketFilters(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, rawPacket string, body *[]byte, req *http.Request) (string, error) {
+	meta := e.packetFilterMeta(ctx, auth, apiKey, model)
+	filtered, blockErr, _ := packetcapture.ApplyRules(ctx, meta, "upstream_request", rawPacket)
+	if blockErr != nil {
+		return rawPacket, blockErr
+	}
+	if req != nil {
+		applyFilteredPacketHeaders(req, filtered)
+	}
+	if body != nil {
+		if filteredBody := packetcapture.PacketBody(filtered); strings.TrimSpace(filteredBody) != "" && filteredBody != string(*body) {
+			*body = []byte(filteredBody)
+			if req != nil {
+				req.Body = io.NopCloser(bytes.NewReader(*body))
+				req.ContentLength = int64(len(*body))
+				req.GetBody = func() (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(*body)), nil
+				}
+			}
+		}
+	}
+	return filtered, nil
+}
+
+func applyFilteredPacketHeaders(req *http.Request, packet string) {
+	headerBlock, _, _ := strings.Cut(packet, "\n\n")
+	if strings.TrimSpace(headerBlock) == strings.TrimSpace(packet) {
+		headerBlock, _, _ = strings.Cut(packet, "\r\n\r\n")
+	}
+	lines := strings.Split(headerBlock, "\n")
+	next := http.Header{}
+	for _, line := range lines[1:] {
+		key, value, ok := strings.Cut(strings.TrimRight(line, "\r"), ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || strings.EqualFold(key, "Host") || strings.EqualFold(key, "Content-Length") {
+			continue
+		}
+		next.Add(key, strings.TrimSpace(value))
+	}
+	if len(next) > 0 {
+		req.Header = next
+	}
+}
+
+func (e *OpenAICompatExecutor) applyUpstreamResponsePacketFilters(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, rawPacket string, body *[]byte) (string, error) {
+	meta := e.packetFilterMeta(ctx, auth, apiKey, model)
+	filtered, blockErr, triggers := packetcapture.ApplyRules(ctx, meta, "upstream_response", rawPacket)
+	e.applyUpstreamResponsePacketActions(ctx, auth, apiKey, model, filtered, triggers)
+	if blockErr != nil {
+		return rawPacket, blockErr
+	}
+	if body != nil {
+		if filteredBody := packetcapture.PacketBody(filtered); filteredBody != "" && filteredBody != string(*body) {
+			*body = []byte(filteredBody)
+		}
+	}
+	return filtered, nil
+}
+
+func (e *OpenAICompatExecutor) applyUpstreamResponsePacketActions(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, filteredPacket string, triggers []packetcapture.TriggerRecord) {
+	if len(triggers) == 0 || strings.TrimSpace(apiKey) == "" {
+		return
+	}
+	service := openai_compat_state.DefaultService()
+	if service == nil {
+		return
+	}
+	provider := e.providerName(auth)
+	if provider == "" {
+		return
+	}
+	for _, trigger := range triggers {
+		if strings.TrimSpace(trigger.Action) != "disable" || strings.TrimSpace(trigger.Target) != "api_key" {
+			continue
+		}
+		message := "packet filter matched: " + strings.TrimSpace(trigger.RuleName)
+		st := service.MarkDisabledForModel(provider, apiKey, model, message, "", filteredPacket)
+		if auth != nil {
+			service.ApplyToAuth(auth)
+		}
+		if ginCtx, _ := ctx.Value("gin").(*gin.Context); ginCtx != nil {
+			ginCtx.Set(packetFilterDisabledAPIKeyKey, true)
+		}
+		log.Infof("openai compat api key disabled by packet filter: provider=%s model=%s api_key=%s status=%s detail=%s", provider, model, util.HideAPIKey(apiKey), st.Status, trigger.Detail)
+		return
+	}
+}
+
+func packetFilterDisabledAPIKey(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	ginCtx, _ := ctx.Value("gin").(*gin.Context)
+	if ginCtx == nil {
+		return false
+	}
+	value, exists := ginCtx.Get(packetFilterDisabledAPIKeyKey)
+	disabled, _ := value.(bool)
+	return exists && disabled
+}
+
+func (e *OpenAICompatExecutor) packetFilterMeta(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string) packetcapture.Record {
+	meta := packetcapture.Record{
+		ID:        logging.GetRequestID(ctx),
+		RequestID: logging.GetRequestID(ctx),
+		Provider:  e.providerName(auth),
+		Source:    e.providerName(auth),
+		Model:     strings.TrimSpace(model),
+		APIKey:    util.HideAPIKey(apiKey),
+	}
+	if auth != nil {
+		meta.AuthType, meta.AuthLabel = auth.AccountInfo()
+		meta.AuthIndex = auth.EnsureIndex()
+	}
+	return meta
 }
 
 func (e *OpenAICompatExecutor) markProxyFailure(auth *cliproxyauth.Auth, apiKey, model string, err error, rawRequest string) string {

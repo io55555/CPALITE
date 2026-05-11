@@ -670,6 +670,10 @@
   font-size: 12px;
 }
 
+.inlineMetrics {
+  align-items: center;
+}
+
 .filterToggleChip {
   min-height: 30px;
   padding: 0 10px;
@@ -1718,6 +1722,67 @@
 
 .logTypeIconSuccess {
   color: var(--monitor-green);
+}
+
+.statusDetailButton {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.statusDetailButton:hover .statusBadge {
+  border-color: color-mix(in srgb, var(--monitor-red) 48%, var(--monitor-line));
+}
+
+.iconActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+  color: var(--monitor-muted);
+  background: var(--monitor-surface-elevated);
+  cursor: pointer;
+}
+
+.iconActionButton:hover {
+  color: var(--monitor-red);
+  border-color: color-mix(in srgb, var(--monitor-red) 52%, var(--monitor-line));
+}
+
+.failurePacketModalBody {
+  display: grid;
+  gap: 12px;
+}
+
+.failurePacketBlock {
+  display: grid;
+  gap: 6px;
+}
+
+.failurePacketBlock h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--monitor-text);
+}
+
+.failurePacketBlock pre {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--monitor-line);
+  border-radius: 8px;
+  background: var(--monitor-surface-elevated);
+  color: var(--monitor-text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .logRowFailed td {

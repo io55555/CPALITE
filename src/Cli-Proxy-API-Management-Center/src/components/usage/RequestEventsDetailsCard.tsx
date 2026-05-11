@@ -33,6 +33,7 @@ const ALL_FILTER = '__all__';
 const RESULT_SUCCESS_FILTER = 'success';
 const RESULT_FAILURE_FILTER = 'failure';
 const MAX_RENDERED_EVENTS = 500;
+const HIDDEN_EVENT_IDS_STORAGE_KEY = 'cli-proxy-monitor-hidden-request-event-ids-v1';
 
 type RequestEventRow = {
   id: string;
@@ -432,6 +433,31 @@ const encodeCsv = (value: string | number): string => {
   return `"${safeText.replace(/"/g, '""')}"`;
 };
 
+const loadHiddenEventIds = (): Record<string, true> => {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const parsed = JSON.parse(localStorage.getItem(HIDDEN_EVENT_IDS_STORAGE_KEY) || '{}') as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.keys(parsed as Record<string, unknown>)
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .map((id) => [id, true])
+    ) as Record<string, true>;
+  } catch {
+    return {};
+  }
+};
+
+const saveHiddenEventIds = (ids: Record<string, true>) => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(HIDDEN_EVENT_IDS_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // Ignore local storage write failures.
+  }
+};
+
 export function RequestEventsDetailsCard({
   usage,
   loading,
@@ -448,7 +474,6 @@ export function RequestEventsDetailsCard({
   const { t, i18n } = useTranslation();
   const { showConfirmation, showNotification } = useNotificationStore();
   const deleteUsageRecords = useUsageStatsStore((state) => state.deleteUsageRecords);
-  const deleteAllUsageRecords = useUsageStatsStore((state) => state.deleteAllUsageRecords);
 
   const [modelFilter, setModelFilter] = useState(ALL_FILTER);
   const [sourceFilter, setSourceFilter] = useState(ALL_FILTER);
@@ -463,6 +488,7 @@ export function RequestEventsDetailsCard({
   const [selectedFailureLogLoading, setSelectedFailureLogLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedRowIds, setSelectedRowIds] = useState<Record<string, true>>({});
+  const [hiddenEventIds, setHiddenEventIds] = useState<Record<string, true>>(loadHiddenEventIds);
   const [nextRefreshAtMs, setNextRefreshAtMs] = useState<number | null>(null);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
 
@@ -687,12 +713,13 @@ export function RequestEventsDetailsCard({
     };
 
     return baseRows
+      .filter((row) => !row.backendId || !hiddenEventIds[row.backendId])
       .map((row) => ({
         ...row,
         source: buildDisambiguatedSourceLabel(row),
       }))
       .sort((a, b) => b.timestampMs - a.timestampMs);
-  }, [authFileMap, i18n.language, sourceInfoMap, usage]);
+  }, [authFileMap, hiddenEventIds, i18n.language, sourceInfoMap, usage]);
 
   const hasTimingData = useMemo(
     () => rows.some((row) => row.firstByteLatencyMs !== null || row.generationMs !== null),
@@ -1002,24 +1029,23 @@ export function RequestEventsDetailsCard({
 
   const handleDeleteAllRows = useCallback(() => {
     showConfirmation({
-      title: '删除全部请求事件',
-      message: '确定删除所有请求事件吗？该操作会清空已持久化的 usage 记录。',
+      title: '清空所有条目记录',
+      message: '确定清空请求事件明细里的所有条目记录吗？该操作只隐藏明细条目，不删除请求数、Token输入/输出/缓存率、花费等统计数据。',
       confirmText: t('common.confirm'),
       variant: 'danger',
-      onConfirm: async () => {
-        try {
-          await deleteAllUsageRecords();
-          setSelectedRowIds({});
-          showNotification('已删除所有请求事件', 'success');
-          await onRefresh?.();
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : '';
-          showNotification(`删除所有请求事件失败${message ? `: ${message}` : ''}`, 'error');
-          throw err;
-        }
+      onConfirm: () => {
+        const ids = rows.map((row) => row.backendId).filter((id): id is string => Boolean(id));
+        const next = { ...hiddenEventIds };
+        ids.forEach((id) => {
+          next[id] = true;
+        });
+        setHiddenEventIds(next);
+        saveHiddenEventIds(next);
+        setSelectedRowIds({});
+        showNotification(`已清空 ${ids.length} 条请求事件明细记录`, 'success');
       },
     });
-  }, [deleteAllUsageRecords, onRefresh, showConfirmation, showNotification, t]);
+  }, [hiddenEventIds, rows, showConfirmation, showNotification, t]);
 
   const selectedCredentialInfo = useMemo(() => {
     if (!selectedFailureRow) return null;
@@ -1201,7 +1227,7 @@ export function RequestEventsDetailsCard({
             onClick={handleDeleteAllRows}
             disabled={rows.length === 0}
           >
-            删除所有条目
+            清空所有条目记录
           </Button>
           <Button
             variant="ghost"

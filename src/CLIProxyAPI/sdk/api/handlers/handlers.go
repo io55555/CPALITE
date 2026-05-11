@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -542,6 +543,12 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 		publishRequestValidationFailureUsage(ctx, handlerType, modelName, rawJSON, errMsg)
 		return nil, nil, errMsg
 	}
+	filteredRawJSON, filterErr := applyClientRequestPacketFilters(ctx, strings.Join(providers, ","), normalizedModel, rawJSON)
+	if filterErr != nil {
+		publishRequestValidationFailureUsage(ctx, strings.Join(providers, ","), normalizedModel, rawJSON, filterErr)
+		return nil, nil, filterErr
+	}
+	rawJSON = filteredRawJSON
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	payload := rawJSON
@@ -582,9 +589,17 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 		return nil, nil, &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 	}
 	if !PassthroughHeadersEnabled(h.Cfg) {
-		return resp.Payload, nil, nil
+		payload, filterMsg := applyClientResponsePacketFilters(ctx, strings.Join(providers, ","), normalizedModel, resp.Payload)
+		if filterMsg != nil {
+			return nil, nil, filterMsg
+		}
+		return payload, nil, nil
 	}
-	return resp.Payload, FilterUpstreamHeaders(resp.Headers), nil
+	payload, filterMsg := applyClientResponsePacketFilters(ctx, strings.Join(providers, ","), normalizedModel, resp.Payload)
+	if filterMsg != nil {
+		return nil, nil, filterMsg
+	}
+	return payload, FilterUpstreamHeaders(resp.Headers), nil
 }
 
 // ExecuteCountWithAuthManager executes a non-streaming request via the core auth manager.
@@ -595,6 +610,12 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 		publishRequestValidationFailureUsage(ctx, handlerType, modelName, rawJSON, errMsg)
 		return nil, nil, errMsg
 	}
+	filteredRawJSON, filterErr := applyClientRequestPacketFilters(ctx, strings.Join(providers, ","), normalizedModel, rawJSON)
+	if filterErr != nil {
+		publishRequestValidationFailureUsage(ctx, strings.Join(providers, ","), normalizedModel, rawJSON, filterErr)
+		return nil, nil, filterErr
+	}
+	rawJSON = filteredRawJSON
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	payload := rawJSON
@@ -634,9 +655,17 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 		return nil, nil, &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 	}
 	if !PassthroughHeadersEnabled(h.Cfg) {
-		return resp.Payload, nil, nil
+		payload, filterMsg := applyClientResponsePacketFilters(ctx, strings.Join(providers, ","), normalizedModel, resp.Payload)
+		if filterMsg != nil {
+			return nil, nil, filterMsg
+		}
+		return payload, nil, nil
 	}
-	return resp.Payload, FilterUpstreamHeaders(resp.Headers), nil
+	payload, filterMsg := applyClientResponsePacketFilters(ctx, strings.Join(providers, ","), normalizedModel, resp.Payload)
+	if filterMsg != nil {
+		return nil, nil, filterMsg
+	}
+	return payload, FilterUpstreamHeaders(resp.Headers), nil
 }
 
 func publishAuthSelectionFailureUsage(ctx context.Context, provider, model string, rawJSON []byte, status int, err error) {
@@ -659,6 +688,58 @@ func publishAuthSelectionFailureUsage(ctx context.Context, provider, model strin
 			Body:       errText,
 		},
 	})
+}
+
+func applyClientRequestPacketFilters(ctx context.Context, provider, model string, rawJSON []byte) ([]byte, *interfaces.ErrorMessage) {
+	rawPacket := buildDownstreamRawRequest(ctx, rawJSON)
+	meta := packetFilterMeta(ctx, provider, model)
+	filtered, errBlock, _ := packetcapture.ApplyRules(ctx, meta, "client_request", rawPacket)
+	if errBlock != nil {
+		status := http.StatusForbidden
+		if se, ok := any(errBlock).(interface{ StatusCode() int }); ok && se.StatusCode() > 0 {
+			status = se.StatusCode()
+		}
+		return nil, &interfaces.ErrorMessage{StatusCode: status, Error: errBlock}
+	}
+	body := packetcapture.PacketBody(filtered)
+	if strings.TrimSpace(body) == "" {
+		return rawJSON, nil
+	}
+	return []byte(body), nil
+}
+
+func applyClientResponsePacketFilters(ctx context.Context, provider, model string, payload []byte) ([]byte, *interfaces.ErrorMessage) {
+	packet := fmt.Sprintf("HTTP/1.1 200 OK\nContent-Type: application/json\n\n%s", string(payload))
+	meta := packetFilterMeta(ctx, provider, model)
+	filtered, errBlock, _ := packetcapture.ApplyRules(ctx, meta, "client_response", packet)
+	if errBlock != nil {
+		status := http.StatusForbidden
+		if se, ok := any(errBlock).(interface{ StatusCode() int }); ok && se.StatusCode() > 0 {
+			status = se.StatusCode()
+		}
+		return nil, &interfaces.ErrorMessage{StatusCode: status, Error: errBlock}
+	}
+	body := packetcapture.PacketBody(filtered)
+	if strings.TrimSpace(body) == "" {
+		return payload, nil
+	}
+	return []byte(body), nil
+}
+
+func packetFilterMeta(ctx context.Context, provider, model string) packetcapture.Record {
+	meta := packetcapture.Record{
+		ID:        logging.GetRequestID(ctx),
+		Provider:  strings.TrimSpace(provider),
+		Source:    strings.TrimSpace(provider),
+		Model:     strings.TrimSpace(model),
+		RequestID: logging.GetRequestID(ctx),
+		Endpoint:  logging.GetEndpoint(ctx),
+	}
+	if ginCtx, _ := ctx.Value("gin").(*gin.Context); ginCtx != nil && ginCtx.Request != nil {
+		meta.ClientUA = strings.TrimSpace(ginCtx.Request.UserAgent())
+		meta.UserToken = strings.TrimSpace(ginCtx.Request.Header.Get("Authorization"))
+	}
+	return meta
 }
 
 func publishRequestValidationFailureUsage(ctx context.Context, provider, model string, rawJSON []byte, msg *interfaces.ErrorMessage) {
@@ -794,6 +875,7 @@ func logCPASentClientResponse(c *gin.Context, status int, body []byte) {
 	b.WriteByte('\n')
 	b.Write(body)
 	c.Set("USAGE_CLIENT_RESPONSE", b.String())
+	packetcapture.FlushPendingRecords(c)
 	internalusage.FlushPendingRecords(c)
 	var ctx context.Context
 	if c.Request != nil {
@@ -840,6 +922,15 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 		close(errChan)
 		return nil, nil, errChan
 	}
+	filteredRawJSON, filterErr := applyClientRequestPacketFilters(ctx, strings.Join(providers, ","), normalizedModel, rawJSON)
+	if filterErr != nil {
+		publishRequestValidationFailureUsage(ctx, strings.Join(providers, ","), normalizedModel, rawJSON, filterErr)
+		errChan := make(chan *interfaces.ErrorMessage, 1)
+		errChan <- filterErr
+		close(errChan)
+		return nil, nil, errChan
+	}
+	rawJSON = filteredRawJSON
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	payload := rawJSON

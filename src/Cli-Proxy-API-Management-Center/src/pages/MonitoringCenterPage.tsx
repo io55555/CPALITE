@@ -27,7 +27,7 @@ import { CodexCredentialQuotaCard } from '@/components/credentialCenter/CodexCre
 import { CredentialStatsCard } from '@/components/credentialCenter/CredentialStatsCard';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
-import { useConfigStore, useThemeStore } from '@/stores';
+import { useConfigStore, useNotificationStore, useThemeStore, useUsageStatsStore } from '@/stores';
 import {
   ModelStatsCard,
   PriceSettingsCard,
@@ -71,6 +71,14 @@ ChartJS.register(
 
 const TIME_RANGE_STORAGE_KEY = 'cli-proxy-monitor-time-range-v1';
 
+const formatRefreshTime = (value: Date) =>
+  value.toLocaleTimeString('zh-CN', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
 const loadTimeRange = (): UsageTimeRange => {
   try {
     if (typeof localStorage === 'undefined') {
@@ -85,6 +93,8 @@ const loadTimeRange = (): UsageTimeRange => {
 
 export function MonitoringCenterPage() {
   const { t } = useTranslation();
+  const { showConfirmation, showNotification } = useNotificationStore();
+  const deleteAllUsageRecords = useUsageStatsStore((state) => state.deleteAllUsageRecords);
   const isMobile = useMediaQuery('(max-width: 768px)');
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const isDark = resolvedTheme === 'dark';
@@ -181,6 +191,25 @@ export function MonitoringCenterPage() {
     setTimeRange(range);
   }, []);
 
+  const handleClearAllStats = useCallback(() => {
+    showConfirmation({
+      title: '清空全部统计记录',
+      message: '确定清空全部已持久化 usage 记录吗？该操作会删除请求事件明细、请求数、Token输入/输出/缓存率和花费等统计数据，无法恢复。',
+      confirmText: t('common.confirm'),
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteAllUsageRecords();
+          showNotification('已清空全部统计记录', 'success');
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : '';
+          showNotification(`清空统计记录失败${message ? `: ${message}` : ''}`, 'error');
+          throw err;
+        }
+      },
+    });
+  }, [deleteAllUsageRecords, showConfirmation, showNotification, t]);
+
   return (
     <div className={styles.container}>
       {loading && !usage && (
@@ -217,9 +246,17 @@ export function MonitoringCenterPage() {
           </Button>
           {lastRefreshedAt && (
             <span className={styles.lastRefreshed}>
-              {t('usage_stats.last_updated')}: {lastRefreshedAt.toLocaleTimeString()}
+              {t('usage_stats.last_updated')}: {formatRefreshTime(lastRefreshedAt)}
             </span>
           )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleClearAllStats}
+            disabled={loading || !usage}
+          >
+            清空全部统计记录
+          </Button>
         </div>
       </div>
 

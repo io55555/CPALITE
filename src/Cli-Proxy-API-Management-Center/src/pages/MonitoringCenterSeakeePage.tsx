@@ -29,6 +29,7 @@ import {
   IconSettings,
   IconSlidersHorizontal,
   IconTimer,
+  IconTrash2,
 } from '@/components/ui/icons';
 import {
   buildAccountRows,
@@ -44,7 +45,7 @@ import {
 import { useUsageData } from '@/features/monitoring/hooks/useUsageData';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useInterval } from '@/hooks/useInterval';
-import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
+import { apiCallApi, getApiCallErrorMessage, usageApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type {
   AuthFileItem,
@@ -160,6 +161,53 @@ type RealtimeLogRow = MonitoringEventRow & {
   successRate: number;
   streamKey: string;
   recentPattern: boolean[];
+};
+
+const extractNamedPacketSection = (content: string, title: string): string => {
+  const marker = `=== ${title} ===`;
+  const start = content.indexOf(marker);
+  if (start < 0) return '';
+  const from = start + marker.length;
+  const next = content.indexOf('=== ', from);
+  return content.slice(from, next >= 0 ? next : undefined).trim();
+};
+
+const parseHTTPStatusCode = (packet: string, fallback?: number): number | null => {
+  const match = packet.match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})/m);
+  if (match?.[1]) return Number(match[1]);
+  return fallback && fallback > 0 ? fallback : null;
+};
+
+const failureStatusLabel = (row: RealtimeLogRow | null): string => {
+  if (!row) return '失败';
+  const upstream = extractNamedPacketSection(row.rawResponse ?? '', '供应商返回CPA的完整数据包') || row.rawResponse || '';
+  const status = parseHTTPStatusCode(upstream, row.failureStatusCode);
+  return status ? `失败 ${status}` : '失败';
+};
+
+const packetSectionsFromRow = (row: RealtimeLogRow | null) => {
+  if (!row) {
+    return [];
+  }
+  const rawRequest = row.rawRequest ?? '';
+  const rawResponse = row.rawResponse ?? '';
+  const clientRequest =
+    extractNamedPacketSection(rawRequest, '客户端发给CPA的完整数据包') ||
+    `POST ${row.endpointPath || row.endpoint || '/v1/chat/completions'} HTTP/1.1\n\n{"model":${JSON.stringify(row.model)}}`;
+  const upstreamRequest = extractNamedPacketSection(rawRequest, 'CPA发给供应商的完整数据包') || rawRequest;
+  const upstreamResponse =
+    extractNamedPacketSection(rawResponse, '供应商返回CPA的完整数据包') ||
+    rawResponse ||
+    `HTTP/1.1 ${row.failureStatusCode || 502}\n\n${row.failureMessage || 'unknown failure'}`;
+  const clientResponse =
+    extractNamedPacketSection(rawResponse, 'CPA发送给客户端的完整数据包') ||
+    `HTTP/1.1 ${row.failureStatusCode || 502}\n\n${row.failureMessage || 'unknown failure'}`;
+  return [
+    ['客户端发给CPA的完整数据包', clientRequest],
+    ['CPA发给供应商的完整数据包', upstreamRequest],
+    ['供应商返回CPA的完整数据包', upstreamResponse],
+    ['CPA发送给客户端的完整数据包', clientResponse],
+  ] as const;
 };
 
 type AccountQuotaTarget = {
@@ -1097,6 +1145,7 @@ export function MonitoringCenterPage() {
   const [accountPageSize, setAccountPageSize] = useState(DEFAULT_ACCOUNT_PAGE_SIZE);
   const [realtimePage, setRealtimePage] = useState(1);
   const [realtimePageSize, setRealtimePageSize] = useState(DEFAULT_REALTIME_PAGE_SIZE);
+  const [selectedFailurePacketRow, setSelectedFailurePacketRow] = useState<RealtimeLogRow | null>(null);
   const focusSnapshotRef = useRef<FocusSnapshot | null>(null);
   const accountQuotaStatesRef = useRef<Record<string, AccountQuotaState>>({});
   const accountQuotaRequestIdsRef = useRef<Record<string, number>>({});
@@ -1925,6 +1974,46 @@ export function MonitoringCenterPage() {
     [importUsageFile, showConfirmation, showNotification, t]
   );
 
+  const deleteRealtimeUsageRows = useCallback(
+    async (rows: RealtimeLogRow[]) => {
+      const ids = Array.from(new Set(rows.map((row) => row.usageRecordId || row.id).filter(Boolean)));
+      if (ids.length === 0) {
+        showNotification('没有可删除的实时监控条目', 'warning');
+        return;
+      }
+      try {
+        await usageApi.deleteUsage(ids);
+        await refreshAll();
+        showNotification(`已删除 ${ids.length} 条实时监控记录`, 'success');
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error || t('common.unknown_error'));
+        showNotification(`删除实时监控记录失败: ${message}`, 'error');
+      }
+    },
+    [refreshAll, showNotification, t]
+  );
+
+  const handleDeleteRealtimeRow = useCallback(
+    (row: RealtimeLogRow) => {
+      void deleteRealtimeUsageRows([row]);
+    },
+    [deleteRealtimeUsageRows]
+  );
+
+  const handleDeleteCurrentRealtimePage = useCallback(() => {
+    void deleteRealtimeUsageRows(realtimePagination.pageItems);
+  }, [deleteRealtimeUsageRows, realtimePagination.pageItems]);
+
+  const handleClearRealtimeRows = useCallback(() => {
+    showConfirmation({
+      title: '清空所有条目记录',
+      message: '实时监控表数据来自 usage_records，删除后相关请求数、Token、花费等统计会重新计算。',
+      confirmText: '清空所有条目记录',
+      variant: 'danger',
+      onConfirm: () => deleteRealtimeUsageRows(realtimeLogRows),
+    });
+  }, [deleteRealtimeUsageRows, realtimeLogRows, showConfirmation]);
+
   return (
     <div className={styles.page}>
       {overallLoading && !usage ? (
@@ -2308,6 +2397,22 @@ export function MonitoringCenterPage() {
             >
               {t('monitoring.filter_status_failed')}
             </button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleDeleteCurrentRealtimePage}
+              disabled={realtimePagination.pageItems.length === 0}
+            >
+              删除当前页条目
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleClearRealtimeRows}
+              disabled={realtimeLogRows.length === 0}
+            >
+              清空所有条目记录
+            </Button>
           </div>
         }
       >
@@ -2325,6 +2430,7 @@ export function MonitoringCenterPage() {
                 <th>{t('monitoring.column_time')}</th>
                 <th>{t('monitoring.this_call_usage')}</th>
                 <th>{t('monitoring.this_call_cost')}</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -2359,9 +2465,17 @@ export function MonitoringCenterPage() {
                     </div>
                   </td>
                   <td>
-                    <StatusBadge tone={row.failed ? 'bad' : 'good'}>
-                      {row.failed ? t('monitoring.result_failed') : t('monitoring.result_success')}
-                    </StatusBadge>
+                    {row.failed ? (
+                      <button
+                        type="button"
+                        className={styles.statusDetailButton}
+                        onClick={() => setSelectedFailurePacketRow(row)}
+                      >
+                        <StatusBadge tone="bad">{failureStatusLabel(row)}</StatusBadge>
+                      </button>
+                    ) : (
+                      <StatusBadge tone="good">{t('monitoring.result_success')}</StatusBadge>
+                    )}
                   </td>
                   <td
                     className={
@@ -2396,11 +2510,21 @@ export function MonitoringCenterPage() {
                     </div>
                   </td>
                   <td>{hasPrices ? formatUsd(row.totalCost) : '--'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className={styles.iconActionButton}
+                      title="删除"
+                      onClick={() => handleDeleteRealtimeRow(row)}
+                    >
+                      <IconTrash2 size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
               {realtimeLogRows.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <div className={styles.emptyTable}>
                       {hasSearchFilter ? t('monitoring.no_filtered_data') : t('monitoring.no_data')}
                     </div>
@@ -2423,6 +2547,23 @@ export function MonitoringCenterPage() {
           t={t}
         />
       </Panel>
+
+      <Modal
+        open={selectedFailurePacketRow !== null}
+        onClose={() => setSelectedFailurePacketRow(null)}
+        title={failureStatusLabel(selectedFailurePacketRow)}
+        width={860}
+        className={styles.monitorModal}
+      >
+        <div className={styles.failurePacketModalBody}>
+          {packetSectionsFromRow(selectedFailurePacketRow).map(([title, packet]) => (
+            <div className={styles.failurePacketBlock} key={title}>
+              <h3>{title}</h3>
+              <pre>{packet || '-'}</pre>
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       <Modal
         open={isCustomRangeModalOpen}
