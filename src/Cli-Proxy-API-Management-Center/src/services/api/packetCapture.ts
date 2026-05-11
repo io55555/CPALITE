@@ -7,6 +7,11 @@ export interface PacketSet {
   client_response: string;
 }
 
+export interface PacketCaptureState {
+  enabled: boolean;
+  'cli-detailed-log': boolean;
+}
+
 export interface PacketRecordSummary {
   id: string;
   timestamp: string;
@@ -70,8 +75,9 @@ export interface PacketTrigger {
 }
 
 export const packetCaptureApi = {
-  getState: () => apiClient.get<{ enabled: boolean }>('/packet-capture/state'),
-  setState: (enabled: boolean) => apiClient.put<{ enabled: boolean }>('/packet-capture/state', { enabled }),
+  getState: () => apiClient.get<PacketCaptureState>('/packet-capture/state'),
+  setState: (payload: { enabled?: boolean; 'cli-detailed-log'?: boolean }) =>
+    apiClient.put<PacketCaptureState>('/packet-capture/state', payload),
   listRecords: (params?: Record<string, string | number>) =>
     apiClient.get<PacketRecordSummary[]>('/packet-capture/records', { params }),
   getRecord: (id: string) => apiClient.get<PacketRecord>(`/packet-capture/records/${id}`),

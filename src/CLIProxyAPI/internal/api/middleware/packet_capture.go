@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 )
 
@@ -80,7 +81,7 @@ func (w *packetCaptureWriter) responsePacket() string {
 
 // PacketCaptureMiddleware is an independent capture layer. It is enabled only by
 // the packet-capture switch and does not depend on request logging, usage, or monitor.
-func PacketCaptureMiddleware() gin.HandlerFunc {
+func PacketCaptureMiddleware(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c == nil || c.Request == nil || shouldSkipPacketCapture(c.Request) || !packetcapture.Enabled(c.Request.Context()) {
 			c.Next()
@@ -104,7 +105,7 @@ func PacketCaptureMiddleware() gin.HandlerFunc {
 		clientResponse := writer.responsePacket()
 		if strings.TrimSpace(clientResponse) != "" {
 			c.Set("USAGE_CLIENT_RESPONSE", clientResponse)
-			logCPASentClientResponseFromMiddleware(c, clientResponse)
+			logCPASentClientResponseFromMiddleware(c, clientResponse, cfg)
 		}
 		packetcapture.CaptureFromGin(c, rawClientRequest)
 		packetcapture.FlushPendingRecords(c)

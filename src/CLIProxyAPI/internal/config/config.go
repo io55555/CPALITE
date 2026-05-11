@@ -167,7 +167,12 @@ type Config struct {
 }
 
 type PacketCaptureConfig struct {
-	FilterRules []PacketFilterRule `yaml:"filter-rules" json:"filter-rules"`
+	FilterRules    []PacketFilterRule `yaml:"filter-rules" json:"filter-rules"`
+	CLIDetailedLog *bool              `yaml:"cli-detailed-log,omitempty" json:"cli-detailed-log,omitempty"`
+}
+
+func (c PacketCaptureConfig) CLIDetailedLogEnabled() bool {
+	return c.CLIDetailedLog == nil || *c.CLIDetailedLog
 }
 
 type PacketFilterRule struct {

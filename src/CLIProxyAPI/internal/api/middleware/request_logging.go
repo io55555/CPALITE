@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -24,7 +25,7 @@ const maxErrorOnlyCapturedRequestBodyBytes int64 = 1 << 20 // 1 MiB
 // It captures detailed information about the request and response, including headers and body,
 // and uses the provided RequestLogger to record this data. When full request logging is disabled,
 // body capture is limited to small known-size payloads to avoid large per-request memory spikes.
-func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
+func RequestLoggingMiddleware(logger logging.RequestLogger, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if logger == nil {
 			c.Next()
@@ -67,7 +68,7 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 		c.Next()
 
 		if packet, recorded := setUsageClientResponseFromWrapper(c, wrapper); recorded {
-			logCPASentClientResponseFromMiddleware(c, packet)
+			logCPASentClientResponseFromMiddleware(c, packet, cfg)
 		}
 		internalusage.FlushPendingRecords(c)
 
@@ -114,8 +115,8 @@ func setUsageClientResponseFromWrapper(c *gin.Context, wrapper *ResponseWriterWr
 	return packet, true
 }
 
-func logCPASentClientResponseFromMiddleware(c *gin.Context, packet string) {
-	if c == nil || strings.TrimSpace(packet) == "" {
+func logCPASentClientResponseFromMiddleware(c *gin.Context, packet string, cfg *config.Config) {
+	if c == nil || strings.TrimSpace(packet) == "" || (cfg != nil && !cfg.PacketCapture.CLIDetailedLogEnabled()) {
 		return
 	}
 	provider := strings.TrimSpace(c.GetString("cpa.request_provider"))

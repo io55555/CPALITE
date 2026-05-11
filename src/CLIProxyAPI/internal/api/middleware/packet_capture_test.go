@@ -27,7 +27,7 @@ func TestPacketCaptureMiddlewareIndependentOfRequestLogger(t *testing.T) {
 	}
 
 	engine := gin.New()
-	engine.Use(PacketCaptureMiddleware())
+	engine.Use(PacketCaptureMiddleware(nil))
 	engine.POST("/v1/chat/completions", func(c *gin.Context) {
 		c.Set("API_REQUEST", []byte("POST /openai/v1/chat/completions HTTP/1.1\nUser-Agent: test\n\n{\"model\":\"llama\"}"))
 		c.Set("API_RESPONSE", []byte("HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"id\":\"ok\"}"))

@@ -182,7 +182,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		usageRawResponse := formatOpenAICompatUsageResponses(rawTransportFailure, rulerDetail, formatOpenAICompatClientResponse(http.StatusBadGateway, http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}}, []byte(rawTransportFailure)))
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
-		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawTransportFailure, rulerDetail)
+		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawTransportFailure, rulerDetail)
 		return resp, err
 	}
 	defer func() {
@@ -208,7 +208,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
-		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
+		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
 		err = statusErr{code: httpResp.StatusCode, msg: string(b), authFault: rulerMatched}
 		reporter.PublishFailure(ctx, err)
 		return resp, err
@@ -227,7 +227,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	rulerDetail := formatOpenAICompatNoStatusRulerDetail("上游响应成功，未触发status-rulers")
 	helps.RecordUsageRawResponse(ctx, formatOpenAICompatUsageResponses(rawResponse, rulerDetail, ""))
 	reporter.SetRawResponse(formatOpenAICompatUsageResponses(rawResponse, rulerDetail, ""))
-	logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
+	logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
 	e.resetProxyFailureBackoff(auth, apiKey, req.Model)
 	reporter.Publish(ctx, helps.ParseOpenAIUsage(body))
 	// Ensure we at least record the request even if upstream doesn't return usage
@@ -338,7 +338,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		usageRawResponse := formatOpenAICompatUsageResponses(rawTransportFailure, rulerDetail, formatOpenAICompatClientResponse(http.StatusBadGateway, http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}}, []byte(rawTransportFailure)))
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
-		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawTransportFailure, rulerDetail)
+		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawTransportFailure, rulerDetail)
 		return nil, err
 	}
 	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
@@ -359,7 +359,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
-		logOpenAICompatAttemptTrace(ctx, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
+		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
 		err = statusErr{code: httpResp.StatusCode, msg: string(b), authFault: rulerMatched}
 		reporter.PublishFailure(ctx, err)
 		if errClose := httpResp.Body.Close(); errClose != nil {
@@ -830,7 +830,10 @@ func formatOpenAICompatAuthForLog(auth *cliproxyauth.Auth, apiKey string) string
 	return fmt.Sprintf("%s=%s auth=%s", accountType, accountInfo, auth.ID)
 }
 
-func logOpenAICompatAttemptTrace(ctx context.Context, provider string, auth *cliproxyauth.Auth, apiKey, rawRequest, rawResponse, rulerDetail string) {
+func logOpenAICompatAttemptTrace(ctx context.Context, cfg *config.Config, provider string, auth *cliproxyauth.Auth, apiKey, rawRequest, rawResponse, rulerDetail string) {
+	if cfg != nil && !cfg.PacketCapture.CLIDetailedLogEnabled() {
+		return
+	}
 	authText := formatOpenAICompatAuthForLog(auth, apiKey)
 	helps.LogWithRequestID(ctx).Infof(
 		"\n================ OpenAI兼容请求链路 ================\n"+

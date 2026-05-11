@@ -298,7 +298,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	for _, mw := range optionState.extraMiddleware {
 		engine.Use(mw)
 	}
-	engine.Use(middleware.PacketCaptureMiddleware())
+	engine.Use(middleware.PacketCaptureMiddleware(cfg))
 
 	// Add request logging middleware (positioned after recovery, before auth)
 	// Resolve logs directory relative to the configuration file directory.
@@ -309,7 +309,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 			requestLogger = optionState.requestLoggerFactory(cfg, configFilePath)
 		}
 		if requestLogger != nil {
-			engine.Use(middleware.RequestLoggingMiddleware(requestLogger))
+			engine.Use(middleware.RequestLoggingMiddleware(requestLogger, cfg))
 			if setter, ok := requestLogger.(interface{ SetEnabled(bool) }); ok {
 				toggle = setter.SetEnabled
 			}

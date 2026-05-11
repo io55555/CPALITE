@@ -265,6 +265,7 @@ export function PacketCapturePage() {
   const config = useConfigStore((state) => state.config);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [enabled, setEnabled] = useState(false);
+  const [cliDetailedLog, setCliDetailedLog] = useState(true);
   const [records, setRecords] = useState<PacketRecordSummary[]>([]);
   const [rules, setRules] = useState<PacketRule[]>([]);
   const [triggers, setTriggers] = useState<PacketTrigger[]>([]);
@@ -298,6 +299,7 @@ export function PacketCapturePage() {
       packetCaptureApi.listTriggers({ limit: 5000 }),
     ]);
     setEnabled(Boolean(state.enabled));
+    setCliDetailedLog(Boolean(state['cli-detailed-log']));
     setRecords(Array.isArray(recordList) ? recordList : []);
     setRules(Array.isArray(ruleList) ? ruleList : []);
     setTriggers(Array.isArray(triggerList) ? triggerList : []);
@@ -490,8 +492,8 @@ export function PacketCapturePage() {
                 checked={enabled}
                 onChange={async (event) => {
                   const next = event.target.checked;
-                  await packetCaptureApi.setState(next);
-                  setEnabled(next);
+                  const state = await packetCaptureApi.setState({ enabled: next });
+                  setEnabled(Boolean(state.enabled));
                 }}
               />
               <span className={styles.switchTrack} aria-hidden="true" />
@@ -581,6 +583,29 @@ export function PacketCapturePage() {
             </tbody>
           </table>
         </div>
+      </Card>
+
+      <Card
+        title={
+          <div className={styles.captureTitle}>
+            <span>CPA命令行日志</span>
+            <label className={styles.switch}>
+              <input
+                type="checkbox"
+                checked={cliDetailedLog}
+                onChange={async (event) => {
+                  const next = event.target.checked;
+                  const state = await packetCaptureApi.setState({ 'cli-detailed-log': next });
+                  setCliDetailedLog(Boolean(state['cli-detailed-log']));
+                }}
+              />
+              <span className={styles.switchTrack} aria-hidden="true" />
+              <span className={styles.switchText}>CPA命令行是否显示详细数据包[1~6]记录</span>
+            </label>
+          </div>
+        }
+      >
+        <p>控制是否在命令行输出完整调试数据包日志，范围包含“CPA收到客户端请求”至“CPA发送给客户端”。默认开启，配置保存在 `config.yaml` 的 `packet-capture.cli-detailed-log`。</p>
       </Card>
 
       <Card

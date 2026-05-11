@@ -45,27 +45,58 @@ func (h *Handler) GetPacketCaptureState(c *gin.Context) {
 	if store != nil {
 		enabled = store.Enabled(c.Request.Context())
 	}
-	c.JSON(http.StatusOK, gin.H{"enabled": enabled})
+	cliDetailedLog := true
+	if h != nil && h.cfg != nil {
+		cliDetailedLog = h.cfg.PacketCapture.CLIDetailedLogEnabled()
+	}
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "cli-detailed-log": cliDetailedLog})
 }
 
 func (h *Handler) PutPacketCaptureState(c *gin.Context) {
-	store := h.packetStore()
-	if store == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "packet capture store unavailable"})
-		return
-	}
 	var body struct {
-		Enabled bool `json:"enabled"`
+		Enabled        *bool `json:"enabled"`
+		CLIDetailedLog *bool `json:"cli-detailed-log"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	if err := store.SetEnabled(c.Request.Context(), body.Enabled); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update packet capture state"})
-		return
+
+	enabled := false
+	store := h.packetStore()
+	if store != nil {
+		enabled = store.Enabled(c.Request.Context())
 	}
-	c.JSON(http.StatusOK, gin.H{"enabled": body.Enabled})
+	if body.Enabled != nil {
+		if store == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "packet capture store unavailable"})
+			return
+		}
+		if err := store.SetEnabled(c.Request.Context(), *body.Enabled); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update packet capture state"})
+			return
+		}
+		enabled = *body.Enabled
+	}
+
+	cliDetailedLog := true
+	if h != nil && h.cfg != nil {
+		cliDetailedLog = h.cfg.PacketCapture.CLIDetailedLogEnabled()
+	}
+	if body.CLIDetailedLog != nil {
+		if h == nil || h.cfg == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config unavailable"})
+			return
+		}
+		h.cfg.PacketCapture.CLIDetailedLog = body.CLIDetailedLog
+		if err := config.SaveConfigPreserveComments(h.configFilePath, h.cfg); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save cli detailed log setting"})
+			return
+		}
+		cliDetailedLog = *body.CLIDetailedLog
+	}
+
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "cli-detailed-log": cliDetailedLog})
 }
 
 func (h *Handler) ListPacketCaptures(c *gin.Context) {

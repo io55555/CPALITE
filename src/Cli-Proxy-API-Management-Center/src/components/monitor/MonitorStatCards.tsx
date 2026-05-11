@@ -5,6 +5,7 @@ import {
   calculateRecentPerMinuteRates,
   calculateTotalCost,
   collectUsageDetails,
+  formatCompactNumber,
   formatPerMinuteValue,
   formatUsd,
   type ModelPrice,
@@ -98,14 +99,14 @@ export function MonitorStatCards({
   );
   const tokenValue = (
     <span className={styles.statValueWithMeta}>
-      <span>{loading ? '-' : tokenTotal.toLocaleString()}</span>
+      <span>{loading ? '-' : formatCompactNumber(tokenTotal)}</span>
       <span>
         (
-        输入{tokenBreakdown.input.toLocaleString()}
+        输入{formatCompactNumber(tokenBreakdown.input)}
         {' '}
         <span className={styles.statSuccessText}>{tokenPercent(tokenBreakdown.input)}</span>
         {' '}
-        输出{tokenBreakdown.output.toLocaleString()}
+        输出{formatCompactNumber(tokenBreakdown.output)}
         {' '}
         <span className={styles.statFailureText}>{tokenPercent(tokenBreakdown.output)}</span>
         {' '}
