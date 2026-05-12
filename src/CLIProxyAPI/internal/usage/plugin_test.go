@@ -56,6 +56,36 @@ func TestLoggerPluginPersistsRecord(t *testing.T) {
 	}
 }
 
+func TestLoggerPluginDropsRawPacketsForSuccessfulRecords(t *testing.T) {
+	store := newPluginTestSQLiteStore(t)
+	recorder := NewRecorder(store)
+	plugin := &LoggerPlugin{recorder: recorder}
+
+	ctx := internallogging.WithEndpoint(context.Background(), "POST /v1/messages")
+	ctx = internallogging.WithResponseStatusHolder(ctx)
+	internallogging.SetResponseStatus(ctx, 200)
+
+	plugin.HandleUsage(ctx, coreusage.Record{
+		Model:       "claude-sonnet-4-6",
+		RequestedAt: time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC),
+		RawRequest:  "POST /v1/messages HTTP/2\n\n{}",
+		RawResponse: "HTTP/2 200\n\n{}",
+		Detail:      coreusage.Detail{TotalTokens: 1},
+	})
+
+	usage, err := store.Query(context.Background(), QueryRange{IncludeRaw: true})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	details := usage["POST /v1/messages"]["claude-sonnet-4-6"]
+	if len(details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(details))
+	}
+	if details[0].RawRequest != "" || details[0].RawResponse != "" {
+		t.Fatalf("raw fields = (%q, %q), want empty for success", details[0].RawRequest, details[0].RawResponse)
+	}
+}
+
 func TestLoggerPluginPersistsRecordWhenLegacyStatisticsDisabled(t *testing.T) {
 	previous := StatisticsEnabled()
 	SetStatisticsEnabled(false)
@@ -114,7 +144,7 @@ func TestLoggerPluginBackfillsFailurePacketsFromGinContext(t *testing.T) {
 		},
 	})
 
-	usage, err := store.Query(context.Background(), QueryRange{})
+	usage, err := store.Query(context.Background(), QueryRange{IncludeRaw: true})
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -166,7 +196,7 @@ func TestLoggerPluginBuildsFallbackRawRequestFromGinRequest(t *testing.T) {
 		},
 	})
 
-	usage, err := store.Query(context.Background(), QueryRange{})
+	usage, err := store.Query(context.Background(), QueryRange{IncludeRaw: true})
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}
@@ -205,7 +235,7 @@ func TestLoggerPluginTruncatesRawPacketsBeforeQueueing(t *testing.T) {
 		},
 	})
 
-	usage, err := store.Query(context.Background(), QueryRange{})
+	usage, err := store.Query(context.Background(), QueryRange{IncludeRaw: true})
 	if err != nil {
 		t.Fatalf("Query() error = %v", err)
 	}

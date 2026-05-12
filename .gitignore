@@ -24,6 +24,7 @@ opencode.json*
 /tui.json
 CPA.exe
 build/
+cpa.back*
 
 # Python
 __pycache__/

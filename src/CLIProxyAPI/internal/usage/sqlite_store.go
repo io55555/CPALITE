@@ -280,15 +280,19 @@ func (s *SQLiteStore) Query(ctx context.Context, rng QueryRange) (APIUsage, erro
 	if limit <= 0 || limit > defaultQueryLimit {
 		limit = defaultQueryLimit
 	}
-	query := `
+	rawColumns := "raw_request, raw_response"
+	if !rng.IncludeRaw {
+		rawColumns = "'' AS raw_request, '' AS raw_response"
+	}
+	query := fmt.Sprintf(`
 SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response, failure_status_code, failure_message,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM (
-SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response, failure_status_code, failure_message,
+SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, %s, failure_status_code, failure_message,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
-FROM usage_records`
+FROM usage_records`, rawColumns)
 	args := make([]any, 0, 3)
 	where := make([]string, 0, 2)
 	if rng.Start != nil && !rng.Start.IsZero() {
@@ -369,6 +373,10 @@ FROM usage_records`
 	for _, record := range s.pendingSnapshot() {
 		if !recordInRange(record, rng) {
 			continue
+		}
+		if !rng.IncludeRaw {
+			record.RawRequest = ""
+			record.RawResponse = ""
 		}
 		addRecordToUsage(result, record)
 	}

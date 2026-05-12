@@ -60,9 +60,10 @@ type RequestDetail struct {
 type APIUsage map[string]map[string][]RequestDetail
 
 type QueryRange struct {
-	Start *time.Time
-	End   *time.Time
-	Limit int
+	Start      *time.Time
+	End        *time.Time
+	Limit      int
+	IncludeRaw bool
 }
 
 type DeleteResult struct {

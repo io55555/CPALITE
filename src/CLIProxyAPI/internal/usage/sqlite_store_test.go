@@ -196,6 +196,42 @@ func TestSQLiteStoreQueryRange(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreQueryOmitsRawByDefault(t *testing.T) {
+	ctx := context.Background()
+	store := newTestSQLiteStore(t)
+
+	record := Record{
+		ID:          "raw-record",
+		Timestamp:   time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC),
+		APIKey:      "api",
+		Model:       "model",
+		RawRequest:  "POST /v1/chat/completions HTTP/2\n\n{}",
+		RawResponse: "HTTP/2 200\n\n{}",
+		Tokens:      TokenStats{TotalTokens: 1},
+	}
+	if err := store.Insert(ctx, record); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+
+	usage, err := store.Query(ctx, QueryRange{})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	detail := usage["api"]["model"][0]
+	if detail.RawRequest != "" || detail.RawResponse != "" {
+		t.Fatalf("raw fields = (%q, %q), want empty by default", detail.RawRequest, detail.RawResponse)
+	}
+
+	usage, err = store.Query(ctx, QueryRange{IncludeRaw: true})
+	if err != nil {
+		t.Fatalf("Query(include raw) error = %v", err)
+	}
+	detail = usage["api"]["model"][0]
+	if detail.RawRequest != record.RawRequest || detail.RawResponse != record.RawResponse {
+		t.Fatalf("raw fields = (%q, %q), want stored packet data", detail.RawRequest, detail.RawResponse)
+	}
+}
+
 func TestSQLiteStoreIgnoresZeroRangeBounds(t *testing.T) {
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)

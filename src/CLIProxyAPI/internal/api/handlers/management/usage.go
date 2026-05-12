@@ -152,7 +152,7 @@ func usageQueryCacheKey(rng usage.QueryRange) string {
 	if rng.End != nil && !rng.End.IsZero() {
 		end = rng.End.UTC().Format(time.RFC3339Nano)
 	}
-	return start + "|" + end + "|" + strconv.Itoa(rng.Limit)
+	return start + "|" + end + "|" + strconv.Itoa(rng.Limit) + "|" + strconv.FormatBool(rng.IncludeRaw)
 }
 
 func (h *Handler) ensureUsageStoreForMonitoring() usage.Store {
@@ -274,8 +274,18 @@ func parseUsageRange(c *gin.Context) (usage.QueryRange, bool) {
 		rng.End = &end
 	}
 	rng.Limit = usageQueryMaxRows
+	rng.IncludeRaw = parseUsageIncludeRaw(c.Query("include_raw"))
 
 	return rng, true
+}
+
+func parseUsageIncludeRaw(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "all":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseUsageQueueCount(value string) (int, error) {

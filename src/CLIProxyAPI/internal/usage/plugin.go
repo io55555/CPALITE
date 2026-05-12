@@ -197,6 +197,13 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 		}
 	}
 	failureMessage := firstNonEmpty(record.Fail.Body, failureMessageFromRawResponse(rawResponse), httpStatusFailureMessage(record.Fail.StatusCode))
+	failed := resolveFailed(ctx, record)
+	if !failed {
+		// 成功请求只保留统计字段，避免usage.db被大包体快速撑满。
+		rawRequest = ""
+		rawResponse = ""
+		failureMessage = ""
+	}
 	rawRequest = truncateUsageRawPacket(rawRequest)
 	rawResponse = truncateUsageRawPacket(rawResponse)
 	failureMessage = truncateUsageRawPacket(failureMessage)
@@ -226,7 +233,7 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 			CachedTokens:    detail.CachedTokens,
 			TotalTokens:     normalizeCoreTotal(detail),
 		},
-		Failed: resolveFailed(ctx, record),
+		Failed: failed,
 	}
 }
 
