@@ -301,12 +301,31 @@ nonstream-keepalive-interval: 0
 #     #   freeze-24h   -> temporarily cool down this API key for hours
 #     #   freeze-10m   -> temporarily cool down this API key for minutes
 #     #   freeze-30s   -> temporarily cool down this API key for seconds
+#     #   return       -> return the configured client-status/client-message immediately without retrying other credentials
 #     # Supported match fields:
 #     #   status       -> HTTP status code, required
 #     #   json-path    -> gjson path in JSON response body, e.g. "message" or "error.code"
 #     #   json-equals  -> exact string value expected at json-path
+#     #   json-contains -> substring expected at json-path, case-insensitive
 #     #   body-equals  -> exact plain response body after trimming spaces
+#     #   body-contains -> response body substring, case-insensitive
 #     status-rulers:
+#       - name: "404+json.error.message(model not found)=return"
+#         when:
+#           status: 404
+#           json-path: "error.message"
+#           json-contains: "model"
+#           body-contains: "not found"
+#         action: "return"
+#         client-status: 404
+#         client-message: "model not found"
+#       - name: "403+body(model requires a subscription)=return"
+#         when:
+#           status: 403
+#           body-contains: "model requires a subscription"
+#         action: "return"
+#         client-status: 403
+#         client-message: "model not support"
 #       - name: "401+json.message(Wrong API Key)=freeze-24h"
 #         when:
 #           status: 401

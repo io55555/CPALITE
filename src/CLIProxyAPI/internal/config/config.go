@@ -622,17 +622,21 @@ type OpenAICompatibilityAPIKey struct {
 
 // OpenAICompatibilityStatusRuler describes how a provider response updates key status.
 type OpenAICompatibilityStatusRuler struct {
-	Name   string                             `yaml:"name" json:"name"`
-	When   OpenAICompatibilityStatusRulerWhen `yaml:"when" json:"when"`
-	Action string                             `yaml:"action" json:"action"`
+	Name          string                             `yaml:"name" json:"name"`
+	When          OpenAICompatibilityStatusRulerWhen `yaml:"when" json:"when"`
+	Action        string                             `yaml:"action" json:"action"`
+	ClientStatus  int                                `yaml:"client-status,omitempty" json:"client-status,omitempty"`
+	ClientMessage string                             `yaml:"client-message,omitempty" json:"client-message,omitempty"`
 }
 
 // OpenAICompatibilityStatusRulerWhen describes the matching condition.
 type OpenAICompatibilityStatusRulerWhen struct {
-	Status     int    `yaml:"status" json:"status"`
-	JSONPath   string `yaml:"json-path,omitempty" json:"json-path,omitempty"`
-	JSONEquals string `yaml:"json-equals,omitempty" json:"json-equals,omitempty"`
-	BodyEquals string `yaml:"body-equals,omitempty" json:"body-equals,omitempty"`
+	Status       int    `yaml:"status" json:"status"`
+	JSONPath     string `yaml:"json-path,omitempty" json:"json-path,omitempty"`
+	JSONEquals   string `yaml:"json-equals,omitempty" json:"json-equals,omitempty"`
+	JSONContains string `yaml:"json-contains,omitempty" json:"json-contains,omitempty"`
+	BodyEquals   string `yaml:"body-equals,omitempty" json:"body-equals,omitempty"`
+	BodyContains string `yaml:"body-contains,omitempty" json:"body-contains,omitempty"`
 }
 
 // OpenAICompatibilityModel represents a model configuration for OpenAI compatibility,

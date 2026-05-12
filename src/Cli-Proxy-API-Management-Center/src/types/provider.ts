@@ -23,9 +23,13 @@ export interface OpenAIStatusRuler {
     status: number;
     'json-path'?: string;
     'json-equals'?: string;
+    'json-contains'?: string;
     'body-equals'?: string;
+    'body-contains'?: string;
   };
   action: string;
+  'client-status'?: number;
+  'client-message'?: string;
 }
 
 export interface OpenAIKeyState {

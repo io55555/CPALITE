@@ -2804,6 +2804,10 @@ func isRequestInvalidError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var stopRetry interface{ StopRetry() bool }
+	if errors.As(err, &stopRetry) && stopRetry.StopRetry() {
+		return true
+	}
 	var authFault interface{ AuthFault() bool }
 	if errors.As(err, &authFault) && authFault.AuthFault() {
 		return false

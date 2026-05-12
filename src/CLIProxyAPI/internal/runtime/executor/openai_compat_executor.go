@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -200,16 +201,22 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		if err != nil {
 			return resp, err
 		}
-		rulerDetail, rulerMatched := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
+		rulerDetail, rulerMatched, terminal := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
 		if strings.TrimSpace(rulerDetail) == "" {
 			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未匹配status-rulers规则")
 		}
-		clientRawResponse := formatOpenAICompatClientResponse(httpResp.StatusCode, httpResp.Header, b)
+		clientStatus, clientMessage := httpResp.StatusCode, string(b)
+		clientBody := b
+		if terminal.matched {
+			clientStatus, clientMessage = terminal.status, terminal.message
+			clientBody = formatOpenAICompatClientErrorBody(clientStatus, clientMessage)
+		}
+		clientRawResponse := formatOpenAICompatClientResponse(clientStatus, httpResp.Header, clientBody)
 		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
 		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
-		err = statusErr{code: httpResp.StatusCode, msg: string(b), authFault: rulerMatched}
+		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched}
 		reporter.PublishFailure(ctx, err)
 		return resp, err
 	}
@@ -351,16 +358,22 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		if err != nil {
 			return nil, err
 		}
-		rulerDetail, rulerMatched := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
+		rulerDetail, rulerMatched, terminal := e.applyKeyStatusRulers(ctx, auth, apiKey, req.Model, httpResp.StatusCode, b, rawRequest, rawResponse)
 		if strings.TrimSpace(rulerDetail) == "" {
 			rulerDetail = formatOpenAICompatNoStatusRulerDetail("未匹配status-rulers规则")
 		}
-		clientRawResponse := formatOpenAICompatClientResponse(httpResp.StatusCode, http.Header{"Content-Type": []string{"application/json"}}, b)
+		clientStatus, clientMessage := httpResp.StatusCode, string(b)
+		clientBody := b
+		if terminal.matched {
+			clientStatus, clientMessage = terminal.status, terminal.message
+			clientBody = formatOpenAICompatClientErrorBody(clientStatus, clientMessage)
+		}
+		clientRawResponse := formatOpenAICompatClientResponse(clientStatus, http.Header{"Content-Type": []string{"application/json"}}, clientBody)
 		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
 		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
-		err = statusErr{code: httpResp.StatusCode, msg: string(b), authFault: rulerMatched}
+		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched}
 		reporter.PublishFailure(ctx, err)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
@@ -523,25 +536,43 @@ func (e *OpenAICompatExecutor) resolveCompatConfig(auth *cliproxyauth.Auth) *con
 	return nil
 }
 
-func (e *OpenAICompatExecutor) applyKeyStatusRulers(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) (string, bool) {
+type openAICompatTerminalRuler struct {
+	matched bool
+	status  int
+	message string
+}
+
+func (e *OpenAICompatExecutor) applyKeyStatusRulers(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) (string, bool, openAICompatTerminalRuler) {
 	if packetFilterDisabledAPIKey(ctx) {
 		detail := "结果: 已由抓包/过滤规则禁用API Key，跳过重复执行status-rulers"
 		helps.RecordUsageStatusRulers(ctx, detail)
-		return detail, true
+		return detail, true, openAICompatTerminalRuler{}
 	}
 	service := openai_compat_state.DefaultService()
 	compat := e.resolveCompatConfig(auth)
 	if service == nil || compat == nil || strings.TrimSpace(apiKey) == "" {
-		return "", false
+		return "", false, openAICompatTerminalRuler{}
 	}
-	if st, matched := service.ApplyRulersForModel(*compat, apiKey, model, status, body, rawRequest, rawResponse); matched {
-		detail := formatOpenAICompatStatusRulerDetail(compat.Name, apiKey, model, status, st)
+	if result := service.ApplyRulersForModelResult(*compat, apiKey, model, status, body, rawRequest, rawResponse); result.Matched {
+		detail := formatOpenAICompatStatusRulerDetail(compat.Name, apiKey, model, status, result.State)
 		helps.RecordUsageStatusRulers(ctx, detail)
-		return detail, true
+		terminal := openAICompatTerminalRuler{}
+		if result.Terminal {
+			terminal.matched = true
+			terminal.status = result.ClientStatus
+			terminal.message = result.ClientMessage
+			if terminal.status <= 0 {
+				terminal.status = status
+			}
+			if terminal.message == "" {
+				terminal.message = strings.TrimSpace(string(body))
+			}
+		}
+		return detail, true, terminal
 	} else {
 		service.MarkErrorForModel(compat.Name, apiKey, model, string(body), rawRequest, rawResponse)
 	}
-	return "", false
+	return "", false, openAICompatTerminalRuler{}
 }
 
 func (e *OpenAICompatExecutor) providerName(auth *cliproxyauth.Auth) string {
@@ -789,6 +820,47 @@ func formatOpenAICompatClientResponse(status int, headers http.Header, body []by
 	return b.String()
 }
 
+func formatOpenAICompatClientErrorBody(status int, message string) []byte {
+	trimmed := strings.TrimSpace(message)
+	if trimmed != "" && json.Valid([]byte(trimmed)) {
+		return []byte(trimmed)
+	}
+	if trimmed == "" {
+		trimmed = http.StatusText(status)
+	}
+	errType := "invalid_request_error"
+	code := ""
+	switch status {
+	case http.StatusUnauthorized:
+		errType = "authentication_error"
+		code = "invalid_api_key"
+	case http.StatusForbidden:
+		errType = "permission_error"
+		code = "insufficient_quota"
+	case http.StatusTooManyRequests:
+		errType = "rate_limit_error"
+		code = "rate_limit_exceeded"
+	case http.StatusNotFound:
+		code = "model_not_found"
+	default:
+		if status >= http.StatusInternalServerError {
+			errType = "server_error"
+			code = "internal_server_error"
+		}
+	}
+	payload, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": trimmed,
+			"type":    errType,
+			"code":    code,
+		},
+	})
+	if err != nil {
+		return []byte(fmt.Sprintf(`{"error":{"message":%q,"type":"server_error","code":"internal_server_error"}}`, trimmed))
+	}
+	return payload
+}
+
 func formatOpenAICompatStatusRulerDetail(provider, apiKey, model string, status int, st openai_compat_state.State) string {
 	action := "标记异常"
 	switch st.Status {
@@ -910,6 +982,7 @@ type statusErr struct {
 	msg        string
 	retryAfter *time.Duration
 	authFault  bool
+	stopRetry  bool
 }
 
 func (e statusErr) Error() string {
@@ -921,3 +994,4 @@ func (e statusErr) Error() string {
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
 func (e statusErr) AuthFault() bool            { return e.authFault }
+func (e statusErr) StopRetry() bool            { return e.stopRetry }

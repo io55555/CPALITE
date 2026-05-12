@@ -43,6 +43,14 @@ type State struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+type RulerResult struct {
+	State         State
+	Matched       bool
+	Terminal      bool
+	ClientStatus  int
+	ClientMessage string
+}
+
 type Service struct {
 	mu      sync.RWMutex
 	db      *sql.DB
@@ -231,14 +239,42 @@ func (s *Service) ApplyRulers(provider config.OpenAICompatibility, apiKey string
 }
 
 func (s *Service) ApplyRulersForModel(provider config.OpenAICompatibility, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) (State, bool) {
+	result := s.ApplyRulersForModelResult(provider, apiKey, model, status, body, rawRequest, rawResponse)
+	return result.State, result.Matched
+}
+
+func (s *Service) ApplyRulersForModelResult(provider config.OpenAICompatibility, apiKey, model string, status int, body []byte, rawRequest, rawResponse string) RulerResult {
 	if s == nil {
-		return State{}, false
+		return RulerResult{}
 	}
 	for _, ruler := range provider.StatusRulers {
 		if !rulerMatches(ruler, status, body) {
 			continue
 		}
 		action := strings.ToLower(strings.TrimSpace(ruler.Action))
+		result := RulerResult{
+			Matched:       true,
+			Terminal:      action == "return",
+			ClientStatus:  ruler.ClientStatus,
+			ClientMessage: strings.TrimSpace(ruler.ClientMessage),
+		}
+		if result.ClientStatus == 0 {
+			result.ClientStatus = status
+		}
+		if result.Terminal {
+			result.State = State{
+				ProviderName:  strings.TrimSpace(provider.Name),
+				APIKey:        strings.TrimSpace(apiKey),
+				Enabled:       true,
+				Status:        StatusActive,
+				StatusMessage: strings.TrimSpace(ruler.Name),
+				LastError:     truncateRaw(string(body)),
+				RawRequest:    truncateRaw(rawRequest),
+				RawResponse:   truncateRaw(rawResponse),
+				UpdatedAt:     time.Now().UTC(),
+			}
+			return result
+		}
 		now := time.Now()
 		st := s.updateForModel(provider.Name, apiKey, model, func(st *State) {
 			st.Enabled = action != "disable"
@@ -258,9 +294,10 @@ func (s *Service) ApplyRulersForModel(provider config.OpenAICompatibility, apiKe
 				st.Status = StatusError
 			}
 		})
-		return st, true
+		result.State = st
+		return result
 	}
-	return State{}, false
+	return RulerResult{}
 }
 
 func (s *Service) MarkError(provider, apiKey, message, rawRequest, rawResponse string) State {
@@ -585,10 +622,30 @@ func rulerMatches(r config.OpenAICompatibilityStatusRuler, status int, body []by
 		return false
 	}
 	if expected := strings.TrimSpace(r.When.BodyEquals); expected != "" {
-		return strings.TrimSpace(string(body)) == expected
+		if strings.TrimSpace(string(body)) != expected {
+			return false
+		}
+	}
+	if expected := strings.TrimSpace(r.When.BodyContains); expected != "" {
+		if !strings.Contains(strings.ToLower(string(body)), strings.ToLower(expected)) {
+			return false
+		}
 	}
 	if path := strings.TrimSpace(r.When.JSONPath); path != "" {
-		return gjson.GetBytes(body, path).String() == r.When.JSONEquals
+		value := gjson.GetBytes(body, path).String()
+		if expected := strings.TrimSpace(r.When.JSONEquals); expected != "" {
+			if value != expected {
+				return false
+			}
+		}
+		if expected := strings.TrimSpace(r.When.JSONContains); expected != "" {
+			if !strings.Contains(strings.ToLower(value), strings.ToLower(expected)) {
+				return false
+			}
+		}
+		if strings.TrimSpace(r.When.JSONEquals) == "" && strings.TrimSpace(r.When.JSONContains) == "" && value == "" {
+			return false
+		}
 	}
 	return true
 }
