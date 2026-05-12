@@ -29,6 +29,7 @@ const partOptions = [
   { value: 'body', label: 'Body字符串' },
   { value: 'body_json', label: 'Body JSON路径' },
   { value: 'header', label: 'HTTP头' },
+  { value: 'headers', label: '所有HTTP头' },
   { value: 'packet', label: '完整数据包' },
 ];
 
@@ -50,17 +51,21 @@ const operatorOptions = [
 
 const actionOptions = [
   { value: 'record', label: '仅记录触发' },
-  { value: 'block', label: '拦截请求' },
+  { value: 'block', label: '拦截请求(向客户端返回403)' },
   { value: 'replace', label: '替换内容' },
   { value: 'delete', label: '删除内容' },
   { value: 'redact', label: '脱敏替换' },
-  { value: 'cooldown', label: '记录冷却动作' },
-  { value: 'disable', label: '禁用API Key' },
+  { value: 'cooldown', label: '冷却目标(*s/*h/*d见秒数)' },
+  { value: 'disable', label: '禁用目标' },
+  { value: 'return_clean_400', label: '返回客户端纯净400' },
+  { value: 'return_clean_401', label: '返回客户端纯净401' },
+  { value: 'return_clean_429', label: '返回客户端纯净429' },
+  { value: 'return_clean_500', label: '返回客户端纯净500' },
 ];
 
 const targetOptions = [
   { value: 'user_token', label: '用户Token' },
-  { value: 'auth', label: '账号' },
+  { value: 'auth', label: '认证文件/账号' },
   { value: 'api_key', label: 'API Key' },
   { value: 'request', label: '请求' },
   { value: 'response', label: '响应' },
@@ -73,6 +78,8 @@ const replacementOptions = [
   { value: '{{random_claude_code_ua}}', label: '随机 Claude Code UA' },
   { value: '{{random_curl_ua}}', label: '随机 curl UA' },
   { value: '[model-redacted]', label: '模型名脱敏占位' },
+  { value: 'Upstream provider error', label: '上游错误脱敏占位' },
+  { value: 'Internal Server Error', label: '纯净500消息' },
   { value: '1', label: '数值 1' },
   { value: '1024', label: '数值 1024' },
 ];
@@ -112,93 +119,138 @@ interface RuleTemplate {
 const ruleTemplates: RuleTemplate[] = [
   {
     value: 'block-client-header-keyword',
-    label: '客户端头包含关键字就拒绝',
-    rule: { name: '客户端头包含关键字就拒绝', packet: 'client_request', part: 'headers', operator: 'wildcard', value: '*关键字*', action: 'block' },
+    label: '[客户端到CPA]拦截Header关键字',
+    rule: { name: '[客户端到CPA]拦截Header关键字', packet: 'client_request', part: 'headers', operator: 'contains', value: '关键字', action: 'block', notes: '拦截请求会中止本次请求，并向客户端返回403 JSON错误。' },
   },
   {
     value: 'block-client-header-field',
-    label: '客户端某个Header包含关键字就拒绝',
-    rule: { name: '客户端Header字段包含关键字就拒绝', packet: 'client_request', part: 'header', header: 'Authorization', operator: 'wildcard', value: '*关键字*', action: 'block' },
+    label: '[客户端到CPA]拦截Authorization关键字',
+    rule: { name: '[客户端到CPA]拦截Authorization关键字', packet: 'client_request', part: 'header', header: 'Authorization', operator: 'contains', value: '关键字', action: 'block', notes: '拦截请求会中止本次请求，并向客户端返回403 JSON错误。' },
   },
   {
     value: 'block-client-body-keyword',
-    label: '客户端Body包含通配关键字就拒绝',
-    rule: { name: '客户端Body包含关键字就拒绝', packet: 'client_request', part: 'body', operator: 'wildcard', value: '*关键字*', action: 'block' },
+    label: '[客户端到CPA]拦截Body关键字',
+    rule: { name: '[客户端到CPA]拦截Body关键字', packet: 'client_request', part: 'body', operator: 'contains', value: '关键字', action: 'block', notes: 'Body字符串包含即可命中，比完整数据包通配更省CPU。' },
   },
   {
     value: 'block-client-dialog-keyword',
-    label: '客户端AI对话包含关键字就拒绝',
-    rule: { name: '客户端AI对话包含关键字就拒绝', packet: 'client_request', part: 'body_json', json_path: 'messages.#.content', operator: 'wildcard', value: '*关键字*', action: 'block' },
+    label: '[客户端到CPA]拦截非法AI对话内容',
+    rule: { name: '[客户端到CPA]拦截非法AI对话内容', packet: 'client_request', part: 'body_json', json_path: 'messages.#.content', operator: 'contains', value: '关键字', action: 'block', notes: '只检查messages内容，避免扫描完整HTTP包。' },
   },
   {
     value: 'block-client-ua-keyword',
-    label: '客户端UA包含通配关键字就拒绝',
-    rule: { name: '客户端UA包含关键字就拒绝', packet: 'client_request', part: 'header', header: 'User-Agent', operator: 'wildcard', value: '*关键字*', action: 'block' },
+    label: '[客户端到CPA]拦截异常UA',
+    rule: { name: '[客户端到CPA]拦截异常UA', packet: 'client_request', part: 'header', header: 'User-Agent', operator: 'contains', value: '关键字', action: 'block' },
   },
   {
     value: 'upstream-random-codex-ua',
-    label: '供应商请求UA随机Codex版本',
-    rule: { name: '供应商请求UA随机Codex版本', packet: 'upstream_request', part: 'header', header: 'User-Agent', operator: 'contains', value: '', action: 'replace', replacement: '{{random_codex_ua}}' },
+    label: '[CPA到运营商]替换UA为随机Codex',
+    rule: { name: '[CPA到运营商]替换UA为随机Codex', packet: 'upstream_request', part: 'header', header: 'User-Agent', operator: 'contains', value: '', action: 'replace', replacement: '{{random_codex_ua}}' },
   },
   {
     value: 'upstream-random-claude-ua',
-    label: '供应商请求UA随机Claude Code版本',
-    rule: { name: '供应商请求UA随机Claude Code版本', packet: 'upstream_request', part: 'header', header: 'User-Agent', operator: 'contains', value: '', action: 'replace', replacement: '{{random_claude_code_ua}}' },
+    label: '[CPA到运营商]替换UA为随机Claude Code',
+    rule: { name: '[CPA到运营商]替换UA为随机Claude Code', packet: 'upstream_request', part: 'header', header: 'User-Agent', operator: 'contains', value: '', action: 'replace', replacement: '{{random_claude_code_ua}}' },
   },
   {
     value: 'upstream-random-curl-ua',
-    label: '供应商请求UA随机curl版本',
-    rule: { name: '供应商请求UA随机curl版本', packet: 'upstream_request', part: 'header', header: 'User-Agent', operator: 'contains', value: '', action: 'replace', replacement: '{{random_curl_ua}}' },
+    label: '[CPA到运营商]替换UA为随机curl',
+    rule: { name: '[CPA到运营商]替换UA为随机curl', packet: 'upstream_request', part: 'header', header: 'User-Agent', operator: 'contains', value: '', action: 'replace', replacement: '{{random_curl_ua}}' },
   },
   {
     value: 'upstream-model-llama-test',
-    label: '替换模型为llama测试模型',
-    rule: { name: '替换模型llama-3.1-8b-instant为测试模型', packet: 'upstream_request', part: 'body_json', json_path: 'model', operator: 'equals', value: 'llama-3.1-8b-instant', action: 'replace', replacement: 'llama-3.1-8b-instant-test' },
+    label: '[CPA到运营商]替换指定模型',
+    rule: { name: '[CPA到运营商]替换指定模型', packet: 'upstream_request', part: 'body_json', json_path: 'model', operator: 'equals', value: 'llama-3.1-8b-instant', action: 'replace', replacement: 'llama-3.1-8b-instant-test' },
   },
   {
     value: 'upstream-append-system',
-    label: '追加system提示词',
-    rule: { name: '追加system提示词', packet: 'upstream_request', part: 'body_json', json_path: 'messages.0.content', operator: 'contains', value: '', action: 'replace', replacement: '{original}\n新增提示词' },
+    label: '[CPA到运营商]追加system提示词',
+    rule: { name: '[CPA到运营商]追加system提示词', packet: 'upstream_request', part: 'body_json', json_path: 'messages.0.content', operator: 'contains', value: '', action: 'replace', replacement: '{original}\n新增提示词' },
   },
   {
     value: 'upstream-append-prompt',
-    label: '追加最后一条提示词',
-    rule: { name: '追加提示词', packet: 'upstream_request', part: 'body', operator: 'contains', value: '"content":"', action: 'replace', replacement: '"content":"新增提示词\\n', replace_limit: 1 },
+    label: '[CPA到运营商]追加提示词片段',
+    rule: { name: '[CPA到运营商]追加提示词片段', packet: 'upstream_request', part: 'body', operator: 'contains', value: '"content":"', action: 'replace', replacement: '"content":"新增提示词\\n', replace_limit: 1 },
   },
   {
     value: 'upstream-top-p-1',
-    label: '替换top_p为1',
-    rule: { name: '替换top_p为1', packet: 'upstream_request', part: 'body_json', json_path: 'top_p', operator: 'contains', value: '', action: 'replace', replacement: '1' },
+    label: '[CPA到运营商]固定top_p为1',
+    rule: { name: '[CPA到运营商]固定top_p为1', packet: 'upstream_request', part: 'body_json', json_path: 'top_p', operator: 'contains', value: '', action: 'replace', replacement: '1' },
   },
   {
     value: 'upstream-max-tokens-1024',
-    label: '替换max_tokens为1024',
-    rule: { name: '替换max_tokens为1024', packet: 'upstream_request', part: 'body_json', json_path: 'max_tokens', operator: 'contains', value: '', action: 'replace', replacement: '1024' },
+    label: '[CPA到运营商]限制max_tokens为1024',
+    rule: { name: '[CPA到运营商]限制max_tokens为1024', packet: 'upstream_request', part: 'body_json', json_path: 'max_tokens', operator: 'contains', value: '', action: 'replace', replacement: '1024' },
+  },
+  {
+    value: 'upstream-response-groq-eof-redact-message',
+    label: '[运营商到CPA]脱敏Groq EOF错误',
+    rule: { name: '[运营商到CPA]脱敏Groq EOF错误', provider_keyword: 'groq', packet: 'upstream_response', part: 'body_json', json_path: 'error.message', operator: 'contains', value: 'api.groq.com/openai', action: 'redact', replacement: 'Upstream provider error' },
+  },
+  {
+    value: 'upstream-response-500-clean',
+    label: '[运营商到CPA]500直接返回纯净500',
+    rule: { name: '[运营商到CPA]500直接返回纯净500', packet: 'upstream_response', part: 'packet', operator: 'starts_with', value: 'HTTP/2 500', action: 'return_clean_500', target: 'response', notes: '命中后中止后续处理，客户端只看到纯净500 JSON。' },
+  },
+  {
+    value: 'upstream-response-401-disable-key',
+    label: '[运营商到CPA]401禁用API Key',
+    rule: { name: '[运营商到CPA]401禁用API Key', packet: 'upstream_response', part: 'body_json', json_path: 'error.code', operator: 'contains', value: 'invalid', action: 'disable', target: 'api_key' },
+  },
+  {
+    value: 'upstream-response-429-cooldown-key-300s',
+    label: '[运营商到CPA]429冷却API Key 300s',
+    rule: { name: '[运营商到CPA]429冷却API Key 300s', packet: 'upstream_response', part: 'packet', operator: 'starts_with', value: 'HTTP/2 429', action: 'cooldown', target: 'api_key', cooldown_seconds: 300 },
+  },
+  {
+    value: 'upstream-response-5xx-cooldown-auth-60s',
+    label: '[运营商到CPA]5xx冷却认证文件60s',
+    rule: { name: '[运营商到CPA]5xx冷却认证文件60s', packet: 'upstream_response', part: 'packet', operator: 'starts_with', value: 'HTTP/2 5', action: 'cooldown', target: 'auth', cooldown_seconds: 60 },
   },
   {
     value: 'client-response-delete-model-header',
-    label: '客户端响应删除Header模型名',
-    rule: { name: '客户端响应删除Header模型名', packet: 'client_response', part: 'header', header: 'X-Model', operator: 'contains', value: '', action: 'delete', replacement: '' },
+    label: '[CPA到客户端]删除Header模型名',
+    rule: { name: '[CPA到客户端]删除Header模型名', packet: 'client_response', part: 'header', header: 'X-Model', operator: 'contains', value: '', action: 'delete', replacement: '' },
   },
   {
     value: 'client-response-redact-model-body',
-    label: '客户端响应Body隐藏模型名',
-    rule: { name: '客户端响应Body隐藏模型名', packet: 'client_response', part: 'body', operator: 'contains', value: 'llama-3.1-8b-instant', action: 'redact', replacement: '[model-redacted]' },
+    label: '[CPA到客户端]脱敏Body模型名',
+    rule: { name: '[CPA到客户端]脱敏Body模型名', packet: 'client_response', part: 'body', operator: 'contains', value: 'llama-3.1-8b-instant', action: 'redact', replacement: '[model-redacted]' },
+  },
+  {
+    value: 'client-response-groq-500-redact-message',
+    label: '[CPA到客户端]脱敏Groq 500错误message',
+    rule: { name: '[CPA到客户端]脱敏Groq 500错误message', provider_keyword: 'groq', packet: 'client_response', part: 'body_json', json_path: 'error.message', operator: 'contains', value: 'api.groq.com/openai', action: 'redact', replacement: 'Internal Server Error', notes: '推荐用于隐藏上游URL、网络错误、供应商内部错误细节。' },
+  },
+  {
+    value: 'client-response-500-clean',
+    label: '[CPA到客户端]脱敏返回纯净500请求',
+    rule: { name: '[CPA到客户端]脱敏返回纯净500请求', packet: 'client_response', part: 'packet', operator: 'starts_with', value: 'HTTP/1.1 500', action: 'return_clean_500', target: 'response', notes: '命中后客户端只收到纯净500 JSON，不暴露原始error.message。' },
+  },
+  {
+    value: 'client-response-429-clean',
+    label: '[CPA到客户端]脱敏返回纯净429请求',
+    rule: { name: '[CPA到客户端]脱敏返回纯净429请求', packet: 'client_response', part: 'packet', operator: 'starts_with', value: 'HTTP/1.1 429', action: 'return_clean_429', target: 'response' },
+  },
+  {
+    value: 'client-response-401-clean',
+    label: '[CPA到客户端]脱敏返回纯净401请求',
+    rule: { name: '[CPA到客户端]脱敏返回纯净401请求', packet: 'client_response', part: 'packet', operator: 'starts_with', value: 'HTTP/1.1 401', action: 'return_clean_401', target: 'response' },
   },
   {
     value: 'disable-key-org-restricted',
-    label: '上游400 organization_restricted禁用Key',
-    rule: { name: '上游400 organization_restricted禁用API Key', packet: 'upstream_response', part: 'packet', operator: 'wildcard', value: 'HTTP/* 400*organization_restricted*', action: 'disable', target: 'api_key' },
+    label: '[运营商到CPA]400 organization_restricted禁用Key',
+    rule: { name: '[运营商到CPA]400 organization_restricted禁用API Key', packet: 'upstream_response', part: 'body_json', json_path: 'error.code', operator: 'equals', value: 'organization_restricted', action: 'disable', target: 'api_key' },
   },
   {
     value: 'disable-key-wrong-api-key',
-    label: '上游401 wrong_api_key禁用Key',
-    rule: { name: '上游401 wrong_api_key禁用API Key', packet: 'upstream_response', part: 'packet', operator: 'wildcard', value: 'HTTP/* 401*wrong_api_key*', action: 'disable', target: 'api_key' },
+    label: '[运营商到CPA]401 wrong_api_key禁用Key',
+    rule: { name: '[运营商到CPA]401 wrong_api_key禁用API Key', packet: 'upstream_response', part: 'body_json', json_path: 'error.code', operator: 'equals', value: 'wrong_api_key', action: 'disable', target: 'api_key' },
   },
   {
     value: 'disable-key-unauthorized-body',
-    label: '上游401 body=unauthorized禁用Key',
-    rule: { name: '上游401 unauthorized禁用API Key', packet: 'upstream_response', part: 'packet', operator: 'wildcard', value: 'HTTP/* 401*unauthorized*', action: 'disable', target: 'api_key' },
+    label: '[运营商到CPA]401 unauthorized禁用Key',
+    rule: { name: '[运营商到CPA]401 unauthorized禁用API Key', packet: 'upstream_response', part: 'body', operator: 'equals', value: 'unauthorized', action: 'disable', target: 'api_key' },
   },
 ];
 
@@ -220,6 +272,17 @@ const formatTime = (value: string) =>
 const formatBytes = (bytes: number) => {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
   return `${(bytes / 1024).toFixed(1)} KB`;
+};
+
+const parseCooldownSeconds = (value: string) => {
+  const raw = value.trim().toLowerCase();
+  const match = raw.match(/^(\d+)\s*([shd])?$/);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return 0;
+  if (match[2] === 'h') return amount * 3600;
+  if (match[2] === 'd') return amount * 86400;
+  return amount;
 };
 
 interface SuggestInputProps {
@@ -753,7 +816,7 @@ export function PacketCapturePage() {
             <label>动作<Select value={editingRule.action} options={actionOptions} onChange={(value) => setEditingRule({ ...editingRule, action: value })} ariaLabel="动作" /></label>
             <label>替换为<SuggestInput value={editingRule.replacement || ''} options={replacementOptions} onChange={(value) => setEditingRule({ ...editingRule, replacement: value })} placeholder="{{random_curl_ua}}" /></label>
             <label>替换次数<Input value={String(editingRule.replace_limit || 0)} onChange={(event) => setEditingRule({ ...editingRule, replace_limit: Number(event.target.value) || 0 })} /></label>
-            <label>冷却秒数<Input value={String(editingRule.cooldown_seconds || 0)} onChange={(event) => setEditingRule({ ...editingRule, cooldown_seconds: Number(event.target.value) || 0 })} /></label>
+            <label>冷却时长<Input value={String(editingRule.cooldown_seconds || 0)} onChange={(event) => setEditingRule({ ...editingRule, cooldown_seconds: parseCooldownSeconds(event.target.value) })} placeholder="300 / 30s / 2h / 1d" /></label>
             <label>操作目标<SuggestInput value={editingRule.target || ''} options={targetOptions} onChange={(value) => setEditingRule({ ...editingRule, target: value })} placeholder="user_token / auth / api_key" /></label>
             <label className={styles.full}>备注<Input value={editingRule.notes || ''} onChange={(event) => setEditingRule({ ...editingRule, notes: event.target.value })} /></label>
             <div className={styles.formActions}>

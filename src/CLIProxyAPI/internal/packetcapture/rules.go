@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -135,24 +134,33 @@ func wildcardMatch(actual, pattern string) bool {
 	if pattern == "" {
 		return false
 	}
-	var b strings.Builder
-	b.WriteString("(?is)^")
-	for _, r := range pattern {
-		switch r {
-		case '*':
-			b.WriteString(".*")
-		case '?':
-			b.WriteByte('.')
-		default:
-			b.WriteString(regexp.QuoteMeta(string(r)))
+	text := []rune(strings.ToLower(actual))
+	glob := []rune(strings.ToLower(pattern))
+	ti, pi, star, match := 0, 0, -1, 0
+	for ti < len(text) {
+		if pi < len(glob) && (glob[pi] == '?' || glob[pi] == text[ti]) {
+			ti++
+			pi++
+			continue
 		}
-	}
-	b.WriteByte('$')
-	re, err := regexp.Compile(b.String())
-	if err != nil {
+		if pi < len(glob) && glob[pi] == '*' {
+			star = pi
+			match = ti
+			pi++
+			continue
+		}
+		if star >= 0 {
+			pi = star + 1
+			match++
+			ti = match
+			continue
+		}
 		return false
 	}
-	return re.MatchString(actual)
+	for pi < len(glob) && glob[pi] == '*' {
+		pi++
+	}
+	return pi == len(glob)
 }
 
 func replacePart(packet string, rule Rule) string {
@@ -249,6 +257,53 @@ func packetBody(packet string) string {
 
 func PacketBody(packet string) string {
 	return packetBody(packet)
+}
+
+func CleanReturnStatus(action string) int {
+	switch strings.TrimSpace(action) {
+	case "return_clean_400":
+		return http.StatusBadRequest
+	case "return_clean_401":
+		return http.StatusUnauthorized
+	case "return_clean_429":
+		return http.StatusTooManyRequests
+	case "return_clean_500":
+		return http.StatusInternalServerError
+	default:
+		return 0
+	}
+}
+
+func CleanReturnBody(status int) string {
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	errType := "invalid_request_error"
+	code := ""
+	switch status {
+	case http.StatusUnauthorized:
+		errType = "authentication_error"
+		code = "invalid_api_key"
+	case http.StatusTooManyRequests:
+		errType = "rate_limit_error"
+		code = "rate_limit_exceeded"
+	default:
+		if status >= http.StatusInternalServerError {
+			errType = "server_error"
+			code = "internal_server_error"
+		}
+	}
+	body, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": http.StatusText(status),
+			"type":    errType,
+			"code":    code,
+		},
+	})
+	if err != nil {
+		return fmt.Sprintf(`{"error":{"message":%q,"type":"server_error","code":"internal_server_error"}}`, http.StatusText(status))
+	}
+	return string(body)
 }
 
 func replaceBody(packet, body string) string {

@@ -92,12 +92,13 @@ type Rule struct {
 }
 
 type TriggerRecord struct {
-	ID        string    `json:"id"`
-	RuleID    string    `json:"rule_id"`
-	RuleName  string    `json:"rule_name"`
-	RecordID  string    `json:"record_id"`
-	Timestamp time.Time `json:"timestamp"`
-	Action    string    `json:"action"`
-	Target    string    `json:"target,omitempty"`
-	Detail    string    `json:"detail,omitempty"`
+	ID              string    `json:"id"`
+	RuleID          string    `json:"rule_id"`
+	RuleName        string    `json:"rule_name"`
+	RecordID        string    `json:"record_id"`
+	Timestamp       time.Time `json:"timestamp"`
+	Action          string    `json:"action"`
+	Target          string    `json:"target,omitempty"`
+	Detail          string    `json:"detail,omitempty"`
+	CooldownSeconds int       `json:"cooldown_seconds,omitempty"`
 }

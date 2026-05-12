@@ -72,6 +72,7 @@ export interface PacketTrigger {
   action: string;
   target?: string;
   detail?: string;
+  cooldown_seconds?: number;
 }
 
 export const packetCaptureApi = {

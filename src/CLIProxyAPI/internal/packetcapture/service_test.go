@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,5 +156,59 @@ func TestRulesWildcardRandomAndOriginalReplacement(t *testing.T) {
 	}
 	if body := PacketBody(filtered); body != "{\"messages\":[{\"content\":\"hello world\"}]}" {
 		t.Fatalf("body = %s", body)
+	}
+}
+
+func TestWildcardMatchIsCaseInsensitiveAndAnchored(t *testing.T) {
+	if !wildcardMatch("HTTP/2 400\n\nORGANIZATION_RESTRICTED", "http/* 400*organization_restricted*") {
+		t.Fatal("expected wildcard match")
+	}
+	if wildcardMatch("prefix HTTP/2 400 organization_restricted", "HTTP/* 400*organization_restricted*") {
+		t.Fatal("expected anchored wildcard mismatch")
+	}
+}
+
+func TestApplyRulesReturnClean500(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	defaultMu.Lock()
+	previous := defaultService
+	defaultService = &Service{store: store}
+	defaultMu.Unlock()
+	defer func() {
+		defaultMu.Lock()
+		defaultService = previous
+		defaultMu.Unlock()
+	}()
+
+	_, err = store.UpsertRule(context.Background(), Rule{
+		Name:     "clean 500",
+		Enabled:  true,
+		Packet:   "client_response",
+		Part:     "body_json",
+		JSONPath: "error.message",
+		Operator: "contains",
+		Value:    "api.groq.com/openai",
+		Action:   "return_clean_500",
+		Target:   "response",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRule: %v", err)
+	}
+	packet := "HTTP/1.1 500 Internal Server Error\nContent-Type: application/json\n\n" +
+		`{"error":{"message":"Post \"https://api.groq.com/openai/v1/chat/completions\": EOF","type":"server_error","code":"internal_server_error"}}`
+	_, blockErr, _ := ApplyRules(context.Background(), Record{Provider: "groq"}, "client_response", packet)
+	if blockErr == nil {
+		t.Fatal("expected clean return error")
+	}
+	status, ok := blockErr.(interface{ StatusCode() int })
+	if !ok || status.StatusCode() != 500 {
+		t.Fatalf("status = %v, want 500", blockErr)
+	}
+	if strings.Contains(blockErr.Error(), "api.groq.com") || !strings.Contains(blockErr.Error(), "Internal Server Error") {
+		t.Fatalf("unexpected body: %s", blockErr.Error())
 	}
 }

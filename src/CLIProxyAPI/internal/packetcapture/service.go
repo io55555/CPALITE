@@ -475,14 +475,15 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 			continue
 		}
 		trigger := TriggerRecord{
-			ID:        uuid.NewString(),
-			RuleID:    rule.ID,
-			RuleName:  rule.Name,
-			RecordID:  meta.ID,
-			Timestamp: nowUTC(),
-			Action:    rule.Action,
-			Target:    rule.Target,
-			Detail:    detail,
+			ID:              uuid.NewString(),
+			RuleID:          rule.ID,
+			RuleName:        rule.Name,
+			RecordID:        meta.ID,
+			Timestamp:       nowUTC(),
+			Action:          rule.Action,
+			Target:          rule.Target,
+			Detail:          detail,
+			CooldownSeconds: rule.CooldownSeconds,
 		}
 		if rule.RecordHistory {
 			triggers = append(triggers, trigger)
@@ -491,6 +492,9 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 		switch strings.TrimSpace(rule.Action) {
 		case "block":
 			return current, &httpError{status: http.StatusForbidden, message: "请求被抓包/过滤规则拦截: " + rule.Name}, triggers
+		case "return_clean_400", "return_clean_401", "return_clean_429", "return_clean_500":
+			status := CleanReturnStatus(rule.Action)
+			return current, &httpError{status: status, message: CleanReturnBody(status)}, triggers
 		case "replace", "delete", "redact":
 			current = next
 		}

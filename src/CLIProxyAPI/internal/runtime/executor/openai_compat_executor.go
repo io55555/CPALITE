@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -212,11 +213,17 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 			clientBody = formatOpenAICompatClientErrorBody(clientStatus, clientMessage)
 		}
 		clientRawResponse := formatOpenAICompatClientResponse(clientStatus, httpResp.Header, clientBody)
+		originalClientBody := append([]byte(nil), clientBody...)
+		clientRawResponse, clientStatus, clientBody, err = e.applyClientResponsePacketFilters(ctx, auth, apiKey, req.Model, clientStatus, httpResp.Header, clientBody)
+		clientFilterTerminal := err != nil
+		if clientFilterTerminal || !bytes.Equal(clientBody, originalClientBody) {
+			clientMessage = string(clientBody)
+		}
 		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
 		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
-		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched}
+		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched || clientFilterTerminal}
 		reporter.PublishFailure(ctx, err)
 		return resp, err
 	}
@@ -369,11 +376,17 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 			clientBody = formatOpenAICompatClientErrorBody(clientStatus, clientMessage)
 		}
 		clientRawResponse := formatOpenAICompatClientResponse(clientStatus, http.Header{"Content-Type": []string{"application/json"}}, clientBody)
+		originalClientBody := append([]byte(nil), clientBody...)
+		clientRawResponse, clientStatus, clientBody, err = e.applyClientResponsePacketFilters(ctx, auth, apiKey, req.Model, clientStatus, http.Header{"Content-Type": []string{"application/json"}}, clientBody)
+		clientFilterTerminal := err != nil
+		if clientFilterTerminal || !bytes.Equal(clientBody, originalClientBody) {
+			clientMessage = string(clientBody)
+		}
 		usageRawResponse := formatOpenAICompatUsageResponses(rawResponse, rulerDetail, clientRawResponse)
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
 		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
-		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched}
+		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched || clientFilterTerminal}
 		reporter.PublishFailure(ctx, err)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
@@ -652,6 +665,27 @@ func (e *OpenAICompatExecutor) applyUpstreamResponsePacketFilters(ctx context.Co
 	return filtered, nil
 }
 
+func (e *OpenAICompatExecutor) applyClientResponsePacketFilters(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string, status int, headers http.Header, body []byte) (string, int, []byte, error) {
+	rawPacket := formatOpenAICompatClientResponse(status, headers, body)
+	meta := e.packetFilterMeta(ctx, auth, apiKey, model)
+	filtered, blockErr, _ := packetcapture.ApplyRules(ctx, meta, "client_response", rawPacket)
+	if blockErr != nil {
+		blockStatus := http.StatusForbidden
+		if se, ok := any(blockErr).(interface{ StatusCode() int }); ok && se.StatusCode() > 0 {
+			blockStatus = se.StatusCode()
+		}
+		blockBody := formatOpenAICompatClientErrorBody(blockStatus, blockErr.Error())
+		return formatOpenAICompatClientResponse(blockStatus, http.Header{"Content-Type": []string{"application/json"}}, blockBody), blockStatus, blockBody, blockErr
+	}
+	if filteredBody := packetcapture.PacketBody(filtered); filteredBody != "" && filteredBody != string(body) {
+		body = []byte(filteredBody)
+	}
+	if parsedStatus := statusFromPacketLine(filtered); parsedStatus > 0 {
+		status = parsedStatus
+	}
+	return filtered, status, body, nil
+}
+
 func (e *OpenAICompatExecutor) applyUpstreamResponsePacketActions(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, filteredPacket string, triggers []packetcapture.TriggerRecord) {
 	if len(triggers) == 0 || strings.TrimSpace(apiKey) == "" {
 		return
@@ -665,19 +699,35 @@ func (e *OpenAICompatExecutor) applyUpstreamResponsePacketActions(ctx context.Co
 		return
 	}
 	for _, trigger := range triggers {
-		if strings.TrimSpace(trigger.Action) != "disable" || strings.TrimSpace(trigger.Target) != "api_key" {
+		action := strings.TrimSpace(trigger.Action)
+		target := strings.TrimSpace(trigger.Target)
+		if target != "api_key" && target != "auth" {
 			continue
 		}
 		message := "packet filter matched: " + strings.TrimSpace(trigger.RuleName)
-		st := service.MarkDisabledForModel(provider, apiKey, model, message, "", filteredPacket)
-		if auth != nil {
-			service.ApplyToAuth(auth)
+		switch action {
+		case "disable":
+			st := service.MarkDisabledForModel(provider, apiKey, model, message, "", filteredPacket)
+			if auth != nil {
+				service.ApplyToAuth(auth)
+			}
+			if ginCtx, _ := ctx.Value("gin").(*gin.Context); ginCtx != nil {
+				ginCtx.Set(packetFilterDisabledAPIKeyKey, true)
+			}
+			log.Infof("openai compat api key disabled by packet filter: provider=%s model=%s api_key=%s status=%s detail=%s", provider, model, util.HideAPIKey(apiKey), st.Status, trigger.Detail)
+			return
+		case "cooldown":
+			seconds := packetFilterCooldownSeconds(trigger)
+			if seconds <= 0 {
+				seconds = 300
+			}
+			st := service.MarkFrozenForModel(provider, apiKey, model, message, "", filteredPacket, time.Duration(seconds)*time.Second)
+			if auth != nil {
+				service.ApplyToAuth(auth)
+			}
+			log.Infof("openai compat api key cooled down by packet filter: provider=%s model=%s api_key=%s status=%s seconds=%d detail=%s", provider, model, util.HideAPIKey(apiKey), st.Status, seconds, trigger.Detail)
+			return
 		}
-		if ginCtx, _ := ctx.Value("gin").(*gin.Context); ginCtx != nil {
-			ginCtx.Set(packetFilterDisabledAPIKeyKey, true)
-		}
-		log.Infof("openai compat api key disabled by packet filter: provider=%s model=%s api_key=%s status=%s detail=%s", provider, model, util.HideAPIKey(apiKey), st.Status, trigger.Detail)
-		return
 	}
 }
 
@@ -692,6 +742,13 @@ func packetFilterDisabledAPIKey(ctx context.Context) bool {
 	value, exists := ginCtx.Get(packetFilterDisabledAPIKeyKey)
 	disabled, _ := value.(bool)
 	return exists && disabled
+}
+
+func packetFilterCooldownSeconds(trigger packetcapture.TriggerRecord) int {
+	if trigger.CooldownSeconds > 0 {
+		return trigger.CooldownSeconds
+	}
+	return 0
 }
 
 func (e *OpenAICompatExecutor) packetFilterMeta(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string) packetcapture.Record {
@@ -818,6 +875,19 @@ func formatOpenAICompatClientResponse(status int, headers http.Header, body []by
 	b.WriteByte('\n')
 	b.Write(body)
 	return b.String()
+}
+
+func statusFromPacketLine(packet string) int {
+	line, _, _ := strings.Cut(strings.TrimSpace(packet), "\n")
+	parts := strings.Fields(line)
+	if len(parts) < 2 || !strings.HasPrefix(parts[0], "HTTP/") {
+		return 0
+	}
+	status, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0
+	}
+	return status
 }
 
 func formatOpenAICompatClientErrorBody(status int, message string) []byte {
