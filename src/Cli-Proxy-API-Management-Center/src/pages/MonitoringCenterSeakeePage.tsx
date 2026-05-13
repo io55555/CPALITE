@@ -163,6 +163,12 @@ type RealtimeLogRow = MonitoringEventRow & {
   recentPattern: boolean[];
 };
 
+type UAInspection = {
+  title: string;
+  clientUA: string;
+  upstreamUA: string;
+};
+
 const extractNamedPacketSection = (content: string, title: string): string => {
   const marker = `=== ${title} ===`;
   const start = content.indexOf(marker);
@@ -357,6 +363,38 @@ const buildRealtimeMetaText = (row: MonitoringEventRow) => {
   const text = `${row.endpointMethod} ${row.endpointPath}`.trim();
   return maskSensitiveText(text || '-');
 };
+
+const compactUserAgent = (ua: string | null | undefined) => {
+  const text = (ua || '').trim();
+  if (!text || text === '-') return '-';
+  const lower = text.toLowerCase();
+  const known: Array<[RegExp, string]> = [
+    [/claude[-_\s]?code|claude-cli|anthropic-cli/, 'ClaudeCode'],
+    [/codex|openai-codex/, 'Codex'],
+    [/openclaw/, 'OpenClaw'],
+    [/opencode/, 'OpenCode'],
+    [/antigravity/, 'Antigravity'],
+    [/\bzed\b|zed\//, 'Zed'],
+    [/\bcurl\//, 'curl'],
+    [/\bwget\//, 'Wget'],
+    [/chrome|chromium|edg\//, 'chrome'],
+    [/firefox/, 'Firefox'],
+    [/safari/, 'Safari'],
+    [/postman/, 'Postman'],
+    [/insomnia/, 'Insomnia'],
+    [/python-requests|aiohttp|httpx/, 'Python'],
+    [/node-fetch|undici|axios|node\.js/, 'Node'],
+    [/go-http-client/, 'Go'],
+  ];
+  const found = known.find(([pattern]) => pattern.test(lower));
+  if (found) return found[1];
+  const firstProduct = text.match(/^([A-Za-z][A-Za-z0-9._-]{1,30})(?:\/|\s|$)/)?.[1];
+  if (firstProduct) return firstProduct;
+  return text.length > 18 ? `${text.slice(0, 16)}...` : text;
+};
+
+const formatUASummary = (row: MonitoringEventRow) =>
+  `客户:${compactUserAgent(row.clientUA)} / CPA:${compactUserAgent(row.upstreamUA)}`;
 
 const FIVE_HOUR_SECONDS = 18000;
 const WEEK_SECONDS = 604800;
@@ -1146,6 +1184,7 @@ export function MonitoringCenterPage() {
   const [realtimePage, setRealtimePage] = useState(1);
   const [realtimePageSize, setRealtimePageSize] = useState(DEFAULT_REALTIME_PAGE_SIZE);
   const [selectedFailurePacketRow, setSelectedFailurePacketRow] = useState<RealtimeLogRow | null>(null);
+  const [selectedUAInspection, setSelectedUAInspection] = useState<UAInspection | null>(null);
   const focusSnapshotRef = useRef<FocusSnapshot | null>(null);
   const accountQuotaStatesRef = useRef<Record<string, AccountQuotaState>>({});
   const accountQuotaRequestIdsRef = useRef<Record<string, number>>({});
@@ -2422,6 +2461,7 @@ export function MonitoringCenterPage() {
               <tr>
                 <th>{t('monitoring.column_type')}</th>
                 <th>{t('monitoring.column_model')}</th>
+                <th>思考强度</th>
                 <th>UA</th>
                 <th>{t('monitoring.recent_status')}</th>
                 <th>{t('monitoring.request_status')}</th>
@@ -2461,10 +2501,23 @@ export function MonitoringCenterPage() {
                     </div>
                   </td>
                   <td>
-                    <div className={styles.primaryCell} title={`客户UA: ${row.clientUA}\nCPA的UA: ${row.upstreamUA}`}>
-                      <span className={styles.monoCell}>{`客户UA: ${row.clientUA}`}</span>
-                      <small className={styles.monoCell}>{`CPA的UA: ${row.upstreamUA}`}</small>
-                    </div>
+                    <span className={styles.monoCell}>{row.thinkingEffort || '-'}</span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={styles.statusDetailButton}
+                      title="查看完整UA"
+                      onClick={() =>
+                        setSelectedUAInspection({
+                          title: `${row.provider} / ${row.model}`,
+                          clientUA: row.clientUA || '-',
+                          upstreamUA: row.upstreamUA || '-',
+                        })
+                      }
+                    >
+                      <span className={styles.monoCell}>{formatUASummary(row)}</span>
+                    </button>
                   </td>
                   <td>
                     <div className={styles.recentStatusCell}>
@@ -2569,6 +2622,25 @@ export function MonitoringCenterPage() {
               <pre>{packet || '-'}</pre>
             </div>
           ))}
+        </div>
+      </Modal>
+
+      <Modal
+        open={selectedUAInspection !== null}
+        onClose={() => setSelectedUAInspection(null)}
+        title={selectedUAInspection ? `UA 明细 · ${selectedUAInspection.title}` : 'UA 明细'}
+        width={760}
+        className={styles.monitorModal}
+      >
+        <div className={styles.failurePacketModalBody}>
+          <div className={styles.failurePacketBlock}>
+            <h3>客户UA</h3>
+            <pre>{selectedUAInspection?.clientUA || '-'}</pre>
+          </div>
+          <div className={styles.failurePacketBlock}>
+            <h3>CPA的UA</h3>
+            <pre>{selectedUAInspection?.upstreamUA || '-'}</pre>
+          </div>
         </div>
       </Modal>
 

@@ -295,3 +295,38 @@
 .formActions {
   justify-content: flex-end;
 }
+
+.ruleSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ruleSubGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ruleSubItem {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-secondary);
+}
+
+@media (max-width: 900px) {
+  .ruleForm {
+    grid-template-columns: 1fr;
+  }
+
+  .ruleSubItem {
+    grid-template-columns: 1fr;
+  }
+}

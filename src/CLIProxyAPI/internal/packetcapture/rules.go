@@ -51,25 +51,137 @@ func ruleMatchesMeta(rule Rule, meta Record) bool {
 }
 
 func applyRuleToPacket(rule Rule, packet string) (string, bool, string) {
-	target := selectPart(packet, rule)
-	if !matchValue(target, rule) {
+	if !ruleConditionsMatch(rule, packet) {
 		return packet, false, ""
 	}
 	next := packet
-	switch strings.TrimSpace(rule.Action) {
-	case "replace", "redact":
-		next = replacePart(packet, rule)
-	case "delete":
-		deleteRule := rule
-		deleteRule.Replacement = ""
-		next = replacePart(packet, deleteRule)
+	for _, action := range ruleActions(rule) {
+		if action.Packet != "" && normalizePacketName(action.Packet) != normalizePacketName(rule.Packet) {
+			continue
+		}
+		actionRule := ruleForAction(rule, action)
+		switch strings.TrimSpace(actionRule.Action) {
+		case "replace", "redact", "append":
+			next = replacePart(next, actionRule)
+		case "delete":
+			actionRule.Replacement = ""
+			next = replacePart(next, actionRule)
+		}
 	}
-	return next, true, fmt.Sprintf("packet=%s part=%s operator=%s value=%s", rule.Packet, rule.Part, rule.Operator, rule.Value)
+	return next, true, ruleMatchDetail(rule)
+}
+
+func ruleConditionsMatch(rule Rule, packet string) bool {
+	conditions := ruleConditions(rule)
+	if len(conditions) == 0 {
+		return true
+	}
+	anyMode := strings.EqualFold(strings.TrimSpace(rule.MatchLogic), "any")
+	matched := 0
+	for _, condition := range conditions {
+		condRule := ruleForCondition(rule, condition)
+		if condition.Packet != "" && normalizePacketName(condition.Packet) != normalizePacketName(rule.Packet) {
+			if anyMode {
+				continue
+			}
+			return false
+		}
+		if matchValue(selectPart(packet, condRule), condRule) {
+			matched++
+			if anyMode {
+				return true
+			}
+			continue
+		}
+		if !anyMode {
+			return false
+		}
+	}
+	return matched > 0
+}
+
+func ruleConditions(rule Rule) []Condition {
+	if len(rule.Conditions) > 0 {
+		return rule.Conditions
+	}
+	return []Condition{{
+		Packet:      rule.Packet,
+		Part:        rule.Part,
+		JSONPath:    rule.JSONPath,
+		Header:      rule.Header,
+		Operator:    rule.Operator,
+		Value:       rule.Value,
+		ValueNumber: rule.ValueNumber,
+	}}
+}
+
+func ruleActions(rule Rule) []Action {
+	if len(rule.Actions) > 0 {
+		return rule.Actions
+	}
+	return []Action{{
+		Type:            rule.Action,
+		Packet:          rule.Packet,
+		Part:            rule.Part,
+		JSONPath:        rule.JSONPath,
+		Header:          rule.Header,
+		Value:           rule.Value,
+		Replacement:     rule.Replacement,
+		ReplaceLimit:    rule.ReplaceLimit,
+		Target:          rule.Target,
+		CooldownSeconds: rule.CooldownSeconds,
+	}}
+}
+
+func ruleForCondition(rule Rule, condition Condition) Rule {
+	next := rule
+	if condition.Packet != "" {
+		next.Packet = condition.Packet
+	}
+	next.Part = firstNonEmptyString(condition.Part, rule.Part)
+	next.JSONPath = firstNonEmptyString(condition.JSONPath, rule.JSONPath)
+	next.Header = firstNonEmptyString(condition.Header, rule.Header)
+	next.Operator = firstNonEmptyString(condition.Operator, rule.Operator)
+	next.Value = condition.Value
+	next.ValueNumber = condition.ValueNumber
+	return next
+}
+
+func ruleForAction(rule Rule, action Action) Rule {
+	next := rule
+	if action.Packet != "" {
+		next.Packet = action.Packet
+	}
+	next.Action = firstNonEmptyString(action.Type, rule.Action)
+	next.Part = firstNonEmptyString(action.Part, rule.Part)
+	next.JSONPath = firstNonEmptyString(action.JSONPath, rule.JSONPath)
+	next.Header = firstNonEmptyString(action.Header, rule.Header)
+	if strings.TrimSpace(action.Value) != "" {
+		next.Value = action.Value
+	}
+	next.Replacement = action.Replacement
+	next.ReplaceLimit = action.ReplaceLimit
+	next.Target = firstNonEmptyString(action.Target, rule.Target)
+	next.CooldownSeconds = action.CooldownSeconds
+	return next
+}
+
+func ruleMatchDetail(rule Rule) string {
+	if len(rule.Conditions) == 0 {
+		return fmt.Sprintf("packet=%s part=%s operator=%s value=%s", rule.Packet, rule.Part, rule.Operator, rule.Value)
+	}
+	parts := make([]string, 0, len(rule.Conditions))
+	for _, condition := range rule.Conditions {
+		parts = append(parts, fmt.Sprintf("packet=%s part=%s operator=%s value=%s", firstNonEmptyString(condition.Packet, rule.Packet), firstNonEmptyString(condition.Part, rule.Part), firstNonEmptyString(condition.Operator, rule.Operator), condition.Value))
+	}
+	return "conditions(" + strings.Join(parts, "; ") + ")"
 }
 
 func selectPart(packet string, rule Rule) string {
 	part := strings.TrimSpace(rule.Part)
 	switch part {
+	case "path", "request_path":
+		return requestPathFromPacket(packet)
 	case "status", "status_code", "http_status":
 		if code := statusFromPacket(packet, 0); code > 0 {
 			return strconv.Itoa(code)
@@ -107,6 +219,10 @@ func matchValue(actual string, rule Rule) bool {
 		return strings.HasSuffix(actual, expected)
 	case "not_contains":
 		return !strings.Contains(actual, expected)
+	case "exists":
+		return strings.TrimSpace(actual) != ""
+	case "not_exists":
+		return strings.TrimSpace(actual) == ""
 	case "wildcard":
 		return wildcardMatch(actual, expected)
 	case "not_wildcard":
@@ -171,6 +287,8 @@ func wildcardMatch(actual, pattern string) bool {
 func replacePart(packet string, rule Rule) string {
 	part := strings.TrimSpace(rule.Part)
 	switch part {
+	case "path", "request_path":
+		return replaceRequestPath(packet, rule.Value, expandReplacement(rule.Replacement, rule.Value))
 	case "header", "headers":
 		if rule.Header == "" {
 			return replaceLimited(packet, rule.Value, expandReplacement(rule.Replacement, rule.Value), rule.ReplaceLimit)
@@ -184,6 +302,9 @@ func replacePart(packet string, rule Rule) string {
 		body := packetBody(packet)
 		original := gjson.Get(body, rule.JSONPath).String()
 		replacement := expandReplacement(rule.Replacement, original)
+		if strings.TrimSpace(rule.Action) == "append" {
+			replacement = original + replacement
+		}
 		var updated string
 		var err error
 		if json.Valid([]byte(replacement)) {
@@ -200,6 +321,33 @@ func replacePart(packet string, rule Rule) string {
 	default:
 		return replaceLimited(packet, rule.Value, expandReplacement(rule.Replacement, rule.Value), rule.ReplaceLimit)
 	}
+}
+
+func requestPathFromPacket(packet string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(packet), "\n")
+	parts := strings.Fields(line)
+	if len(parts) >= 2 && !strings.HasPrefix(parts[0], "HTTP/") {
+		return parts[1]
+	}
+	return ""
+}
+
+func replaceRequestPath(packet, old, replacement string) string {
+	line, rest, ok := strings.Cut(strings.TrimSpace(packet), "\n")
+	parts := strings.Fields(line)
+	if len(parts) < 3 || strings.HasPrefix(parts[0], "HTTP/") {
+		return packet
+	}
+	if strings.TrimSpace(old) == "" || parts[1] == old {
+		parts[1] = replacement
+	} else {
+		parts[1] = strings.ReplaceAll(parts[1], old, replacement)
+	}
+	nextLine := strings.Join(parts, " ")
+	if ok {
+		return nextLine + "\n" + rest
+	}
+	return nextLine
 }
 
 func expandReplacement(replacement, original string) string {

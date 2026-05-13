@@ -42,6 +42,7 @@ export interface PacketRule {
   enabled: boolean;
   record_history?: boolean;
   priority: number;
+  match_logic?: string;
   provider?: string;
   provider_keyword?: string;
   model?: string;
@@ -59,8 +60,33 @@ export interface PacketRule {
   cooldown_seconds?: number;
   target?: string;
   notes?: string;
+  conditions?: PacketRuleCondition[];
+  actions?: PacketRuleAction[];
   created_at?: string;
   updated_at?: string;
+}
+
+export interface PacketRuleCondition {
+  packet?: string;
+  part?: string;
+  json_path?: string;
+  header?: string;
+  operator?: string;
+  value?: string;
+  value_number?: number;
+}
+
+export interface PacketRuleAction {
+  type: string;
+  packet?: string;
+  part?: string;
+  json_path?: string;
+  header?: string;
+  value?: string;
+  replacement?: string;
+  replace_limit?: number;
+  target?: string;
+  cooldown_seconds?: number;
 }
 
 export interface PacketTrigger {

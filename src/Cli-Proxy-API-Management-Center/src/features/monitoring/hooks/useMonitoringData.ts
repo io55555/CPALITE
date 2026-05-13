@@ -323,6 +323,7 @@ export type MonitoringEventRow = {
   channel: string;
   channelHost: string;
   channelDisabled: boolean;
+  thinkingEffort: string;
   clientUA: string;
   upstreamUA: string;
   failed: boolean;
@@ -1408,6 +1409,7 @@ const buildEventRows = (
         channel: channelLabel,
         channelHost: channelMeta?.host || '-',
         channelDisabled: channelMeta?.disabled || false,
+        thinkingEffort: readString(detail.thinking_effort) || readString(detail.thinking?.intensity) || readString(detail.thinking?.level) || '-',
         clientUA: readString(detail.client_ua) || '-',
         upstreamUA: readString(detail.upstream_ua) || '-',
         failed: detail.failed === true,

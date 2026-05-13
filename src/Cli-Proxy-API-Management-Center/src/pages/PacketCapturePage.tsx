@@ -10,6 +10,8 @@ import {
   type PacketRecord,
   type PacketRecordSummary,
   type PacketRule,
+  type PacketRuleAction,
+  type PacketRuleCondition,
   type PacketTrigger,
 } from '@/services/api/packetCapture';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -27,6 +29,7 @@ const packetOptions = [
 
 const partOptions = [
   { value: 'status', label: '响应码' },
+  { value: 'path', label: '请求路径' },
   { value: 'body', label: 'Body字符串' },
   { value: 'body_json', label: 'Body JSON路径' },
   { value: 'header', label: 'HTTP头' },
@@ -109,6 +112,13 @@ const defaultRule: PacketRule = {
   replace_limit: 0,
   cooldown_seconds: 300,
   target: 'user_token',
+  match_logic: 'all',
+  conditions: [
+    { packet: 'client_request', part: 'body', operator: 'contains', value: '' },
+  ],
+  actions: [
+    { type: 'record', packet: 'client_request', part: 'body' },
+  ],
 };
 
 interface RuleTemplate {
@@ -137,6 +147,28 @@ const ruleTemplates: RuleTemplate[] = [
     value: 'upstream-status-429-cooldown',
     label: '上游响应码429冷却API Key',
     rule: { name: '[运营商到CPA]响应码429冷却API Key 300s', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 429, action: 'cooldown', target: 'api_key', cooldown_seconds: 300 },
+  },
+  {
+    value: 'upstream-status-and-body-disable',
+    label: '上游响应码+Body组合禁用Key',
+    rule: {
+      name: '[运营商到CPA]401且Body含invalid禁用API Key',
+      packet: 'upstream_response',
+      part: 'status',
+      operator: 'num_eq',
+      value_number: 401,
+      action: 'disable',
+      target: 'api_key',
+      match_logic: 'all',
+      conditions: [
+        { packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 401 },
+        { packet: 'upstream_response', part: 'body', operator: 'contains', value: 'invalid' },
+      ],
+      actions: [
+        { type: 'disable', packet: 'upstream_response', target: 'api_key' },
+      ],
+      notes: '先用响应码缩小范围，再检查Body内容，适合状态码+错误码的组合判定。',
+    },
   },
   {
     value: 'upstream-status-500-clean',
@@ -349,6 +381,29 @@ function SuggestInput({ value, options, onChange, placeholder }: SuggestInputPro
   );
 }
 
+const defaultCondition = (packet = 'client_request'): PacketRuleCondition => ({
+  packet,
+  part: 'body',
+  operator: 'contains',
+  value: '',
+});
+
+const defaultAction = (packet = 'client_request'): PacketRuleAction => ({
+  type: 'record',
+  packet,
+  part: 'body',
+});
+
+const compactRuleSummary = (rule: PacketRule) => {
+  const conditions = rule.conditions?.length
+    ? `${rule.match_logic === 'any' ? '任一' : '全部'}条件 ${rule.conditions.length} 个`
+    : `${rule.packet} · ${rule.part} · ${rule.operator}`;
+  const actions = rule.actions?.length
+    ? `动作 ${rule.actions.map((item) => item.type).join(', ')}`
+    : rule.action;
+  return `${conditions} · ${actions}`;
+};
+
 export function PacketCapturePage() {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const config = useConfigStore((state) => state.config);
@@ -483,7 +538,23 @@ export function PacketCapturePage() {
 
   const saveRule = async () => {
     if (!editingRule) return;
-    await packetCaptureApi.saveRule(editingRule);
+    const firstCondition = editingRule.conditions?.[0];
+    const firstAction = editingRule.actions?.[0];
+    await packetCaptureApi.saveRule({
+      ...editingRule,
+      packet: firstCondition?.packet || editingRule.packet || 'client_request',
+      part: firstCondition?.part || editingRule.part || 'body',
+      json_path: firstCondition?.json_path ?? editingRule.json_path,
+      header: firstCondition?.header ?? editingRule.header,
+      operator: firstCondition?.operator || editingRule.operator || 'contains',
+      value: firstCondition?.value ?? editingRule.value,
+      value_number: firstCondition?.value_number ?? editingRule.value_number,
+      action: firstAction?.type || editingRule.action || 'record',
+      replacement: firstAction?.replacement ?? editingRule.replacement,
+      replace_limit: firstAction?.replace_limit ?? editingRule.replace_limit,
+      cooldown_seconds: firstAction?.cooldown_seconds ?? editingRule.cooldown_seconds,
+      target: firstAction?.target ?? editingRule.target,
+    });
     setEditingRule(null);
     await load();
   };
@@ -532,6 +603,20 @@ export function PacketCapturePage() {
     await load();
   };
 
+  const updateCondition = (index: number, patch: Partial<PacketRuleCondition>) => {
+    if (!editingRule) return;
+    const conditions = [...(editingRule.conditions?.length ? editingRule.conditions : [defaultCondition(editingRule.packet)])];
+    conditions[index] = { ...conditions[index], ...patch };
+    setEditingRule({ ...editingRule, conditions });
+  };
+
+  const updateAction = (index: number, patch: Partial<PacketRuleAction>) => {
+    if (!editingRule) return;
+    const actions = [...(editingRule.actions?.length ? editingRule.actions : [defaultAction(editingRule.packet)])];
+    actions[index] = { ...actions[index], ...patch };
+    setEditingRule({ ...editingRule, actions });
+  };
+
   const showTriggerDetail = async (item: PacketTrigger) => {
     setTriggerDetailError('');
     setTriggerDetail(null);
@@ -558,6 +643,31 @@ export function PacketCapturePage() {
     setEditingRule({
       ...editingRule,
       ...template.rule,
+      conditions: template.rule.conditions || [
+        {
+          packet: template.rule.packet || editingRule.packet,
+          part: template.rule.part || editingRule.part,
+          json_path: template.rule.json_path,
+          header: template.rule.header,
+          operator: template.rule.operator || editingRule.operator,
+          value: template.rule.value,
+          value_number: template.rule.value_number,
+        },
+      ],
+      actions: template.rule.actions || [
+        {
+          type: template.rule.action || editingRule.action,
+          packet: template.rule.packet || editingRule.packet,
+          part: template.rule.part || editingRule.part,
+          json_path: template.rule.json_path,
+          header: template.rule.header,
+          value: template.rule.value,
+          replacement: template.rule.replacement,
+          replace_limit: template.rule.replace_limit,
+          target: template.rule.target,
+          cooldown_seconds: template.rule.cooldown_seconds,
+        },
+      ],
       enabled: editingRule.enabled,
       record_history: editingRule.record_history ?? true,
       priority: editingRule.priority,
@@ -724,7 +834,7 @@ export function PacketCapturePage() {
             <div className={styles.ruleItem} key={rule.id}>
               <div>
                 <div className={styles.ruleName}>{rule.name}</div>
-                <span>{rule.record_history ?? true ? '记录触发历史' : '不记录触发历史'} · {rule.packet} · {rule.part} · {rule.operator} · {rule.action}</span>
+                <span>{rule.record_history ?? true ? '记录触发历史' : '不记录触发历史'} · {compactRuleSummary(rule)}</span>
               </div>
               <div className={styles.actions}>
                 <label className={styles.switch} title={rule.enabled ? '停用规则' : '启用规则'}>
@@ -832,6 +942,49 @@ export function PacketCapturePage() {
             <label>渠道包含<Input value={editingRule.provider_keyword || ''} onChange={(event) => setEditingRule({ ...editingRule, provider_keyword: event.target.value })} /></label>
             <label>指定模型<SuggestInput value={editingRule.model || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model: value })} /></label>
             <label>模型包含<SuggestInput value={editingRule.model_keyword || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model_keyword: value })} /></label>
+            <label>匹配逻辑<Select value={editingRule.match_logic || 'all'} options={[{ value: 'all', label: '全部条件都满足' }, { value: 'any', label: '任一条件满足' }]} onChange={(value) => setEditingRule({ ...editingRule, match_logic: value })} ariaLabel="匹配逻辑" /></label>
+            <div className={styles.full}>
+              <div className={styles.ruleSectionHeader}>
+                <strong>匹配条件</strong>
+                <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, conditions: [...(editingRule.conditions || []), defaultCondition(editingRule.packet)] })}>添加条件</Button>
+              </div>
+              <div className={styles.ruleSubGrid}>
+                {(editingRule.conditions?.length ? editingRule.conditions : [defaultCondition(editingRule.packet)]).map((condition, index) => (
+                  <div className={styles.ruleSubItem} key={`condition-${index}`}>
+                    <Select value={condition.packet || editingRule.packet} options={packetOptions} onChange={(value) => updateCondition(index, { packet: value })} ariaLabel="数据包" />
+                    <Select value={condition.part || 'body'} options={partOptions} onChange={(value) => updateCondition(index, { part: value })} ariaLabel="位置" />
+                    <SuggestInput value={condition.header || ''} options={headerOptions} onChange={(value) => updateCondition(index, { header: value })} placeholder="Header" />
+                    <Input value={condition.json_path || ''} onChange={(event) => updateCondition(index, { json_path: event.target.value })} placeholder="JSON路径" />
+                    <Select value={condition.operator || 'contains'} options={operatorOptions} onChange={(value) => updateCondition(index, { operator: value })} ariaLabel="判断" />
+                    <Input value={condition.value || ''} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="匹配值" />
+                    <Input value={String(condition.value_number || 0)} onChange={(event) => updateCondition(index, { value_number: Number(event.target.value) || 0 })} placeholder="数值" />
+                    <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, conditions: (editingRule.conditions || []).filter((_, i) => i !== index) })}>删除</Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className={styles.full}>
+              <div className={styles.ruleSectionHeader}>
+                <strong>执行动作</strong>
+                <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, actions: [...(editingRule.actions || []), defaultAction(editingRule.packet)] })}>添加动作</Button>
+              </div>
+              <div className={styles.ruleSubGrid}>
+                {(editingRule.actions?.length ? editingRule.actions : [defaultAction(editingRule.packet)]).map((action, index) => (
+                  <div className={styles.ruleSubItem} key={`action-${index}`}>
+                    <Select value={action.type || 'record'} options={actionOptions.map(({ value, label }) => ({ value, label }))} onChange={(value) => updateAction(index, { type: value })} ariaLabel="动作" />
+                    <Select value={action.packet || editingRule.packet} options={packetOptions} onChange={(value) => updateAction(index, { packet: value })} ariaLabel="数据包" />
+                    <Select value={action.part || 'body'} options={partOptions} onChange={(value) => updateAction(index, { part: value })} ariaLabel="位置" />
+                    <SuggestInput value={action.header || ''} options={headerOptions} onChange={(value) => updateAction(index, { header: value })} placeholder="Header" />
+                    <Input value={action.json_path || ''} onChange={(event) => updateAction(index, { json_path: event.target.value })} placeholder="JSON路径" />
+                    <SuggestInput value={action.replacement || ''} options={replacementOptions} onChange={(value) => updateAction(index, { replacement: value })} placeholder="替换/追加内容" />
+                    <Input value={String(action.replace_limit || 0)} onChange={(event) => updateAction(index, { replace_limit: Number(event.target.value) || 0 })} placeholder="次数" />
+                    <SuggestInput value={action.target || ''} options={targetOptions} onChange={(value) => updateAction(index, { target: value })} placeholder="目标" />
+                    <Input value={String(action.cooldown_seconds || 0)} onChange={(event) => updateAction(index, { cooldown_seconds: parseCooldownSeconds(event.target.value) })} placeholder="冷却" />
+                    <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, actions: (editingRule.actions || []).filter((_, i) => i !== index) })}>删除</Button>
+                  </div>
+                ))}
+              </div>
+            </div>
             <label>检查数据包<Select value={editingRule.packet} options={packetOptions} onChange={(value) => setEditingRule({ ...editingRule, packet: value })} ariaLabel="检查数据包" /></label>
             <label>检查位置<Select value={editingRule.part} options={partOptions} onChange={(value) => setEditingRule({ ...editingRule, part: value })} ariaLabel="检查位置" /></label>
             <label>Header名<SuggestInput value={editingRule.header || ''} options={headerOptions} onChange={(value) => setEditingRule({ ...editingRule, header: value })} /></label>

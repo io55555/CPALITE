@@ -215,6 +215,56 @@ func TestApplyRulesMatchesHTTPStatusWithoutScanningWholePacket(t *testing.T) {
 	}
 }
 
+func TestApplyRulesMatchesStatusAndBodyConditions(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	defaultMu.Lock()
+	previous := defaultService
+	defaultService = &Service{store: store}
+	defaultMu.Unlock()
+	defer func() {
+		defaultMu.Lock()
+		defaultService = previous
+		defaultMu.Unlock()
+	}()
+
+	rule := Rule{
+		Name:          "status and body",
+		Enabled:       true,
+		RecordHistory: true,
+		Packet:        "upstream_response",
+		MatchLogic:    "all",
+		Conditions: []Condition{
+			{Packet: "upstream_response", Part: "status", Operator: "num_eq", ValueNumber: 401},
+			{Packet: "upstream_response", Part: "body", Operator: "contains", Value: "invalid_api_key"},
+		},
+		Actions: []Action{
+			{Type: "disable", Packet: "upstream_response", Target: "api_key"},
+		},
+	}
+	previousProvider := defaultRulesProvider
+	SetDefaultRulesProvider(func(context.Context) ([]Rule, error) { return []Rule{rule}, nil })
+	defer SetDefaultRulesProvider(previousProvider)
+
+	missPacket := "HTTP/2 401 Unauthorized\nContent-Type: application/json\n\n{\"error\":{\"code\":\"other\"}}"
+	_, blockErr, triggers := ApplyRules(context.Background(), Record{Provider: "groq"}, "upstream_response", missPacket)
+	if blockErr != nil || len(triggers) != 0 {
+		t.Fatalf("unexpected match for body miss: block=%v triggers=%d", blockErr, len(triggers))
+	}
+
+	hitPacket := "HTTP/2 401 Unauthorized\nContent-Type: application/json\n\n{\"error\":{\"code\":\"invalid_api_key\"}}"
+	_, blockErr, triggers = ApplyRules(context.Background(), Record{Provider: "groq"}, "upstream_response", hitPacket)
+	if blockErr != nil {
+		t.Fatalf("ApplyRules block: %v", blockErr)
+	}
+	if len(triggers) != 1 || triggers[0].Action != "disable" || triggers[0].Target != "api_key" {
+		t.Fatalf("triggers = %+v, want disable api_key", triggers)
+	}
+}
+
 func TestApplyRulesReturnClean500(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
 	if err != nil {

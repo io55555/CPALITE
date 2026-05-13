@@ -474,28 +474,35 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 		if !matched {
 			continue
 		}
-		trigger := TriggerRecord{
-			ID:              uuid.NewString(),
-			RuleID:          rule.ID,
-			RuleName:        rule.Name,
-			RecordID:        meta.ID,
-			Timestamp:       nowUTC(),
-			Action:          rule.Action,
-			Target:          rule.Target,
-			Detail:          detail,
-			CooldownSeconds: rule.CooldownSeconds,
-		}
-		if rule.RecordHistory {
+		for _, action := range ruleActions(rule) {
+			if action.Packet != "" && normalizePacketName(action.Packet) != normalizePacketName(rule.Packet) {
+				continue
+			}
+			actionRule := ruleForAction(rule, action)
+			trigger := TriggerRecord{
+				ID:              uuid.NewString(),
+				RuleID:          rule.ID,
+				RuleName:        rule.Name,
+				RecordID:        meta.ID,
+				Timestamp:       nowUTC(),
+				Action:          actionRule.Action,
+				Target:          actionRule.Target,
+				Detail:          detail,
+				CooldownSeconds: actionRule.CooldownSeconds,
+			}
 			triggers = append(triggers, trigger)
-			_ = store.InsertTrigger(context.Background(), trigger)
+			if rule.RecordHistory {
+				_ = store.InsertTrigger(context.Background(), trigger)
+			}
+			switch strings.TrimSpace(actionRule.Action) {
+			case "block":
+				return current, &httpError{status: http.StatusForbidden, message: "请求被抓包/过滤规则拦截: " + rule.Name}, triggers
+			case "return_clean_400", "return_clean_401", "return_clean_429", "return_clean_500":
+				status := CleanReturnStatus(actionRule.Action)
+				return current, &httpError{status: status, message: CleanReturnBody(status)}, triggers
+			}
 		}
-		switch strings.TrimSpace(rule.Action) {
-		case "block":
-			return current, &httpError{status: http.StatusForbidden, message: "请求被抓包/过滤规则拦截: " + rule.Name}, triggers
-		case "return_clean_400", "return_clean_401", "return_clean_429", "return_clean_500":
-			status := CleanReturnStatus(rule.Action)
-			return current, &httpError{status: status, message: CleanReturnBody(status)}, triggers
-		case "replace", "delete", "redact":
+		if next != current {
 			current = next
 		}
 	}

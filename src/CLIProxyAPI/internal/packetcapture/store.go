@@ -146,12 +146,17 @@ func (s *Store) initSchema(ctx context.Context) error {
 	timestamp TEXT NOT NULL,
 	action TEXT NOT NULL,
 	target TEXT NOT NULL DEFAULT '',
-	detail TEXT NOT NULL DEFAULT ''
+	detail TEXT NOT NULL DEFAULT '',
+	cooldown_seconds INTEGER NOT NULL DEFAULT 0
 )`,
+		`ALTER TABLE trigger_records ADD COLUMN cooldown_seconds INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS idx_trigger_records_timestamp ON trigger_records(timestamp)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				continue
+			}
 			return fmt.Errorf("packet capture init schema: %w", err)
 		}
 	}
@@ -540,7 +545,7 @@ func (s *Store) InsertTrigger(ctx context.Context, trigger TriggerRecord) error 
 	if trigger.Timestamp.IsZero() {
 		trigger.Timestamp = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO trigger_records(id,rule_id,rule_name,record_id,timestamp,action,target,detail) VALUES(?,?,?,?,?,?,?,?)`, trigger.ID, trigger.RuleID, trigger.RuleName, trigger.RecordID, trigger.Timestamp.Format(timestampLayout), trigger.Action, trigger.Target, trigger.Detail)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO trigger_records(id,rule_id,rule_name,record_id,timestamp,action,target,detail,cooldown_seconds) VALUES(?,?,?,?,?,?,?,?,?)`, trigger.ID, trigger.RuleID, trigger.RuleName, trigger.RecordID, trigger.Timestamp.Format(timestampLayout), trigger.Action, trigger.Target, trigger.Detail, trigger.CooldownSeconds)
 	return err
 }
 
@@ -551,7 +556,7 @@ func (s *Store) ListTriggers(ctx context.Context, limit int) ([]TriggerRecord, e
 	if limit > maxLimit {
 		limit = maxLimit
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,rule_id,rule_name,record_id,timestamp,action,target,detail FROM trigger_records ORDER BY timestamp DESC, id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,rule_id,rule_name,record_id,timestamp,action,target,detail,cooldown_seconds FROM trigger_records ORDER BY timestamp DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +565,7 @@ func (s *Store) ListTriggers(ctx context.Context, limit int) ([]TriggerRecord, e
 	for rows.Next() {
 		var item TriggerRecord
 		var ts string
-		if err := rows.Scan(&item.ID, &item.RuleID, &item.RuleName, &item.RecordID, &ts, &item.Action, &item.Target, &item.Detail); err != nil {
+		if err := rows.Scan(&item.ID, &item.RuleID, &item.RuleName, &item.RecordID, &ts, &item.Action, &item.Target, &item.Detail, &item.CooldownSeconds); err != nil {
 			return nil, err
 		}
 		item.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)

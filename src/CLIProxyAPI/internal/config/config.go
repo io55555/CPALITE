@@ -176,30 +176,56 @@ func (c PacketCaptureConfig) CLIDetailedLogEnabled() bool {
 }
 
 type PacketFilterRule struct {
-	ID              string    `yaml:"id,omitempty" json:"id"`
-	Name            string    `yaml:"name" json:"name"`
-	Enabled         bool      `yaml:"enabled" json:"enabled"`
-	RecordHistory   bool      `yaml:"record-history" json:"record_history"`
-	Priority        int       `yaml:"priority" json:"priority"`
-	Provider        string    `yaml:"provider,omitempty" json:"provider,omitempty"`
-	ProviderKeyword string    `yaml:"provider-keyword,omitempty" json:"provider_keyword,omitempty"`
-	Model           string    `yaml:"model,omitempty" json:"model,omitempty"`
-	ModelKeyword    string    `yaml:"model-keyword,omitempty" json:"model_keyword,omitempty"`
-	Packet          string    `yaml:"packet" json:"packet"`
-	Part            string    `yaml:"part" json:"part"`
-	JSONPath        string    `yaml:"json-path,omitempty" json:"json_path,omitempty"`
-	Header          string    `yaml:"header,omitempty" json:"header,omitempty"`
-	Operator        string    `yaml:"operator" json:"operator"`
-	Value           string    `yaml:"value,omitempty" json:"value,omitempty"`
-	ValueNumber     float64   `yaml:"value-number,omitempty" json:"value_number,omitempty"`
-	Action          string    `yaml:"action" json:"action"`
-	Replacement     string    `yaml:"replacement,omitempty" json:"replacement,omitempty"`
-	ReplaceLimit    int       `yaml:"replace-limit,omitempty" json:"replace_limit,omitempty"`
-	CooldownSeconds int       `yaml:"cooldown-seconds,omitempty" json:"cooldown_seconds,omitempty"`
-	Target          string    `yaml:"target,omitempty" json:"target,omitempty"`
-	Notes           string    `yaml:"notes,omitempty" json:"notes,omitempty"`
-	CreatedAt       time.Time `yaml:"created-at,omitempty" json:"created_at"`
-	UpdatedAt       time.Time `yaml:"updated-at,omitempty" json:"updated_at"`
+	ID              string                  `yaml:"id,omitempty" json:"id"`
+	Name            string                  `yaml:"name" json:"name"`
+	Enabled         bool                    `yaml:"enabled" json:"enabled"`
+	RecordHistory   bool                    `yaml:"record-history" json:"record_history"`
+	Priority        int                     `yaml:"priority" json:"priority"`
+	MatchLogic      string                  `yaml:"match-logic,omitempty" json:"match_logic,omitempty"`
+	Provider        string                  `yaml:"provider,omitempty" json:"provider,omitempty"`
+	ProviderKeyword string                  `yaml:"provider-keyword,omitempty" json:"provider_keyword,omitempty"`
+	Model           string                  `yaml:"model,omitempty" json:"model,omitempty"`
+	ModelKeyword    string                  `yaml:"model-keyword,omitempty" json:"model_keyword,omitempty"`
+	Packet          string                  `yaml:"packet" json:"packet"`
+	Part            string                  `yaml:"part" json:"part"`
+	JSONPath        string                  `yaml:"json-path,omitempty" json:"json_path,omitempty"`
+	Header          string                  `yaml:"header,omitempty" json:"header,omitempty"`
+	Operator        string                  `yaml:"operator" json:"operator"`
+	Value           string                  `yaml:"value,omitempty" json:"value,omitempty"`
+	ValueNumber     float64                 `yaml:"value-number,omitempty" json:"value_number,omitempty"`
+	Action          string                  `yaml:"action" json:"action"`
+	Replacement     string                  `yaml:"replacement,omitempty" json:"replacement,omitempty"`
+	ReplaceLimit    int                     `yaml:"replace-limit,omitempty" json:"replace_limit,omitempty"`
+	CooldownSeconds int                     `yaml:"cooldown-seconds,omitempty" json:"cooldown_seconds,omitempty"`
+	Target          string                  `yaml:"target,omitempty" json:"target,omitempty"`
+	Notes           string                  `yaml:"notes,omitempty" json:"notes,omitempty"`
+	Conditions      []PacketFilterCondition `yaml:"conditions,omitempty" json:"conditions,omitempty"`
+	Actions         []PacketFilterAction    `yaml:"actions,omitempty" json:"actions,omitempty"`
+	CreatedAt       time.Time               `yaml:"created-at,omitempty" json:"created_at"`
+	UpdatedAt       time.Time               `yaml:"updated-at,omitempty" json:"updated_at"`
+}
+
+type PacketFilterCondition struct {
+	Packet      string  `yaml:"packet,omitempty" json:"packet,omitempty"`
+	Part        string  `yaml:"part,omitempty" json:"part,omitempty"`
+	JSONPath    string  `yaml:"json-path,omitempty" json:"json_path,omitempty"`
+	Header      string  `yaml:"header,omitempty" json:"header,omitempty"`
+	Operator    string  `yaml:"operator,omitempty" json:"operator,omitempty"`
+	Value       string  `yaml:"value,omitempty" json:"value,omitempty"`
+	ValueNumber float64 `yaml:"value-number,omitempty" json:"value_number,omitempty"`
+}
+
+type PacketFilterAction struct {
+	Type            string `yaml:"type" json:"type"`
+	Packet          string `yaml:"packet,omitempty" json:"packet,omitempty"`
+	Part            string `yaml:"part,omitempty" json:"part,omitempty"`
+	JSONPath        string `yaml:"json-path,omitempty" json:"json_path,omitempty"`
+	Header          string `yaml:"header,omitempty" json:"header,omitempty"`
+	Value           string `yaml:"value,omitempty" json:"value,omitempty"`
+	Replacement     string `yaml:"replacement,omitempty" json:"replacement,omitempty"`
+	ReplaceLimit    int    `yaml:"replace-limit,omitempty" json:"replace_limit,omitempty"`
+	Target          string `yaml:"target,omitempty" json:"target,omitempty"`
+	CooldownSeconds int    `yaml:"cooldown-seconds,omitempty" json:"cooldown_seconds,omitempty"`
 }
 
 // ClaudeHeaderDefaults configures default header values injected into Claude API requests.

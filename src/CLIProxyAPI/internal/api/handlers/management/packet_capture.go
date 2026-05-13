@@ -392,6 +392,7 @@ func configRulesToPacketRules(in []config.PacketFilterRule) []packetcapture.Rule
 			Enabled:         rule.Enabled,
 			RecordHistory:   rule.RecordHistory,
 			Priority:        rule.Priority,
+			MatchLogic:      rule.MatchLogic,
 			Provider:        rule.Provider,
 			ProviderKeyword: rule.ProviderKeyword,
 			Model:           rule.Model,
@@ -409,6 +410,8 @@ func configRulesToPacketRules(in []config.PacketFilterRule) []packetcapture.Rule
 			CooldownSeconds: rule.CooldownSeconds,
 			Target:          rule.Target,
 			Notes:           rule.Notes,
+			Conditions:      configPacketConditionsToRuntime(rule.Conditions),
+			Actions:         configPacketActionsToRuntime(rule.Actions),
 			CreatedAt:       rule.CreatedAt,
 			UpdatedAt:       rule.UpdatedAt,
 		})
@@ -425,6 +428,7 @@ func packetRulesToConfigRules(in []packetcapture.Rule) []config.PacketFilterRule
 			Enabled:         rule.Enabled,
 			RecordHistory:   rule.RecordHistory,
 			Priority:        rule.Priority,
+			MatchLogic:      rule.MatchLogic,
 			Provider:        rule.Provider,
 			ProviderKeyword: rule.ProviderKeyword,
 			Model:           rule.Model,
@@ -442,9 +446,43 @@ func packetRulesToConfigRules(in []packetcapture.Rule) []config.PacketFilterRule
 			CooldownSeconds: rule.CooldownSeconds,
 			Target:          rule.Target,
 			Notes:           rule.Notes,
+			Conditions:      runtimePacketConditionsToConfig(rule.Conditions),
+			Actions:         runtimePacketActionsToConfig(rule.Actions),
 			CreatedAt:       rule.CreatedAt,
 			UpdatedAt:       rule.UpdatedAt,
 		})
+	}
+	return out
+}
+
+func configPacketConditionsToRuntime(in []config.PacketFilterCondition) []packetcapture.Condition {
+	out := make([]packetcapture.Condition, 0, len(in))
+	for _, item := range in {
+		out = append(out, packetcapture.Condition{Packet: item.Packet, Part: item.Part, JSONPath: item.JSONPath, Header: item.Header, Operator: item.Operator, Value: item.Value, ValueNumber: item.ValueNumber})
+	}
+	return out
+}
+
+func configPacketActionsToRuntime(in []config.PacketFilterAction) []packetcapture.Action {
+	out := make([]packetcapture.Action, 0, len(in))
+	for _, item := range in {
+		out = append(out, packetcapture.Action{Type: item.Type, Packet: item.Packet, Part: item.Part, JSONPath: item.JSONPath, Header: item.Header, Value: item.Value, Replacement: item.Replacement, ReplaceLimit: item.ReplaceLimit, Target: item.Target, CooldownSeconds: item.CooldownSeconds})
+	}
+	return out
+}
+
+func runtimePacketConditionsToConfig(in []packetcapture.Condition) []config.PacketFilterCondition {
+	out := make([]config.PacketFilterCondition, 0, len(in))
+	for _, item := range in {
+		out = append(out, config.PacketFilterCondition{Packet: item.Packet, Part: item.Part, JSONPath: item.JSONPath, Header: item.Header, Operator: item.Operator, Value: item.Value, ValueNumber: item.ValueNumber})
+	}
+	return out
+}
+
+func runtimePacketActionsToConfig(in []packetcapture.Action) []config.PacketFilterAction {
+	out := make([]config.PacketFilterAction, 0, len(in))
+	for _, item := range in {
+		out = append(out, config.PacketFilterAction{Type: item.Type, Packet: item.Packet, Part: item.Part, JSONPath: item.JSONPath, Header: item.Header, Value: item.Value, Replacement: item.Replacement, ReplaceLimit: item.ReplaceLimit, Target: item.Target, CooldownSeconds: item.CooldownSeconds})
 	}
 	return out
 }

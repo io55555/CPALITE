@@ -16,6 +16,7 @@ import (
 	internallogging "github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 )
 
 const insertTimeout = 5 * time.Second
@@ -186,8 +187,9 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 	rawRequest := firstNonEmpty(record.RawRequest, contextString(ctx, "USAGE_RAW_REQUEST"), contextString(ctx, "API_REQUEST"))
 	rawResponse := firstNonEmpty(record.RawResponse, contextString(ctx, "USAGE_RAW_RESPONSE"), contextString(ctx, "API_RESPONSE"))
 	rawResponse = mergeClientResponsePacket(rawResponse, contextString(ctx, "USAGE_CLIENT_RESPONSE"))
-	clientUA := clientUserAgent(ctx)
+	clientUA := firstNonEmpty(clientUserAgent(ctx), clientUserAgentFromRawRequest(rawRequest), clientUserAgentFromRawRequest(record.RawRequest), clientUserAgentFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
 	upstreamUA := firstNonEmpty(recordUpstreamUserAgent(rawRequest), recordUpstreamUserAgent(record.RawRequest), recordUpstreamUserAgent(contextString(ctx, "USAGE_RAW_REQUEST")))
+	thinkingEffort := firstNonEmpty(thinkingEffortFromRawRequest(rawRequest), thinkingEffortFromRawRequest(record.RawRequest), thinkingEffortFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
 	if strings.TrimSpace(rawRequest) == "" {
 		rawRequest = buildFallbackRawRequest(ctx, record)
 	}
@@ -230,6 +232,7 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 		LatencyMs:          latencyMs,
 		FirstByteLatencyMs: 0,
 		GenerationMs:       latencyMs,
+		ThinkingEffort:     thinkingEffort,
 		Tokens: TokenStats{
 			InputTokens:     detail.InputTokens,
 			OutputTokens:    detail.OutputTokens,
@@ -258,6 +261,76 @@ func recordUpstreamUserAgent(rawRequest string) string {
 		packet = rawRequest
 	}
 	return headerValue(packet, "User-Agent")
+}
+
+func clientUserAgentFromRawRequest(rawRequest string) string {
+	packet := extractNamedSection(rawRequest, "客户端发给CPA的完整数据包")
+	if strings.TrimSpace(packet) == "" {
+		packet = rawRequest
+	}
+	return headerValue(packet, "User-Agent")
+}
+
+func thinkingEffortFromRawRequest(rawRequest string) string {
+	for _, title := range []string{"客户端发给CPA的完整数据包", "CPA发给供应商的完整数据包"} {
+		if effort := thinkingEffortFromPacket(extractNamedSection(rawRequest, title)); effort != "" {
+			return effort
+		}
+	}
+	return thinkingEffortFromPacket(rawRequest)
+}
+
+func thinkingEffortFromPacket(packet string) string {
+	body := strings.TrimSpace(packetBody(packet))
+	if body == "" || !json.Valid([]byte(body)) {
+		return ""
+	}
+	for _, path := range []string{
+		"reasoning_effort",
+		"reasoning.effort",
+		"output_config.effort",
+		"thinking.effort",
+		"thinking.level",
+		"thinkingLevel",
+		"generationConfig.thinkingConfig.thinkingLevel",
+		"request.generationConfig.thinkingConfig.thinkingLevel",
+	} {
+		value := gjson.Get(body, path)
+		if value.Exists() {
+			text := strings.TrimSpace(value.String())
+			if text != "" {
+				return text
+			}
+		}
+	}
+	for _, path := range []string{
+		"thinking_budget",
+		"thinking.budget",
+		"thinkingBudget",
+		"generationConfig.thinkingConfig.thinkingBudget",
+		"request.generationConfig.thinkingConfig.thinkingBudget",
+	} {
+		value := gjson.Get(body, path)
+		if value.Exists() {
+			text := strings.TrimSpace(value.String())
+			if text != "" {
+				return "budget:" + text
+			}
+		}
+	}
+	return ""
+}
+
+func packetBody(packet string) string {
+	_, body, ok := strings.Cut(packet, "\r\n\r\n")
+	if ok {
+		return body
+	}
+	_, body, ok = strings.Cut(packet, "\n\n")
+	if ok {
+		return body
+	}
+	return ""
 }
 
 func extractNamedSection(content, title string) string {
