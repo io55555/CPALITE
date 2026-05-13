@@ -323,6 +323,8 @@ export type MonitoringEventRow = {
   channel: string;
   channelHost: string;
   channelDisabled: boolean;
+  clientUA: string;
+  upstreamUA: string;
   failed: boolean;
   statsIncluded: boolean;
   latencyMs: number | null;
@@ -1406,6 +1408,8 @@ const buildEventRows = (
         channel: channelLabel,
         channelHost: channelMeta?.host || '-',
         channelDisabled: channelMeta?.disabled || false,
+        clientUA: readString(detail.client_ua) || '-',
+        upstreamUA: readString(detail.upstream_ua) || '-',
         failed: detail.failed === true,
         statsIncluded,
         latencyMs: typeof detail.latency_ms === 'number' ? detail.latency_ms : null,
@@ -1428,6 +1432,8 @@ const buildEventRows = (
           authIndex,
           channelLabel,
           channelMeta?.host,
+          detail.client_ua,
+          detail.upstream_ua,
           endpointPath,
           endpointMethod,
           authMeta?.provider,

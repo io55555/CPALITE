@@ -2422,6 +2422,7 @@ export function MonitoringCenterPage() {
               <tr>
                 <th>{t('monitoring.column_type')}</th>
                 <th>{t('monitoring.column_model')}</th>
+                <th>UA</th>
                 <th>{t('monitoring.recent_status')}</th>
                 <th>{t('monitoring.request_status')}</th>
                 <th>{t('monitoring.column_success_rate')}</th>
@@ -2457,6 +2458,12 @@ export function MonitoringCenterPage() {
                     <div className={styles.primaryCell}>
                       <span className={styles.monoCell}>{row.model}</span>
                       <small className={styles.monoCell}>{buildRealtimeMetaText(row)}</small>
+                    </div>
+                  </td>
+                  <td>
+                    <div className={styles.primaryCell} title={`客户UA: ${row.clientUA}\nCPA的UA: ${row.upstreamUA}`}>
+                      <span className={styles.monoCell}>{`客户UA: ${row.clientUA}`}</span>
+                      <small className={styles.monoCell}>{`CPA的UA: ${row.upstreamUA}`}</small>
                     </div>
                   </td>
                   <td>
@@ -2524,7 +2531,7 @@ export function MonitoringCenterPage() {
               ))}
               {realtimeLogRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>
+                  <td colSpan={12}>
                     <div className={styles.emptyTable}>
                       {hasSearchFilter ? t('monitoring.no_filtered_data') : t('monitoring.no_data')}
                     </div>

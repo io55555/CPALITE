@@ -70,6 +70,11 @@ func applyRuleToPacket(rule Rule, packet string) (string, bool, string) {
 func selectPart(packet string, rule Rule) string {
 	part := strings.TrimSpace(rule.Part)
 	switch part {
+	case "status", "status_code", "http_status":
+		if code := statusFromPacket(packet, 0); code > 0 {
+			return strconv.Itoa(code)
+		}
+		return ""
 	case "headers", "header":
 		if rule.Header != "" {
 			return headerValue(packet, rule.Header)

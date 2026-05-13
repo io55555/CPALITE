@@ -111,6 +111,8 @@ func (s *SQLiteStore) initSchema(ctx context.Context) error {
 	first_byte_latency_ms INTEGER NOT NULL DEFAULT 0 CHECK (first_byte_latency_ms >= 0),
 	generation_ms INTEGER NOT NULL DEFAULT 0 CHECK (generation_ms >= 0),
 	thinking_effort TEXT NOT NULL DEFAULT '',
+	client_ua_id INTEGER NOT NULL DEFAULT 0,
+	upstream_ua_id INTEGER NOT NULL DEFAULT 0,
 	raw_request TEXT NOT NULL DEFAULT '',
 	raw_response TEXT NOT NULL DEFAULT '',
 	failure_status_code INTEGER NOT NULL DEFAULT 0,
@@ -122,10 +124,16 @@ func (s *SQLiteStore) initSchema(ctx context.Context) error {
 	total_tokens INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens >= 0),
 	failed INTEGER NOT NULL DEFAULT 0 CHECK (failed IN (0, 1))
 )`,
+		`CREATE TABLE IF NOT EXISTS ua_strings (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	value TEXT NOT NULL UNIQUE
+)`,
 		`ALTER TABLE usage_records ADD COLUMN raw_request TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE usage_records ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE usage_records ADD COLUMN failure_status_code INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE usage_records ADD COLUMN failure_message TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_records ADD COLUMN client_ua_id INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_records ADD COLUMN upstream_ua_id INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_timestamp ON usage_records(timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_records_api_model ON usage_records(api_key, endpoint, provider, model)`,
 	}
@@ -205,9 +213,9 @@ func (s *SQLiteStore) flush(ctx context.Context) {
 INSERT INTO usage_records (
 	id, timestamp, api_key, provider, model, source, auth_index, auth_type, endpoint, request_id,
 	latency_ms, first_byte_latency_ms, generation_ms, thinking_effort,
-	raw_request, raw_response, failure_status_code, failure_message,
+	client_ua_id, upstream_ua_id, raw_request, raw_response, failure_status_code, failure_message,
 	input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `)
 	if err != nil {
 		_ = tx.Rollback()
@@ -215,7 +223,21 @@ INSERT INTO usage_records (
 		return
 	}
 	for _, record := range pending {
-		if err := execInsert(stmt, record); err != nil {
+		clientUAID, err := ensureUAString(ctx, tx, record.ClientUA)
+		if err != nil {
+			_ = stmt.Close()
+			_ = tx.Rollback()
+			s.restorePending(pending)
+			return
+		}
+		upstreamUAID, err := ensureUAString(ctx, tx, record.UpstreamUA)
+		if err != nil {
+			_ = stmt.Close()
+			_ = tx.Rollback()
+			s.restorePending(pending)
+			return
+		}
+		if err := execInsert(stmt, record, clientUAID, upstreamUAID); err != nil {
 			_ = stmt.Close()
 			_ = tx.Rollback()
 			s.restorePending(pending)
@@ -237,7 +259,22 @@ func (s *SQLiteStore) restorePending(records []Record) {
 	s.mu.Unlock()
 }
 
-func execInsert(stmt *sql.Stmt, record Record) error {
+func ensureUAString(ctx context.Context, tx *sql.Tx, value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO ua_strings(value) VALUES(?)`, value); err != nil {
+		return 0, fmt.Errorf("usage sqlite upsert ua: %w", err)
+	}
+	var id int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM ua_strings WHERE value=?`, value).Scan(&id); err != nil {
+		return 0, fmt.Errorf("usage sqlite select ua: %w", err)
+	}
+	return id, nil
+}
+
+func execInsert(stmt *sql.Stmt, record Record, clientUAID, upstreamUAID int64) error {
 	tokens := nonNegativeTokenStats(record.Tokens)
 	tokens.TotalTokens = normalizeTotalTokens(tokens)
 	_, err := stmt.ExecContext(context.Background(),
@@ -255,6 +292,8 @@ func execInsert(stmt *sql.Stmt, record Record) error {
 		nonNegative(record.FirstByteLatencyMs),
 		nonNegative(record.GenerationMs),
 		strings.TrimSpace(record.ThinkingEffort),
+		clientUAID,
+		upstreamUAID,
 		truncateUsageRaw(record.RawRequest),
 		truncateUsageRaw(record.RawResponse),
 		max(record.FailureStatusCode, 0),
@@ -280,33 +319,37 @@ func (s *SQLiteStore) Query(ctx context.Context, rng QueryRange) (APIUsage, erro
 	if limit <= 0 || limit > defaultQueryLimit {
 		limit = defaultQueryLimit
 	}
-	rawColumns := "raw_request, raw_response"
+	rawColumns := "ur.raw_request, ur.raw_response"
 	if !rng.IncludeRaw {
 		rawColumns = "'' AS raw_request, '' AS raw_response"
 	}
 	query := fmt.Sprintf(`
 SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response, failure_status_code, failure_message,
+       client_ua, upstream_ua,
        latency_ms, first_byte_latency_ms, generation_ms,
        input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
 FROM (
-SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, %s, failure_status_code, failure_message,
-       latency_ms, first_byte_latency_ms, generation_ms,
-       input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, failed
-FROM usage_records`, rawColumns)
+SELECT ur.id, ur.timestamp, ur.api_key, ur.endpoint, ur.request_id, ur.provider, ur.model, ur.source, ur.auth_index, ur.auth_type, ur.thinking_effort, %s, ur.failure_status_code, ur.failure_message,
+       COALESCE(cua.value, '') AS client_ua, COALESCE(uua.value, '') AS upstream_ua,
+       ur.latency_ms, ur.first_byte_latency_ms, ur.generation_ms,
+       ur.input_tokens, ur.output_tokens, ur.reasoning_tokens, ur.cached_tokens, ur.total_tokens, ur.failed
+FROM usage_records ur
+LEFT JOIN ua_strings cua ON cua.id = ur.client_ua_id
+LEFT JOIN ua_strings uua ON uua.id = ur.upstream_ua_id`, rawColumns)
 	args := make([]any, 0, 3)
 	where := make([]string, 0, 2)
 	if rng.Start != nil && !rng.Start.IsZero() {
-		where = append(where, "timestamp >= ?")
+		where = append(where, "ur.timestamp >= ?")
 		args = append(args, formatSQLiteTimestamp(*rng.Start))
 	}
 	if rng.End != nil && !rng.End.IsZero() {
-		where = append(where, "timestamp < ?")
+		where = append(where, "ur.timestamp < ?")
 		args = append(args, formatSQLiteTimestamp(*rng.End))
 	}
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
-	query += " ORDER BY timestamp DESC, id DESC LIMIT ?"
+	query += " ORDER BY ur.timestamp DESC, ur.id DESC LIMIT ?"
 	args = append(args, limit)
 	query += ") ORDER BY timestamp ASC, id ASC"
 
@@ -342,6 +385,8 @@ FROM usage_records`, rawColumns)
 			&detail.RawResponse,
 			&detail.FailureStatusCode,
 			&detail.FailureMessage,
+			&detail.ClientUA,
+			&detail.UpstreamUA,
 			&detail.LatencyMs,
 			&detail.FirstByteLatencyMs,
 			&detail.GenerationMs,
@@ -503,6 +548,8 @@ func addRecordToUsage(result APIUsage, record Record) {
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),
 		AuthType:           strings.TrimSpace(record.AuthType),
 		ThinkingEffort:     strings.TrimSpace(record.ThinkingEffort),
+		ClientUA:           strings.TrimSpace(record.ClientUA),
+		UpstreamUA:         strings.TrimSpace(record.UpstreamUA),
 		RawRequest:         truncateUsageRaw(record.RawRequest),
 		RawResponse:        truncateUsageRaw(record.RawResponse),
 		FailureStatusCode:  max(record.FailureStatusCode, 0),

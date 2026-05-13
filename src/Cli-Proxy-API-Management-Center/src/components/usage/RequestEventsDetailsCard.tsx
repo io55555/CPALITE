@@ -51,6 +51,8 @@ type RequestEventRow = {
   sourceType: string;
   authType: string;
   authIndex: string;
+  clientUA: string;
+  upstreamUA: string;
   failed: boolean;
   firstByteLatencyMs: number | null;
   generationMs: number | null;
@@ -665,6 +667,8 @@ export function RequestEventsDetailsCard({
         sourceType,
         authType: typeof detail.auth_type === 'string' && detail.auth_type.trim() ? detail.auth_type.trim() : '-',
         authIndex,
+        clientUA: typeof detail.client_ua === 'string' && detail.client_ua.trim() ? detail.client_ua.trim() : '-',
+        upstreamUA: typeof detail.upstream_ua === 'string' && detail.upstream_ua.trim() ? detail.upstream_ua.trim() : '-',
         failed: detail.failed === true,
         firstByteLatencyMs,
         generationMs,
@@ -877,6 +881,8 @@ export function RequestEventsDetailsCard({
       'model',
       'source',
       'source_raw',
+      'client_ua',
+      'upstream_ua',
       'result',
       ...(hasTimingData ? ['first_byte_latency_ms', 'generation_ms', 'tps'] : []),
       'thinking_effort',
@@ -894,6 +900,8 @@ export function RequestEventsDetailsCard({
         row.model,
         row.source,
         row.sourceRaw,
+        row.clientUA === '-' ? '' : row.clientUA,
+        row.upstreamUA === '-' ? '' : row.upstreamUA,
         row.failed ? 'failed' : 'success',
         ...(hasTimingData
           ? [
@@ -930,6 +938,8 @@ export function RequestEventsDetailsCard({
       model: row.model,
       source: row.source,
       source_raw: row.sourceRaw,
+      client_ua: row.clientUA === '-' ? '' : row.clientUA,
+      upstream_ua: row.upstreamUA === '-' ? '' : row.upstreamUA,
       failed: row.failed,
       ...(hasTimingData && row.firstByteLatencyMs !== null
         ? { first_byte_latency_ms: row.firstByteLatencyMs }
@@ -1365,6 +1375,7 @@ export function RequestEventsDetailsCard({
                 <col className={styles.requestEventsTimestampCol} />
                 <col className={styles.requestEventsModelCol} />
                 <col className={styles.requestEventsSourceCol} />
+                <col className={styles.requestEventsSourceCol} />
                 <col className={styles.requestEventsResultCol} />
                 {hasTimingData && <col className={styles.requestEventsTimingCol} />}
                 {hasTimingData && <col className={styles.requestEventsTimingCol} />}
@@ -1396,6 +1407,7 @@ export function RequestEventsDetailsCard({
                   <th>{t('usage_stats.request_events_timestamp')}</th>
                   <th>{t('usage_stats.model_name')}</th>
                   <th>{t('usage_stats.request_events_source')}</th>
+                  <th>UA</th>
                   <th>{t('usage_stats.request_events_result')}</th>
                   {hasTimingData && <th>{t('usage_stats.first_byte_latency')}</th>}
                   {hasTimingData && <th>{t('usage_stats.generation_time')}</th>}
@@ -1442,6 +1454,10 @@ export function RequestEventsDetailsCard({
                       {row.sourceType && (
                         <span className={styles.credentialType}>{row.sourceType}</span>
                       )}
+                    </td>
+                    <td className={styles.requestEventsSourceCell} title={`客户UA: ${row.clientUA}\nCPA的UA: ${row.upstreamUA}`}>
+                      <span>{`客户UA: ${row.clientUA}`}</span>
+                      <span className={styles.credentialType}>{`CPA的UA: ${row.upstreamUA}`}</span>
                     </td>
                     <td>
                       {row.failed ? (

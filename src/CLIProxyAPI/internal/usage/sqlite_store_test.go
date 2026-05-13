@@ -232,6 +232,42 @@ func TestSQLiteStoreQueryOmitsRawByDefault(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreDeduplicatesUserAgents(t *testing.T) {
+	ctx := context.Background()
+	store := newTestSQLiteStore(t)
+
+	for _, record := range []Record{
+		{ID: "ua-1", Timestamp: time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC), APIKey: "api", Model: "model", ClientUA: "client-a", UpstreamUA: "cpa-a", Tokens: TokenStats{TotalTokens: 1}},
+		{ID: "ua-2", Timestamp: time.Date(2026, 5, 2, 12, 0, 1, 0, time.UTC), APIKey: "api", Model: "model", ClientUA: "client-a", UpstreamUA: "cpa-a", Tokens: TokenStats{TotalTokens: 1}},
+	} {
+		if err := store.Insert(ctx, record); err != nil {
+			t.Fatalf("Insert(%s) error = %v", record.ID, err)
+		}
+	}
+	store.flush(ctx)
+
+	usage, err := store.Query(ctx, QueryRange{})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	details := usage["api"]["model"]
+	if len(details) != 2 {
+		t.Fatalf("details len = %d, want 2", len(details))
+	}
+	for _, detail := range details {
+		if detail.ClientUA != "client-a" || detail.UpstreamUA != "cpa-a" {
+			t.Fatalf("ua fields = (%q, %q), want (client-a, cpa-a)", detail.ClientUA, detail.UpstreamUA)
+		}
+	}
+	var count int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ua_strings`).Scan(&count); err != nil {
+		t.Fatalf("count ua_strings: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("ua_strings count = %d, want 2 unique strings", count)
+	}
+}
+
 func TestSQLiteStoreIgnoresZeroRangeBounds(t *testing.T) {
 	ctx := context.Background()
 	store := newTestSQLiteStore(t)

@@ -28,6 +28,8 @@ type Record struct {
 	FirstByteLatencyMs int64
 	GenerationMs       int64
 	ThinkingEffort     string
+	ClientUA           string
+	UpstreamUA         string
 	RawRequest         string
 	RawResponse        string
 	FailureStatusCode  int
@@ -49,6 +51,8 @@ type RequestDetail struct {
 	AuthType           string     `json:"auth_type,omitempty"`
 	AuthIndex          string     `json:"auth_index"`
 	ThinkingEffort     string     `json:"thinking_effort"`
+	ClientUA           string     `json:"client_ua,omitempty"`
+	UpstreamUA         string     `json:"upstream_ua,omitempty"`
 	RawRequest         string     `json:"raw_request,omitempty"`
 	RawResponse        string     `json:"raw_response,omitempty"`
 	FailureStatusCode  int        `json:"failure_status_code,omitempty"`

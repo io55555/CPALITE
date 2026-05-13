@@ -26,6 +26,7 @@ const packetOptions = [
 ];
 
 const partOptions = [
+  { value: 'status', label: '响应码' },
   { value: 'body', label: 'Body字符串' },
   { value: 'body_json', label: 'Body JSON路径' },
   { value: 'header', label: 'HTTP头' },
@@ -117,6 +118,31 @@ interface RuleTemplate {
 }
 
 const ruleTemplates: RuleTemplate[] = [
+  {
+    value: 'upstream-status-200-record',
+    label: '上游响应码200仅记录',
+    rule: { name: '[运营商到CPA]响应码200仅记录', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 200, action: 'record', notes: '使用已解析响应码精确匹配，避免扫描完整HTTP包。' },
+  },
+  {
+    value: 'upstream-status-400-record',
+    label: '上游响应码400仅记录',
+    rule: { name: '[运营商到CPA]响应码400仅记录', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 400, action: 'record' },
+  },
+  {
+    value: 'upstream-status-401-disable',
+    label: '上游响应码401禁用API Key',
+    rule: { name: '[运营商到CPA]响应码401禁用API Key', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 401, action: 'disable', target: 'api_key' },
+  },
+  {
+    value: 'upstream-status-429-cooldown',
+    label: '上游响应码429冷却API Key',
+    rule: { name: '[运营商到CPA]响应码429冷却API Key 300s', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 429, action: 'cooldown', target: 'api_key', cooldown_seconds: 300 },
+  },
+  {
+    value: 'upstream-status-500-clean',
+    label: '上游响应码500返回纯净500',
+    rule: { name: '[运营商到CPA]响应码500直接返回纯净500', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 500, action: 'return_clean_500', target: 'response' },
+  },
   {
     value: 'block-client-header-keyword',
     label: '[客户端到CPA]拦截Header关键字',

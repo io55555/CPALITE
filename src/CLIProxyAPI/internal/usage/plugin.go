@@ -186,6 +186,8 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 	rawRequest := firstNonEmpty(record.RawRequest, contextString(ctx, "USAGE_RAW_REQUEST"), contextString(ctx, "API_REQUEST"))
 	rawResponse := firstNonEmpty(record.RawResponse, contextString(ctx, "USAGE_RAW_RESPONSE"), contextString(ctx, "API_RESPONSE"))
 	rawResponse = mergeClientResponsePacket(rawResponse, contextString(ctx, "USAGE_CLIENT_RESPONSE"))
+	clientUA := clientUserAgent(ctx)
+	upstreamUA := firstNonEmpty(recordUpstreamUserAgent(rawRequest), recordUpstreamUserAgent(record.RawRequest), recordUpstreamUserAgent(contextString(ctx, "USAGE_RAW_REQUEST")))
 	if strings.TrimSpace(rawRequest) == "" {
 		rawRequest = buildFallbackRawRequest(ctx, record)
 	}
@@ -217,6 +219,8 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 		Source:             strings.TrimSpace(record.Source),
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),
 		AuthType:           strings.TrimSpace(record.AuthType),
+		ClientUA:           clientUA,
+		UpstreamUA:         upstreamUA,
 		RawRequest:         rawRequest,
 		RawResponse:        rawResponse,
 		FailureStatusCode:  record.Fail.StatusCode,
@@ -235,6 +239,54 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 		},
 		Failed: failed,
 	}
+}
+
+func clientUserAgent(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	ginCtx, _ := ctx.Value("gin").(*gin.Context)
+	if ginCtx == nil || ginCtx.Request == nil {
+		return ""
+	}
+	return strings.TrimSpace(ginCtx.Request.UserAgent())
+}
+
+func recordUpstreamUserAgent(rawRequest string) string {
+	packet := extractNamedSection(rawRequest, "CPA发给供应商的完整数据包")
+	if strings.TrimSpace(packet) == "" {
+		packet = rawRequest
+	}
+	return headerValue(packet, "User-Agent")
+}
+
+func extractNamedSection(content, title string) string {
+	marker := "=== " + title + " ==="
+	start := strings.Index(content, marker)
+	if start < 0 {
+		return ""
+	}
+	from := start + len(marker)
+	next := strings.Index(content[from:], "=== ")
+	if next >= 0 {
+		return strings.TrimSpace(content[from : from+next])
+	}
+	return strings.TrimSpace(content[from:])
+}
+
+func headerValue(packet, name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	head, _, ok := strings.Cut(packet, "\r\n\r\n")
+	if !ok {
+		head, _, _ = strings.Cut(packet, "\n\n")
+	}
+	for _, line := range strings.Split(head, "\n") {
+		key, value, ok := strings.Cut(strings.TrimRight(line, "\r"), ":")
+		if ok && strings.ToLower(strings.TrimSpace(key)) == name {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func mergeClientResponsePacket(rawResponse, clientResponse string) string {

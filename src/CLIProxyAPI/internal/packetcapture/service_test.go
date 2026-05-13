@@ -168,6 +168,53 @@ func TestWildcardMatchIsCaseInsensitiveAndAnchored(t *testing.T) {
 	}
 }
 
+func TestApplyRulesMatchesHTTPStatusWithoutScanningWholePacket(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	defaultMu.Lock()
+	previous := defaultService
+	defaultService = &Service{store: store}
+	defaultMu.Unlock()
+	defer func() {
+		defaultMu.Lock()
+		defaultService = previous
+		defaultMu.Unlock()
+	}()
+
+	_, err = store.UpsertRule(context.Background(), Rule{
+		Name:          "status 429",
+		Enabled:       true,
+		RecordHistory: true,
+		Packet:        "upstream_response",
+		Part:          "status",
+		Operator:      "num_eq",
+		Value:         "body should not matter",
+		// 数值运算符用 ValueNumber 匹配响应码。
+		ValueNumber:     429,
+		Action:          "cooldown",
+		Target:          "api_key",
+		CooldownSeconds: 300,
+	})
+	if err != nil {
+		t.Fatalf("UpsertRule: %v", err)
+	}
+
+	packet := "HTTP/2 429 Too Many Requests\nContent-Type: application/json\n\n{\"ok\":false}"
+	_, blockErr, triggers := ApplyRules(context.Background(), Record{Provider: "groq"}, "upstream_response", packet)
+	if blockErr != nil {
+		t.Fatalf("ApplyRules block: %v", blockErr)
+	}
+	if len(triggers) != 1 {
+		t.Fatalf("triggers len = %d, want 1", len(triggers))
+	}
+	if !strings.Contains(triggers[0].Detail, "part=status") {
+		t.Fatalf("trigger detail = %q, want status part", triggers[0].Detail)
+	}
+}
+
 func TestApplyRulesReturnClean500(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
 	if err != nil {

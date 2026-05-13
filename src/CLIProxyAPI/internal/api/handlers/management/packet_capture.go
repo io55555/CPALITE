@@ -361,6 +361,10 @@ func normalizePacketRule(rule packetcapture.Rule) packetcapture.Rule {
 	if strings.TrimSpace(rule.Part) == "" {
 		rule.Part = "body"
 	}
+	if strings.TrimSpace(rule.Part) == "status" {
+		rule.JSONPath = ""
+		rule.Header = ""
+	}
 	if strings.TrimSpace(rule.Operator) == "" {
 		rule.Operator = "contains"
 	}

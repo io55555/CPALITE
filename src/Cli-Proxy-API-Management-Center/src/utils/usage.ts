@@ -82,6 +82,8 @@ export interface UsageDetail {
   };
   thinking?: UsageThinking | null;
   thinking_effort?: string;
+  client_ua?: string;
+  upstream_ua?: string;
   raw_request?: string;
   raw_response?: string;
   failure_status_code?: number;
@@ -309,6 +311,8 @@ const normalizeUsageRecordDetail = (
     tokens: normalizeUsageTokens(detail.tokens),
     thinking: normalizeUsageThinking(detail.thinking),
     ...(thinkingEffort ? { thinking_effort: thinkingEffort } : {}),
+    client_ua: typeof detail.client_ua === 'string' ? detail.client_ua : undefined,
+    upstream_ua: typeof detail.upstream_ua === 'string' ? detail.upstream_ua : undefined,
     raw_request: typeof detail.raw_request === 'string' ? detail.raw_request : undefined,
     raw_response: typeof detail.raw_response === 'string' ? detail.raw_response : undefined,
     failure_status_code:
@@ -915,6 +919,8 @@ export function collectUsageDetails(usageData: unknown): UsageDetail[] {
           tokens: normalizeUsageTokens(detailRaw.tokens),
           thinking: normalizeUsageThinking(detailRaw.thinking),
           ...(thinkingEffort ? { thinking_effort: thinkingEffort } : {}),
+          client_ua: typeof detailRaw.client_ua === 'string' ? detailRaw.client_ua : undefined,
+          upstream_ua: typeof detailRaw.upstream_ua === 'string' ? detailRaw.upstream_ua : undefined,
           raw_request: typeof detailRaw.raw_request === 'string' ? detailRaw.raw_request : undefined,
           raw_response: typeof detailRaw.raw_response === 'string' ? detailRaw.raw_response : undefined,
           failure_status_code:
