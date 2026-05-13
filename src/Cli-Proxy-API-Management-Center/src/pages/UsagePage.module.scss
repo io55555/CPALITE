@@ -1187,6 +1187,24 @@
   word-break: break-all;
 }
 
+.requestEventsUaButton {
+  display: grid;
+  gap: 3px;
+  max-width: 180px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.requestEventsUaButton:hover {
+  color: var(--primary-color);
+}
+
 .requestEventsResultSuccess {
   color: var(--success-badge-text, #065f46);
   background: var(--success-badge-bg, #d1fae5);

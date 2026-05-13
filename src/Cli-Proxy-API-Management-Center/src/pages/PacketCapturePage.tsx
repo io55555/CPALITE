@@ -930,20 +930,44 @@ export function PacketCapturePage() {
         ))}
       </Modal>
 
-      <Modal open={editingRule !== null} title="过滤规则" onClose={() => setEditingRule(null)} width={720}>
+      <Modal
+        open={editingRule !== null}
+        title="过滤规则"
+        onClose={() => setEditingRule(null)}
+        width="min(1120px, calc(100vw - 32px))"
+        className={styles.ruleModal}
+      >
         {editingRule && (
           <div className={styles.ruleForm}>
-            <label className={styles.full}>常见模板<Select value="" options={[{ value: '', label: '选择模板快速套用' }, ...ruleTemplates.map((item) => ({ value: item.value, label: item.label }))]} onChange={applyRuleTemplate} ariaLabel="常见模板" /></label>
-            <label>规则名称<Input value={editingRule.name} onChange={(event) => setEditingRule({ ...editingRule, name: event.target.value })} /></label>
-            <label>启用<input type="checkbox" checked={editingRule.enabled} onChange={(event) => setEditingRule({ ...editingRule, enabled: event.target.checked })} /></label>
-            <label>记录触发历史<input type="checkbox" checked={editingRule.record_history ?? true} onChange={(event) => setEditingRule({ ...editingRule, record_history: event.target.checked })} /></label>
-            <label>优先级<Input value={String(editingRule.priority)} onChange={(event) => setEditingRule({ ...editingRule, priority: Number(event.target.value) || 100 })} /></label>
-            <label>指定渠道<SuggestInput value={editingRule.provider || ''} options={providerSuggestions} onChange={(value) => setEditingRule({ ...editingRule, provider: value })} /></label>
-            <label>渠道包含<Input value={editingRule.provider_keyword || ''} onChange={(event) => setEditingRule({ ...editingRule, provider_keyword: event.target.value })} /></label>
-            <label>指定模型<SuggestInput value={editingRule.model || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model: value })} /></label>
-            <label>模型包含<SuggestInput value={editingRule.model_keyword || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model_keyword: value })} /></label>
-            <label>匹配逻辑<Select value={editingRule.match_logic || 'all'} options={[{ value: 'all', label: '全部条件都满足' }, { value: 'any', label: '任一条件满足' }]} onChange={(value) => setEditingRule({ ...editingRule, match_logic: value })} ariaLabel="匹配逻辑" /></label>
-            <div className={styles.full}>
+            <div className={styles.ruleHelp}>
+              <strong>推荐流程</strong>
+              <span>先选模板，再按“适用范围 → 匹配条件 → 执行动作”检查。多数规则只需要 1 个条件和 1 个动作。</span>
+              <span>响应码请选“响应码 + 数值判断”，Header 请选“HTTP头 + Header名”，JSON 字段请选“Body JSON路径 + JSON路径”。</span>
+            </div>
+
+            <section className={styles.ruleSection}>
+              <div className={styles.ruleSectionTitle}>基础信息</div>
+              <div className={styles.ruleBaseGrid}>
+                <label className={styles.ruleFieldWide}>常见模板<Select value="" options={[{ value: '', label: '选择模板快速套用' }, ...ruleTemplates.map((item) => ({ value: item.value, label: item.label }))]} onChange={applyRuleTemplate} ariaLabel="常见模板" /></label>
+                <label className={styles.ruleFieldWide}>规则名称<Input value={editingRule.name} onChange={(event) => setEditingRule({ ...editingRule, name: event.target.value })} /></label>
+                <label>优先级<Input value={String(editingRule.priority)} onChange={(event) => setEditingRule({ ...editingRule, priority: Number(event.target.value) || 100 })} /></label>
+                <label>匹配逻辑<Select value={editingRule.match_logic || 'all'} options={[{ value: 'all', label: '全部条件都满足' }, { value: 'any', label: '任一条件满足' }]} onChange={(value) => setEditingRule({ ...editingRule, match_logic: value })} ariaLabel="匹配逻辑" /></label>
+                <label className={styles.ruleCheck}><input type="checkbox" checked={editingRule.enabled} onChange={(event) => setEditingRule({ ...editingRule, enabled: event.target.checked })} />启用规则</label>
+                <label className={styles.ruleCheck}><input type="checkbox" checked={editingRule.record_history ?? true} onChange={(event) => setEditingRule({ ...editingRule, record_history: event.target.checked })} />记录触发历史</label>
+              </div>
+            </section>
+
+            <section className={styles.ruleSection}>
+              <div className={styles.ruleSectionTitle}>适用范围</div>
+              <div className={styles.ruleBaseGrid}>
+                <label>指定渠道<SuggestInput value={editingRule.provider || ''} options={providerSuggestions} onChange={(value) => setEditingRule({ ...editingRule, provider: value })} placeholder="留空表示不限" /></label>
+                <label>渠道包含<Input value={editingRule.provider_keyword || ''} onChange={(event) => setEditingRule({ ...editingRule, provider_keyword: event.target.value })} placeholder="如 groq/openrouter" /></label>
+                <label>指定模型<SuggestInput value={editingRule.model || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model: value })} placeholder="留空表示不限" /></label>
+                <label>模型包含<SuggestInput value={editingRule.model_keyword || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model_keyword: value })} placeholder="如 gpt-5" /></label>
+              </div>
+            </section>
+
+            <section className={styles.ruleSection}>
               <div className={styles.ruleSectionHeader}>
                 <strong>匹配条件</strong>
                 <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, conditions: [...(editingRule.conditions || []), defaultCondition(editingRule.packet)] })}>添加条件</Button>
@@ -951,19 +975,23 @@ export function PacketCapturePage() {
               <div className={styles.ruleSubGrid}>
                 {(editingRule.conditions?.length ? editingRule.conditions : [defaultCondition(editingRule.packet)]).map((condition, index) => (
                   <div className={styles.ruleSubItem} key={`condition-${index}`}>
-                    <Select value={condition.packet || editingRule.packet} options={packetOptions} onChange={(value) => updateCondition(index, { packet: value })} ariaLabel="数据包" />
-                    <Select value={condition.part || 'body'} options={partOptions} onChange={(value) => updateCondition(index, { part: value })} ariaLabel="位置" />
-                    <SuggestInput value={condition.header || ''} options={headerOptions} onChange={(value) => updateCondition(index, { header: value })} placeholder="Header" />
-                    <Input value={condition.json_path || ''} onChange={(event) => updateCondition(index, { json_path: event.target.value })} placeholder="JSON路径" />
-                    <Select value={condition.operator || 'contains'} options={operatorOptions} onChange={(value) => updateCondition(index, { operator: value })} ariaLabel="判断" />
-                    <Input value={condition.value || ''} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="匹配值" />
-                    <Input value={String(condition.value_number || 0)} onChange={(event) => updateCondition(index, { value_number: Number(event.target.value) || 0 })} placeholder="数值" />
-                    <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, conditions: (editingRule.conditions || []).filter((_, i) => i !== index) })}>删除</Button>
+                    <div className={styles.ruleSubIndex}>条件 {index + 1}</div>
+                    <label>数据包<Select value={condition.packet || editingRule.packet} options={packetOptions} onChange={(value) => updateCondition(index, { packet: value })} ariaLabel="数据包" /></label>
+                    <label>匹配位置<Select value={condition.part || 'body'} options={partOptions} onChange={(value) => updateCondition(index, { part: value })} ariaLabel="位置" /></label>
+                    <label>Header名<SuggestInput value={condition.header || ''} options={headerOptions} onChange={(value) => updateCondition(index, { header: value })} placeholder="User-Agent" /></label>
+                    <label>JSON路径<Input value={condition.json_path || ''} onChange={(event) => updateCondition(index, { json_path: event.target.value })} placeholder="error.message / model" /></label>
+                    <label>判断方式<Select value={condition.operator || 'contains'} options={operatorOptions} onChange={(value) => updateCondition(index, { operator: value })} ariaLabel="判断" /></label>
+                    <label>匹配值<Input value={condition.value || ''} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="文本、通配符或JSON值" /></label>
+                    <label>数值<Input value={String(condition.value_number || 0)} onChange={(event) => updateCondition(index, { value_number: Number(event.target.value) || 0 })} placeholder="响应码/数值" /></label>
+                    <div className={styles.ruleSubActions}>
+                      <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, conditions: (editingRule.conditions || []).filter((_, i) => i !== index) })}>删除</Button>
+                    </div>
                   </div>
                 ))}
               </div>
-            </div>
-            <div className={styles.full}>
+            </section>
+
+            <section className={styles.ruleSection}>
               <div className={styles.ruleSectionHeader}>
                 <strong>执行动作</strong>
                 <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, actions: [...(editingRule.actions || []), defaultAction(editingRule.packet)] })}>添加动作</Button>
@@ -971,33 +999,29 @@ export function PacketCapturePage() {
               <div className={styles.ruleSubGrid}>
                 {(editingRule.actions?.length ? editingRule.actions : [defaultAction(editingRule.packet)]).map((action, index) => (
                   <div className={styles.ruleSubItem} key={`action-${index}`}>
-                    <Select value={action.type || 'record'} options={actionOptions.map(({ value, label }) => ({ value, label }))} onChange={(value) => updateAction(index, { type: value })} ariaLabel="动作" />
-                    <Select value={action.packet || editingRule.packet} options={packetOptions} onChange={(value) => updateAction(index, { packet: value })} ariaLabel="数据包" />
-                    <Select value={action.part || 'body'} options={partOptions} onChange={(value) => updateAction(index, { part: value })} ariaLabel="位置" />
-                    <SuggestInput value={action.header || ''} options={headerOptions} onChange={(value) => updateAction(index, { header: value })} placeholder="Header" />
-                    <Input value={action.json_path || ''} onChange={(event) => updateAction(index, { json_path: event.target.value })} placeholder="JSON路径" />
-                    <SuggestInput value={action.replacement || ''} options={replacementOptions} onChange={(value) => updateAction(index, { replacement: value })} placeholder="替换/追加内容" />
-                    <Input value={String(action.replace_limit || 0)} onChange={(event) => updateAction(index, { replace_limit: Number(event.target.value) || 0 })} placeholder="次数" />
-                    <SuggestInput value={action.target || ''} options={targetOptions} onChange={(value) => updateAction(index, { target: value })} placeholder="目标" />
-                    <Input value={String(action.cooldown_seconds || 0)} onChange={(event) => updateAction(index, { cooldown_seconds: parseCooldownSeconds(event.target.value) })} placeholder="冷却" />
-                    <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, actions: (editingRule.actions || []).filter((_, i) => i !== index) })}>删除</Button>
+                    <div className={styles.ruleSubIndex}>动作 {index + 1}</div>
+                    <label>动作类型<Select value={action.type || 'record'} options={actionOptions.map(({ value, label }) => ({ value, label }))} onChange={(value) => updateAction(index, { type: value })} ariaLabel="动作" /></label>
+                    <label>作用数据包<Select value={action.packet || editingRule.packet} options={packetOptions} onChange={(value) => updateAction(index, { packet: value })} ariaLabel="数据包" /></label>
+                    <label>作用位置<Select value={action.part || 'body'} options={partOptions} onChange={(value) => updateAction(index, { part: value })} ariaLabel="位置" /></label>
+                    <label>Header名<SuggestInput value={action.header || ''} options={headerOptions} onChange={(value) => updateAction(index, { header: value })} placeholder="User-Agent" /></label>
+                    <label>JSON路径<Input value={action.json_path || ''} onChange={(event) => updateAction(index, { json_path: event.target.value })} placeholder="error.message / model" /></label>
+                    <label className={styles.ruleFieldWide}>替换/脱敏内容<SuggestInput value={action.replacement || ''} options={replacementOptions} onChange={(value) => updateAction(index, { replacement: value })} placeholder="{{random_codex_ua}} 或自定义文本" /></label>
+                    <label>替换次数<Input value={String(action.replace_limit || 0)} onChange={(event) => updateAction(index, { replace_limit: Number(event.target.value) || 0 })} placeholder="0 表示不限" /></label>
+                    <label>操作目标<SuggestInput value={action.target || ''} options={targetOptions} onChange={(value) => updateAction(index, { target: value })} placeholder="api_key / auth" /></label>
+                    <label>冷却时长<Input value={String(action.cooldown_seconds || 0)} onChange={(event) => updateAction(index, { cooldown_seconds: parseCooldownSeconds(event.target.value) })} placeholder="300 / 30s / 2h / 1d" /></label>
+                    <div className={styles.ruleSubActions}>
+                      <Button size="sm" variant="secondary" onClick={() => setEditingRule({ ...editingRule, actions: (editingRule.actions || []).filter((_, i) => i !== index) })}>删除</Button>
+                    </div>
                   </div>
                 ))}
               </div>
-            </div>
-            <label>检查数据包<Select value={editingRule.packet} options={packetOptions} onChange={(value) => setEditingRule({ ...editingRule, packet: value })} ariaLabel="检查数据包" /></label>
-            <label>检查位置<Select value={editingRule.part} options={partOptions} onChange={(value) => setEditingRule({ ...editingRule, part: value })} ariaLabel="检查位置" /></label>
-            <label>Header名<SuggestInput value={editingRule.header || ''} options={headerOptions} onChange={(value) => setEditingRule({ ...editingRule, header: value })} /></label>
-            <label>JSON路径<Input value={editingRule.json_path || ''} onChange={(event) => setEditingRule({ ...editingRule, json_path: event.target.value })} placeholder="message.3.error.res" /></label>
-            <label>判断<Select value={editingRule.operator} options={operatorOptions} onChange={(value) => setEditingRule({ ...editingRule, operator: value })} ariaLabel="判断" /></label>
-            <label>匹配值<Input value={editingRule.value || ''} onChange={(event) => setEditingRule({ ...editingRule, value: event.target.value })} /></label>
-            <label>数值<Input value={String(editingRule.value_number || 0)} onChange={(event) => setEditingRule({ ...editingRule, value_number: Number(event.target.value) || 0 })} /></label>
-            <label>动作<Select value={editingRule.action} options={actionOptions} onChange={(value) => setEditingRule({ ...editingRule, action: value })} ariaLabel="动作" /></label>
-            <label>替换为<SuggestInput value={editingRule.replacement || ''} options={replacementOptions} onChange={(value) => setEditingRule({ ...editingRule, replacement: value })} placeholder="{{random_curl_ua}}" /></label>
-            <label>替换次数<Input value={String(editingRule.replace_limit || 0)} onChange={(event) => setEditingRule({ ...editingRule, replace_limit: Number(event.target.value) || 0 })} /></label>
-            <label>冷却时长<Input value={String(editingRule.cooldown_seconds || 0)} onChange={(event) => setEditingRule({ ...editingRule, cooldown_seconds: parseCooldownSeconds(event.target.value) })} placeholder="300 / 30s / 2h / 1d" /></label>
-            <label>操作目标<SuggestInput value={editingRule.target || ''} options={targetOptions} onChange={(value) => setEditingRule({ ...editingRule, target: value })} placeholder="user_token / auth / api_key" /></label>
-            <label className={styles.full}>备注<Input value={editingRule.notes || ''} onChange={(event) => setEditingRule({ ...editingRule, notes: event.target.value })} /></label>
+            </section>
+
+            <section className={styles.ruleSection}>
+              <div className={styles.ruleSectionTitle}>备注</div>
+              <label className={styles.ruleFieldWide}>备注<Input value={editingRule.notes || ''} onChange={(event) => setEditingRule({ ...editingRule, notes: event.target.value })} placeholder="说明这条规则的用途、影响范围或回滚方式" /></label>
+            </section>
+
             <div className={styles.formActions}>
               <Button variant="secondary" onClick={() => setEditingRule(null)}>取消</Button>
               <Button onClick={() => void saveRule()}>保存</Button>

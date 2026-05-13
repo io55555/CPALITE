@@ -17,6 +17,7 @@ import type { AuthFileItem } from '@/types/authFile';
 import type { CredentialInfo } from '@/types/sourceInfo';
 import { buildSourceInfoMap, resolveSourceDisplay } from '@/utils/sourceResolver';
 import { parseTimestampMs } from '@/utils/timestamp';
+import { resolveUsageUserAgents } from '@/utils/packetUserAgent';
 import {
   collectUsageDetails,
   extractFirstByteLatencyMs,
@@ -69,6 +70,12 @@ type RequestEventRow = {
   rawResponse?: string;
   failureStatusCode?: number;
   failureMessage?: string;
+};
+
+type UAInspection = {
+  title: string;
+  clientUA: string;
+  upstreamUA: string;
 };
 
 const extractLogSection = (content: string, title: string, nextTitle?: string): string => {
@@ -486,6 +493,7 @@ export function RequestEventsDetailsCard({
   );
   const [localAuthFiles, setLocalAuthFiles] = useState<AuthFileItem[]>([]);
   const [selectedFailureRow, setSelectedFailureRow] = useState<RequestEventRow | null>(null);
+  const [selectedUAInspection, setSelectedUAInspection] = useState<UAInspection | null>(null);
   const [selectedFailureLogText, setSelectedFailureLogText] = useState('');
   const [selectedFailureLogLoading, setSelectedFailureLogLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -650,6 +658,7 @@ export function RequestEventsDetailsCard({
       const thinkingEffort = normalizeThinkingText(detail.thinking_effort);
       const thinkingLabel = thinkingEffort || formatThinkingLabel(thinking);
       const cacheHitRatio = inputTokens > 0 ? cachedTokens / inputTokens : null;
+      const userAgents = resolveUsageUserAgents(detail);
 
       return {
         id: backendId ?? `${timestamp}-${model}-${sourceKey}-${authIndex}-${index}`,
@@ -667,8 +676,8 @@ export function RequestEventsDetailsCard({
         sourceType,
         authType: typeof detail.auth_type === 'string' && detail.auth_type.trim() ? detail.auth_type.trim() : '-',
         authIndex,
-        clientUA: typeof detail.client_ua === 'string' && detail.client_ua.trim() ? detail.client_ua.trim() : '-',
-        upstreamUA: typeof detail.upstream_ua === 'string' && detail.upstream_ua.trim() ? detail.upstream_ua.trim() : '-',
+        clientUA: userAgents.clientUA,
+        upstreamUA: userAgents.upstreamUA,
         failed: detail.failed === true,
         firstByteLatencyMs,
         generationMs,
@@ -1455,9 +1464,22 @@ export function RequestEventsDetailsCard({
                         <span className={styles.credentialType}>{row.sourceType}</span>
                       )}
                     </td>
-                    <td className={styles.requestEventsSourceCell} title={`客户UA: ${row.clientUA}\nCPA的UA: ${row.upstreamUA}`}>
-                      <span>{`客户UA: ${row.clientUA}`}</span>
-                      <span className={styles.credentialType}>{`CPA的UA: ${row.upstreamUA}`}</span>
+                    <td>
+                      <button
+                        type="button"
+                        className={styles.requestEventsUaButton}
+                        title="查看完整UA"
+                        onClick={() =>
+                          setSelectedUAInspection({
+                            title: `${row.provider} / ${row.model}`,
+                            clientUA: row.clientUA,
+                            upstreamUA: row.upstreamUA,
+                          })
+                        }
+                      >
+                        <span>{`客户UA: ${row.clientUA}`}</span>
+                        <span className={styles.credentialType}>{`CPA的UA: ${row.upstreamUA}`}</span>
+                      </button>
                     </td>
                     <td>
                       {row.failed ? (
@@ -1629,6 +1651,28 @@ export function RequestEventsDetailsCard({
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={selectedUAInspection !== null}
+        onClose={() => setSelectedUAInspection(null)}
+        title={selectedUAInspection ? `UA 明细 · ${selectedUAInspection.title}` : 'UA 明细'}
+        width={760}
+      >
+        <div className={styles.requestEventsFailureModalBody}>
+          <div className={styles.requestEventsFailureMessageBlock}>
+            <div className={styles.requestEventsFailureMetaLabel}>客户UA</div>
+            <pre className={styles.requestEventsFailurePacket}>
+              {selectedUAInspection?.clientUA || '-'}
+            </pre>
+          </div>
+          <div className={styles.requestEventsFailureMessageBlock}>
+            <div className={styles.requestEventsFailureMetaLabel}>CPA的UA</div>
+            <pre className={styles.requestEventsFailurePacket}>
+              {selectedUAInspection?.upstreamUA || '-'}
+            </pre>
+          </div>
+        </div>
       </Modal>
     </Card>
   );

@@ -5,6 +5,7 @@ import type { AuthFileItem } from '@/types/authFile';
 import type { Config } from '@/types/config';
 import type { CredentialInfo } from '@/types/sourceInfo';
 import { buildSourceInfoMap, resolveSourceDisplay } from '@/utils/sourceResolver';
+import { resolveUsageUserAgents } from '@/utils/packetUserAgent';
 import {
   calculateCost,
   collectUsageDetailsWithEndpoint,
@@ -1384,6 +1385,7 @@ const buildEventRows = (
       const hourLabel = buildHourLabel(timestampMs);
       const sourceKey = sourceMeta.identityKey || `source:${sourceLabel}`;
       const taskKey = `${detail.timestamp}|${sourceKey}|${authIndex}`;
+      const userAgents = resolveUsageUserAgents(detail);
 
       return {
         id: detail.id || `${detail.timestamp}-${detail.__modelName || '-'}-${sourceKey}-${authIndex}-${index}`,
@@ -1410,8 +1412,8 @@ const buildEventRows = (
         channelHost: channelMeta?.host || '-',
         channelDisabled: channelMeta?.disabled || false,
         thinkingEffort: readString(detail.thinking_effort) || readString(detail.thinking?.intensity) || readString(detail.thinking?.level) || '-',
-        clientUA: readString(detail.client_ua) || '-',
-        upstreamUA: readString(detail.upstream_ua) || '-',
+        clientUA: userAgents.clientUA,
+        upstreamUA: userAgents.upstreamUA,
         failed: detail.failed === true,
         statsIncluded,
         latencyMs: typeof detail.latency_ms === 'number' ? detail.latency_ms : null,
@@ -1434,8 +1436,8 @@ const buildEventRows = (
           authIndex,
           channelLabel,
           channelMeta?.host,
-          detail.client_ua,
-          detail.upstream_ua,
+          userAgents.clientUA,
+          userAgents.upstreamUA,
           endpointPath,
           endpointMethod,
           authMeta?.provider,

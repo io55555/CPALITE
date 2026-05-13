@@ -273,10 +273,15 @@
   color: var(--error-color);
 }
 
+.ruleModal :global(.modal-body) {
+  max-height: min(76vh, 760px);
+  overflow: auto;
+}
+
 .ruleForm {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .ruleForm label {
@@ -285,6 +290,67 @@
   gap: 5px;
   font-size: 12px;
   color: var(--text-secondary);
+  min-width: 0;
+}
+
+.ruleForm input,
+.ruleForm select {
+  min-width: 0;
+}
+
+.ruleHelp {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 28%, var(--border-color));
+  border-radius: $radius-sm;
+  background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-secondary));
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ruleHelp strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.ruleSection {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-primary);
+}
+
+.ruleSectionTitle {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ruleBaseGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.ruleFieldWide {
+  grid-column: span 2;
+}
+
+.ruleCheck {
+  min-height: 34px;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px !important;
+  color: var(--text-primary) !important;
+}
+
+.ruleCheck input {
+  width: 16px;
+  height: 16px;
 }
 
 .full,
@@ -312,21 +378,35 @@
 
 .ruleSubItem {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  grid-template-columns: 72px repeat(4, minmax(132px, 1fr));
   gap: 8px;
-  align-items: center;
-  padding: 8px;
+  align-items: end;
+  padding: 10px;
   border: 1px solid var(--border-color);
   border-radius: $radius-sm;
   background: var(--bg-secondary);
 }
 
+.ruleSubIndex {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ruleSubActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: end;
+}
+
 @media (max-width: 900px) {
-  .ruleForm {
+  .ruleBaseGrid,
+  .ruleSubItem {
     grid-template-columns: 1fr;
   }
 
-  .ruleSubItem {
-    grid-template-columns: 1fr;
+  .ruleFieldWide {
+    grid-column: auto;
   }
 }
