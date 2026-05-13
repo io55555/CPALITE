@@ -1477,8 +1477,8 @@ export function RequestEventsDetailsCard({
                           })
                         }
                       >
-                        <span>{`客户UA: ${row.clientUA}`}</span>
-                        <span className={styles.credentialType}>{`CPA的UA: ${row.upstreamUA}`}</span>
+                        <span>{`客户: ${row.clientUA}`}</span>
+                        <span className={styles.credentialType}>{`CPA: ${row.upstreamUA}`}</span>
                       </button>
                     </td>
                     <td>

@@ -319,10 +319,6 @@ func (s *SQLiteStore) Query(ctx context.Context, rng QueryRange) (APIUsage, erro
 	if limit <= 0 || limit > defaultQueryLimit {
 		limit = defaultQueryLimit
 	}
-	rawColumns := "ur.raw_request, ur.raw_response"
-	if !rng.IncludeRaw {
-		rawColumns = "'' AS raw_request, '' AS raw_response"
-	}
 	query := fmt.Sprintf(`
 SELECT id, timestamp, api_key, endpoint, request_id, provider, model, source, auth_index, auth_type, thinking_effort, raw_request, raw_response, failure_status_code, failure_message,
        client_ua, upstream_ua,
@@ -335,7 +331,7 @@ SELECT ur.id, ur.timestamp, ur.api_key, ur.endpoint, ur.request_id, ur.provider,
        ur.input_tokens, ur.output_tokens, ur.reasoning_tokens, ur.cached_tokens, ur.total_tokens, ur.failed
 FROM usage_records ur
 LEFT JOIN ua_strings cua ON cua.id = ur.client_ua_id
-LEFT JOIN ua_strings uua ON uua.id = ur.upstream_ua_id`, rawColumns)
+LEFT JOIN ua_strings uua ON uua.id = ur.upstream_ua_id`, "ur.raw_request, ur.raw_response")
 	args := make([]any, 0, 3)
 	where := make([]string, 0, 2)
 	if rng.Start != nil && !rng.Start.IsZero() {
@@ -406,6 +402,16 @@ LEFT JOIN ua_strings uua ON uua.id = ur.upstream_ua_id`, rawColumns)
 		detail.Timestamp = parsed.UTC()
 		detail.Endpoint = strings.TrimSpace(endpoint)
 		detail.RequestID = strings.TrimSpace(requestID)
+		if strings.TrimSpace(detail.ClientUA) == "" {
+			detail.ClientUA = clientUserAgentFromRawRequest(detail.RawRequest)
+		}
+		if strings.TrimSpace(detail.UpstreamUA) == "" {
+			detail.UpstreamUA = recordUpstreamUserAgent(detail.RawRequest)
+		}
+		if !rng.IncludeRaw {
+			detail.RawRequest = ""
+			detail.RawResponse = ""
+		}
 		detail.LatencyMs = nonNegative(detail.LatencyMs)
 		detail.FirstByteLatencyMs = nonNegative(detail.FirstByteLatencyMs)
 		detail.GenerationMs = nonNegative(detail.GenerationMs)
@@ -418,6 +424,12 @@ LEFT JOIN ua_strings uua ON uua.id = ur.upstream_ua_id`, rawColumns)
 	for _, record := range s.pendingSnapshot() {
 		if !recordInRange(record, rng) {
 			continue
+		}
+		if strings.TrimSpace(record.ClientUA) == "" {
+			record.ClientUA = clientUserAgentFromRawRequest(record.RawRequest)
+		}
+		if strings.TrimSpace(record.UpstreamUA) == "" {
+			record.UpstreamUA = recordUpstreamUserAgent(record.RawRequest)
 		}
 		if !rng.IncludeRaw {
 			record.RawRequest = ""
@@ -535,6 +547,14 @@ func recordInRange(record Record, rng QueryRange) bool {
 }
 
 func addRecordToUsage(result APIUsage, record Record) {
+	clientUA := strings.TrimSpace(record.ClientUA)
+	if clientUA == "" {
+		clientUA = clientUserAgentFromRawRequest(record.RawRequest)
+	}
+	upstreamUA := strings.TrimSpace(record.UpstreamUA)
+	if upstreamUA == "" {
+		upstreamUA = recordUpstreamUserAgent(record.RawRequest)
+	}
 	detail := RequestDetail{
 		ID:                 strings.TrimSpace(record.ID),
 		Timestamp:          record.Timestamp.UTC(),
@@ -548,8 +568,8 @@ func addRecordToUsage(result APIUsage, record Record) {
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),
 		AuthType:           strings.TrimSpace(record.AuthType),
 		ThinkingEffort:     strings.TrimSpace(record.ThinkingEffort),
-		ClientUA:           strings.TrimSpace(record.ClientUA),
-		UpstreamUA:         strings.TrimSpace(record.UpstreamUA),
+		ClientUA:           clientUA,
+		UpstreamUA:         upstreamUA,
 		RawRequest:         truncateUsageRaw(record.RawRequest),
 		RawResponse:        truncateUsageRaw(record.RawResponse),
 		FailureStatusCode:  max(record.FailureStatusCode, 0),

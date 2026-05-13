@@ -187,8 +187,8 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 	rawRequest := firstNonEmpty(record.RawRequest, contextString(ctx, "USAGE_RAW_REQUEST"), contextString(ctx, "API_REQUEST"))
 	rawResponse := firstNonEmpty(record.RawResponse, contextString(ctx, "USAGE_RAW_RESPONSE"), contextString(ctx, "API_RESPONSE"))
 	rawResponse = mergeClientResponsePacket(rawResponse, contextString(ctx, "USAGE_CLIENT_RESPONSE"))
-	clientUA := firstNonEmpty(clientUserAgent(ctx), clientUserAgentFromRawRequest(rawRequest), clientUserAgentFromRawRequest(record.RawRequest), clientUserAgentFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
-	upstreamUA := firstNonEmpty(recordUpstreamUserAgent(rawRequest), recordUpstreamUserAgent(record.RawRequest), recordUpstreamUserAgent(contextString(ctx, "USAGE_RAW_REQUEST")))
+	clientUA := firstNonEmpty(record.ClientUA, clientUserAgent(ctx), clientUserAgentFromRawRequest(rawRequest), clientUserAgentFromRawRequest(record.RawRequest), clientUserAgentFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
+	upstreamUA := firstNonEmpty(record.UpstreamUA, recordUpstreamUserAgent(rawRequest), recordUpstreamUserAgent(record.RawRequest), recordUpstreamUserAgent(contextString(ctx, "USAGE_RAW_REQUEST")), apiLogHeaderValue(rawRequest, "User-Agent"))
 	thinkingEffort := firstNonEmpty(thinkingEffortFromRawRequest(rawRequest), thinkingEffortFromRawRequest(record.RawRequest), thinkingEffortFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
 	if strings.TrimSpace(rawRequest) == "" {
 		rawRequest = buildFallbackRawRequest(ctx, record)
@@ -260,7 +260,7 @@ func recordUpstreamUserAgent(rawRequest string) string {
 	if strings.TrimSpace(packet) == "" {
 		packet = rawRequest
 	}
-	return headerValue(packet, "User-Agent")
+	return firstNonEmpty(headerValue(packet, "User-Agent"), apiLogHeaderValue(packet, "User-Agent"))
 }
 
 func clientUserAgentFromRawRequest(rawRequest string) string {
@@ -269,6 +269,19 @@ func clientUserAgentFromRawRequest(rawRequest string) string {
 		packet = rawRequest
 	}
 	return headerValue(packet, "User-Agent")
+}
+
+func apiLogHeaderValue(raw, name string) string {
+	lower := strings.ToLower(raw)
+	start := strings.Index(lower, "\nheaders:")
+	if start < 0 {
+		return ""
+	}
+	block := raw[start+len("\nheaders:"):]
+	if end := strings.Index(strings.ToLower(block), "\nbody:"); end >= 0 {
+		block = block[:end]
+	}
+	return headerValue("GET / HTTP/1.1\n"+strings.TrimSpace(block)+"\n\n", name)
 }
 
 func thinkingEffortFromRawRequest(rawRequest string) string {

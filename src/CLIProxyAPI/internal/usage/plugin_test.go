@@ -216,6 +216,48 @@ func TestLoggerPluginBuildsFallbackRawRequestFromGinRequest(t *testing.T) {
 	}
 }
 
+func TestLoggerPluginExtractsUAFromStoredRawWhenRawExcluded(t *testing.T) {
+	store := newPluginTestSQLiteStore(t)
+	recorder := NewRecorder(store)
+	plugin := &LoggerPlugin{recorder: recorder}
+
+	ctx := internallogging.WithEndpoint(context.Background(), "POST /v1/chat/completions")
+	plugin.HandleUsage(ctx, coreusage.Record{
+		Provider:    "groq",
+		Model:       "llama",
+		RequestedAt: time.Date(2026, 5, 10, 9, 42, 16, 0, time.UTC),
+		Failed:      true,
+		RawRequest: strings.Join([]string{
+			"=== 客户端发给CPA的完整数据包 ===",
+			"POST /v1/chat/completions HTTP/2",
+			"User-Agent: client-test/1.0",
+			"",
+			`{"model":"llama"}`,
+			"=== CPA发给供应商的完整数据包 ===",
+			"POST /openai/v1/chat/completions HTTP/1.1",
+			"User-Agent: cpa-test/2.0",
+			"",
+			`{"model":"llama"}`,
+		}, "\n"),
+		Fail: coreusage.Failure{StatusCode: 502, Body: "bad gateway"},
+	})
+
+	usage, err := store.Query(context.Background(), QueryRange{})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	details := usage["POST /v1/chat/completions"]["llama"]
+	if len(details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(details))
+	}
+	if details[0].RawRequest != "" {
+		t.Fatalf("RawRequest = %q, want omitted", details[0].RawRequest)
+	}
+	if details[0].ClientUA != "client-test/1.0" || details[0].UpstreamUA != "cpa-test/2.0" {
+		t.Fatalf("UA = (%q, %q), want client/cpa", details[0].ClientUA, details[0].UpstreamUA)
+	}
+}
+
 func TestLoggerPluginTruncatesRawPacketsBeforeQueueing(t *testing.T) {
 	store := newPluginTestSQLiteStore(t)
 	recorder := NewRecorder(store)

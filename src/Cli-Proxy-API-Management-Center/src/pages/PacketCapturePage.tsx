@@ -19,6 +19,7 @@ import { downloadBlob } from '@/utils/download';
 import styles from './PacketCapturePage.module.scss';
 
 const ALL = '__all__';
+const ALL_OPENAI_COMPAT_PROVIDER_LABEL = '所有openai兼容渠道';
 
 const packetOptions = [
   { value: 'client_request', label: '客户端发给CPA' },
@@ -472,6 +473,7 @@ export function PacketCapturePage() {
   );
   const providerSuggestions = useMemo(() => {
     const values = new Set<string>();
+    values.add(ALL_OPENAI_COMPAT_PROVIDER_LABEL);
     config?.openaiCompatibility?.forEach((provider) => {
       if (provider.name) values.add(provider.name);
     });
@@ -601,6 +603,14 @@ export function PacketCapturePage() {
     setRules((prev) => prev.map((item) => (item.id === rule.id ? { ...item, enabled } : item)));
     await packetCaptureApi.saveRule({ ...rule, enabled });
     await load();
+  };
+
+  const updateRuleProvider = (value: string) => {
+    if (!editingRule) return;
+    setEditingRule({
+      ...editingRule,
+      provider: value === ALL_OPENAI_COMPAT_PROVIDER_LABEL ? '' : value,
+    });
   };
 
   const updateCondition = (index: number, patch: Partial<PacketRuleCondition>) => {
@@ -960,7 +970,7 @@ export function PacketCapturePage() {
             <section className={styles.ruleSection}>
               <div className={styles.ruleSectionTitle}>适用范围</div>
               <div className={styles.ruleBaseGrid}>
-                <label>指定渠道<SuggestInput value={editingRule.provider || ''} options={providerSuggestions} onChange={(value) => setEditingRule({ ...editingRule, provider: value })} placeholder="留空表示不限" /></label>
+                <label>指定渠道<SuggestInput value={editingRule.provider || ALL_OPENAI_COMPAT_PROVIDER_LABEL} options={providerSuggestions} onChange={updateRuleProvider} placeholder="所有openai兼容渠道" /></label>
                 <label>渠道包含<Input value={editingRule.provider_keyword || ''} onChange={(event) => setEditingRule({ ...editingRule, provider_keyword: event.target.value })} placeholder="如 groq/openrouter" /></label>
                 <label>指定模型<SuggestInput value={editingRule.model || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model: value })} placeholder="留空表示不限" /></label>
                 <label>模型包含<SuggestInput value={editingRule.model_keyword || ''} options={modelSuggestions} onChange={(value) => setEditingRule({ ...editingRule, model_keyword: value })} placeholder="如 gpt-5" /></label>

@@ -23,6 +23,11 @@ const readNamedSection = (content: string, names: readonly string[]) => {
   return '';
 };
 
+const extractLogHeadersBlock = (content: string) => {
+  const match = content.match(/(?:^|\n)Headers:\s*\n([\s\S]*?)(?:\n\s*\nBody:|\nBody:|$)/i);
+  return match?.[1]?.trim() || '';
+};
+
 export const extractHeaderValue = (packet: string | null | undefined, headerName: string) => {
   const text = (packet || '').trim();
   if (!text) return '';
@@ -38,16 +43,18 @@ export const resolveUsageUserAgents = (detail: {
 }) => {
   const rawRequest = detail.raw_request || '';
   const clientPacket = readNamedSection(rawRequest, SECTION_MARKERS.clientRequest) || rawRequest;
-  const upstreamPacket = readNamedSection(rawRequest, SECTION_MARKERS.upstreamRequest);
+  const upstreamPacket = readNamedSection(rawRequest, SECTION_MARKERS.upstreamRequest) || rawRequest;
 
   return {
     clientUA:
       detail.client_ua?.trim() ||
       extractHeaderValue(clientPacket, 'User-Agent') ||
+      extractHeaderValue(extractLogHeadersBlock(clientPacket), 'User-Agent') ||
       '-',
     upstreamUA:
       detail.upstream_ua?.trim() ||
       extractHeaderValue(upstreamPacket, 'User-Agent') ||
+      extractHeaderValue(extractLogHeadersBlock(upstreamPacket), 'User-Agent') ||
       '-',
   };
 };

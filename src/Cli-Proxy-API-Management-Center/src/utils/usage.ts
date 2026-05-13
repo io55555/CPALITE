@@ -1006,7 +1006,12 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
         details.push({
           ...(id ? { id } : {}),
           timestamp,
+          endpoint: typeof detailRaw.endpoint === 'string' ? detailRaw.endpoint.trim() : undefined,
+          request_id: typeof detailRaw.request_id === 'string' ? detailRaw.request_id.trim() : undefined,
+          provider: typeof detailRaw.provider === 'string' ? detailRaw.provider.trim() : undefined,
           source: normalizeSource(detailRaw.source),
+          __sourceRaw: typeof detailRaw.source === 'string' ? detailRaw.source.trim() : undefined,
+          auth_type: typeof detailRaw.auth_type === 'string' ? detailRaw.auth_type.trim() : undefined,
           auth_index: (detailRaw?.auth_index ??
             detailRaw?.authIndex ??
             detailRaw?.AuthIndex ??
@@ -1017,6 +1022,17 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
           tokens: normalizeUsageTokens(detailRaw.tokens),
           thinking: normalizeUsageThinking(detailRaw.thinking),
           ...(thinkingEffort ? { thinking_effort: thinkingEffort } : {}),
+          client_ua: typeof detailRaw.client_ua === 'string' ? detailRaw.client_ua : undefined,
+          upstream_ua: typeof detailRaw.upstream_ua === 'string' ? detailRaw.upstream_ua : undefined,
+          raw_request: typeof detailRaw.raw_request === 'string' ? detailRaw.raw_request : undefined,
+          raw_response: typeof detailRaw.raw_response === 'string' ? detailRaw.raw_response : undefined,
+          failure_status_code:
+            typeof detailRaw.failure_status_code === 'number' &&
+            Number.isFinite(detailRaw.failure_status_code)
+              ? detailRaw.failure_status_code
+              : undefined,
+          failure_message:
+            typeof detailRaw.failure_message === 'string' ? detailRaw.failure_message : undefined,
           failed: detailRaw.failed === true,
           __modelName: modelName,
           __endpoint: endpoint,
