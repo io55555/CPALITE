@@ -32,8 +32,20 @@ func normalizePacketName(value string) string {
 }
 
 func ruleMatchesMeta(rule Rule, meta Record) bool {
-	if rule.Provider != "" && !strings.EqualFold(rule.Provider, meta.Provider) && !strings.EqualFold(rule.Provider, meta.Source) {
-		return false
+	if rule.Provider != "" {
+		switch normalizeProviderAlias(rule.Provider) {
+		case "", normalizeProviderAlias("所有渠道"):
+		case normalizeProviderAlias("所有openai兼容渠道"):
+			if normalizeProviderAlias(meta.ProviderGroup) != normalizeProviderAlias("openai-compatibility") &&
+				normalizeProviderAlias(meta.ProviderGroup) != normalizeProviderAlias("openai") {
+				return false
+			}
+		default:
+			if normalizeProviderAlias(rule.Provider) != normalizeProviderAlias(meta.Provider) &&
+				normalizeProviderAlias(rule.Provider) != normalizeProviderAlias(meta.Source) {
+				return false
+			}
+		}
 	}
 	if rule.ProviderKeyword != "" {
 		text := strings.ToLower(meta.Provider + "\n" + meta.Source)
@@ -48,6 +60,14 @@ func ruleMatchesMeta(rule Rule, meta Record) bool {
 		return false
 	}
 	return true
+}
+
+func normalizeProviderAlias(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "-", "")
+	value = strings.ReplaceAll(value, "_", "")
+	value = strings.ReplaceAll(value, " ", "")
+	return value
 }
 
 func applyRuleToPacket(rule Rule, packet string) (string, bool, string) {

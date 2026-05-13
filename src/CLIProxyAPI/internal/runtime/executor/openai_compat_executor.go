@@ -753,12 +753,13 @@ func packetFilterCooldownSeconds(trigger packetcapture.TriggerRecord) int {
 
 func (e *OpenAICompatExecutor) packetFilterMeta(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string) packetcapture.Record {
 	meta := packetcapture.Record{
-		ID:        logging.GetRequestID(ctx),
-		RequestID: logging.GetRequestID(ctx),
-		Provider:  e.providerName(auth),
-		Source:    e.providerName(auth),
-		Model:     strings.TrimSpace(model),
-		APIKey:    util.HideAPIKey(apiKey),
+		ID:            logging.GetRequestID(ctx),
+		RequestID:     logging.GetRequestID(ctx),
+		Provider:      e.providerName(auth),
+		ProviderGroup: "openai-compatibility",
+		Source:        e.providerName(auth),
+		Model:         strings.TrimSpace(model),
+		APIKey:        util.HideAPIKey(apiKey),
 	}
 	if auth != nil {
 		meta.AuthType, meta.AuthLabel = auth.AccountInfo()

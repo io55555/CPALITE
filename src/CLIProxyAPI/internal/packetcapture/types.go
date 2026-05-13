@@ -14,6 +14,7 @@ type Record struct {
 	Timestamp          time.Time `json:"timestamp"`
 	RequestID          string    `json:"request_id,omitempty"`
 	Provider           string    `json:"provider"`
+	ProviderGroup      string    `json:"provider_group,omitempty"`
 	Source             string    `json:"source,omitempty"`
 	Model              string    `json:"model"`
 	UserToken          string    `json:"user_token,omitempty"`
