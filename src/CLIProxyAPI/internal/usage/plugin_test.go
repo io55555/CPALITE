@@ -86,6 +86,81 @@ func TestLoggerPluginDropsRawPacketsForSuccessfulRecords(t *testing.T) {
 	}
 }
 
+func TestLoggerPluginPersistsThinkingEffortFromCodexRawRequest(t *testing.T) {
+	store := newPluginTestSQLiteStore(t)
+	recorder := NewRecorder(store)
+	plugin := &LoggerPlugin{recorder: recorder}
+
+	ctx := internallogging.WithEndpoint(context.Background(), "POST /v1/responses")
+	ctx = internallogging.WithResponseStatusHolder(ctx)
+	internallogging.SetResponseStatus(ctx, 200)
+
+	plugin.HandleUsage(ctx, coreusage.Record{
+		Model:       "gpt-5.4",
+		RequestedAt: time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC),
+		RawRequest:  "POST /v1/responses HTTP/2\nContent-Type: application/json\n\n{\"model\":\"gpt-5.4\",\"reasoning\":{\"effort\":\"high\"}}",
+		Detail:      coreusage.Detail{TotalTokens: 1},
+	})
+
+	usage, err := store.Query(context.Background(), QueryRange{})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	details := usage["POST /v1/responses"]["gpt-5.4"]
+	if len(details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(details))
+	}
+	if details[0].ThinkingEffort != "high" {
+		t.Fatalf("ThinkingEffort = %q, want high", details[0].ThinkingEffort)
+	}
+}
+
+func TestLoggerPluginPersistsThinkingEffortFromAPIRequestLog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newPluginTestSQLiteStore(t)
+	recorder := NewRecorder(store)
+	plugin := &LoggerPlugin{recorder: recorder}
+
+	ginCtx := &gin.Context{}
+	ginCtx.Set("USAGE_RAW_REQUEST", "POST /v1/responses HTTP/2\nContent-Type: application/json\n\n")
+	ginCtx.Set("API_REQUEST", strings.Join([]string{
+		"=== API REQUEST 1 ===",
+		"Timestamp: 2026-05-15T09:00:00Z",
+		"Upstream URL: https://chatgpt.com/backend-api/codex/responses",
+		"HTTP Method: POST",
+		"",
+		"Headers:",
+		"Content-Type: application/json",
+		"",
+		"Body:",
+		`{"model":"gpt-5.4","reasoning":{"effort":"xhigh"}}`,
+		"",
+	}, "\n"))
+
+	ctx := context.WithValue(context.Background(), "gin", ginCtx)
+	ctx = internallogging.WithEndpoint(ctx, "POST /v1/responses")
+	ctx = internallogging.WithResponseStatusHolder(ctx)
+	internallogging.SetResponseStatus(ctx, 200)
+
+	plugin.HandleUsage(ctx, coreusage.Record{
+		Model:       "gpt-5.4",
+		RequestedAt: time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC),
+		Detail:      coreusage.Detail{TotalTokens: 1},
+	})
+
+	usage, err := store.Query(context.Background(), QueryRange{})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	details := usage["POST /v1/responses"]["gpt-5.4"]
+	if len(details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(details))
+	}
+	if details[0].ThinkingEffort != "xhigh" {
+		t.Fatalf("ThinkingEffort = %q, want xhigh", details[0].ThinkingEffort)
+	}
+}
+
 func TestLoggerPluginPersistsRecordWhenLegacyStatisticsDisabled(t *testing.T) {
 	previous := StatisticsEnabled()
 	SetStatisticsEnabled(false)

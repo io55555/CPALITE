@@ -189,7 +189,12 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 	rawResponse = mergeClientResponsePacket(rawResponse, contextString(ctx, "USAGE_CLIENT_RESPONSE"))
 	clientUA := firstNonEmpty(record.ClientUA, clientUserAgent(ctx), clientUserAgentFromRawRequest(rawRequest), clientUserAgentFromRawRequest(record.RawRequest), clientUserAgentFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
 	upstreamUA := firstNonEmpty(record.UpstreamUA, recordUpstreamUserAgent(rawRequest), recordUpstreamUserAgent(record.RawRequest), recordUpstreamUserAgent(contextString(ctx, "USAGE_RAW_REQUEST")), apiLogHeaderValue(rawRequest, "User-Agent"))
-	thinkingEffort := firstNonEmpty(thinkingEffortFromRawRequest(rawRequest), thinkingEffortFromRawRequest(record.RawRequest), thinkingEffortFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
+	thinkingEffort := firstNonEmpty(
+		thinkingEffortFromRawRequest(rawRequest),
+		thinkingEffortFromRawRequest(record.RawRequest),
+		thinkingEffortFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")),
+		thinkingEffortFromRawRequest(contextString(ctx, "API_REQUEST")),
+	)
 	if strings.TrimSpace(rawRequest) == "" {
 		rawRequest = buildFallbackRawRequest(ctx, record)
 	}
@@ -290,11 +295,19 @@ func thinkingEffortFromRawRequest(rawRequest string) string {
 			return effort
 		}
 	}
-	return thinkingEffortFromPacket(rawRequest)
+	return firstNonEmpty(
+		thinkingEffortFromPacket(rawRequest),
+		thinkingEffortFromJSONBody(rawRequest),
+		thinkingEffortFromAPIRequestLog(rawRequest),
+	)
 }
 
 func thinkingEffortFromPacket(packet string) string {
-	body := strings.TrimSpace(packetBody(packet))
+	return thinkingEffortFromJSONBody(packetBody(packet))
+}
+
+func thinkingEffortFromJSONBody(body string) string {
+	body = strings.TrimSpace(body)
 	if body == "" || !json.Valid([]byte(body)) {
 		return ""
 	}
@@ -332,6 +345,30 @@ func thinkingEffortFromPacket(packet string) string {
 		}
 	}
 	return ""
+}
+
+func thinkingEffortFromAPIRequestLog(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lower := strings.ToLower(raw)
+	searchFrom := 0
+	for {
+		idx := strings.Index(lower[searchFrom:], "\nbody:\n")
+		if idx < 0 {
+			return ""
+		}
+		bodyStart := searchFrom + idx + len("\nbody:\n")
+		body := raw[bodyStart:]
+		if next := strings.Index(strings.ToLower(body), "\n\n=== api request "); next >= 0 {
+			body = body[:next]
+		}
+		if effort := thinkingEffortFromJSONBody(body); effort != "" {
+			return effort
+		}
+		searchFrom = bodyStart
+	}
 }
 
 func packetBody(packet string) string {
