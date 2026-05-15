@@ -497,9 +497,9 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 			switch strings.TrimSpace(actionRule.Action) {
 			case "block":
 				return current, &httpError{status: http.StatusForbidden, message: "请求被抓包/过滤规则拦截: " + rule.Name}, triggers
-			case "return_clean_400", "return_clean_401", "return_clean_429", "return_clean_500":
+			case "return_clean_400", "return_clean_401", "return_clean_404", "return_clean_404_model_not_support", "return_clean_429", "return_clean_500":
 				status := CleanReturnStatus(actionRule.Action)
-				return current, &httpError{status: status, message: CleanReturnBody(status)}, triggers
+				return current, &httpError{status: status, message: CleanReturnBodyForAction(actionRule.Action, status)}, triggers
 			}
 		}
 		if next != current {

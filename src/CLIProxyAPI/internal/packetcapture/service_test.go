@@ -309,3 +309,90 @@ func TestApplyRulesReturnClean500(t *testing.T) {
 		t.Fatalf("unexpected body: %s", blockErr.Error())
 	}
 }
+
+func TestApplyRulesModifyStatus(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	defaultMu.Lock()
+	previous := defaultService
+	defaultService = &Service{store: store}
+	defaultMu.Unlock()
+	defer func() {
+		defaultMu.Lock()
+		defaultService = previous
+		defaultMu.Unlock()
+	}()
+
+	_, err = store.UpsertRule(context.Background(), Rule{
+		Name:        "403 to 404",
+		Enabled:     true,
+		Packet:      "client_response",
+		Part:        "status",
+		Operator:    "num_eq",
+		ValueNumber: 403,
+		Action:      "modify_status",
+		Replacement: "404",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRule: %v", err)
+	}
+
+	filtered, blockErr, _ := ApplyRules(context.Background(), Record{Provider: "ollama_cloud"}, "client_response", "HTTP/1.1 403 Forbidden\nContent-Type: application/json\n\n{}")
+	if blockErr != nil {
+		t.Fatalf("ApplyRules block: %v", blockErr)
+	}
+	if !strings.HasPrefix(filtered, "HTTP/1.1 404 Not Found") {
+		t.Fatalf("filtered = %q, want 404 status line", filtered)
+	}
+}
+
+func TestApplyRulesReturnClean404ModelNotSupport(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	defaultMu.Lock()
+	previous := defaultService
+	defaultService = &Service{store: store}
+	defaultMu.Unlock()
+	defer func() {
+		defaultMu.Lock()
+		defaultService = previous
+		defaultMu.Unlock()
+	}()
+
+	rule := Rule{
+		Name:       "ollama subscription",
+		Enabled:    true,
+		Provider:   "ollama_cloud",
+		Packet:     "client_response",
+		MatchLogic: "all",
+		Conditions: []Condition{
+			{Packet: "client_response", Part: "status", Operator: "num_eq", ValueNumber: 403},
+			{Packet: "client_response", Part: "body_json", JSONPath: "error", Operator: "contains", Value: "model requires a subscription"},
+		},
+		Actions: []Action{
+			{Type: "return_clean_404_model_not_support", Packet: "client_response", Target: "response"},
+		},
+	}
+	previousProvider := defaultRulesProvider
+	SetDefaultRulesProvider(func(context.Context) ([]Rule, error) { return []Rule{rule}, nil })
+	defer SetDefaultRulesProvider(previousProvider)
+
+	packet := "HTTP/1.1 403 Forbidden\nContent-Type: application/json\n\n" + `{"error":"this model requires a subscription"}`
+	_, blockErr, _ := ApplyRules(context.Background(), Record{Provider: "ollama_cloud"}, "client_response", packet)
+	if blockErr == nil {
+		t.Fatal("expected clean return error")
+	}
+	status, ok := blockErr.(interface{ StatusCode() int })
+	if !ok || status.StatusCode() != http.StatusNotFound {
+		t.Fatalf("status = %v, want 404", blockErr)
+	}
+	if blockErr.Error() != `{"error":"model not support"}` {
+		t.Fatalf("body = %s", blockErr.Error())
+	}
+}

@@ -81,7 +81,7 @@ func applyRuleToPacket(rule Rule, packet string) (string, bool, string) {
 		}
 		actionRule := ruleForAction(rule, action)
 		switch strings.TrimSpace(actionRule.Action) {
-		case "replace", "redact", "append":
+		case "replace", "redact", "append", "modify_status":
 			next = replacePart(next, actionRule)
 		case "delete":
 			actionRule.Replacement = ""
@@ -307,6 +307,8 @@ func wildcardMatch(actual, pattern string) bool {
 func replacePart(packet string, rule Rule) string {
 	part := strings.TrimSpace(rule.Part)
 	switch part {
+	case "status", "status_code", "http_status":
+		return replaceStatusLine(packet, expandReplacement(firstNonEmptyString(rule.Replacement, rule.Value), strconv.Itoa(statusFromPacket(packet, 0))))
 	case "path", "request_path":
 		return replaceRequestPath(packet, rule.Value, expandReplacement(rule.Replacement, rule.Value))
 	case "header", "headers":
@@ -438,6 +440,8 @@ func CleanReturnStatus(action string) int {
 		return http.StatusBadRequest
 	case "return_clean_401":
 		return http.StatusUnauthorized
+	case "return_clean_404", "return_clean_404_model_not_support":
+		return http.StatusNotFound
 	case "return_clean_429":
 		return http.StatusTooManyRequests
 	case "return_clean_500":
@@ -477,6 +481,41 @@ func CleanReturnBody(status int) string {
 		return fmt.Sprintf(`{"error":{"message":%q,"type":"server_error","code":"internal_server_error"}}`, http.StatusText(status))
 	}
 	return string(body)
+}
+
+func CleanReturnBodyForAction(action string, status int) string {
+	if strings.TrimSpace(action) == "return_clean_404_model_not_support" {
+		return `{"error":"model not support"}`
+	}
+	return CleanReturnBody(status)
+}
+
+func replaceStatusLine(packet, replacement string) string {
+	replacement = strings.TrimSpace(replacement)
+	status, err := strconv.Atoi(replacement)
+	if err != nil || status < 100 || status > 999 {
+		return packet
+	}
+	line, rest, ok := strings.Cut(strings.TrimSpace(packet), "\n")
+	parts := strings.Fields(line)
+	if len(parts) < 2 || !strings.HasPrefix(parts[0], "HTTP/") {
+		return packet
+	}
+	parts[1] = strconv.Itoa(status)
+	text := http.StatusText(status)
+	if text == "" {
+		text = replacement
+	}
+	if len(parts) >= 3 {
+		parts = append(parts[:2], text)
+	} else {
+		parts = append(parts, text)
+	}
+	nextLine := strings.Join(parts, " ")
+	if ok {
+		return nextLine + "\n" + rest
+	}
+	return nextLine
 }
 
 func replaceBody(packet, body string) string {
