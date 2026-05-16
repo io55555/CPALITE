@@ -462,14 +462,13 @@ func (h *Handler) PutOpenAICompat(c *gin.Context) {
 }
 func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	type openAICompatPatch struct {
-		Name          *string                                  `json:"name"`
-		Prefix        *string                                  `json:"prefix"`
-		Disabled      *bool                                    `json:"disabled"`
-		BaseURL       *string                                  `json:"base-url"`
-		APIKeyEntries *[]config.OpenAICompatibilityAPIKey      `json:"api-key-entries"`
-		Models        *[]config.OpenAICompatibilityModel       `json:"models"`
-		Headers       *map[string]string                       `json:"headers"`
-		StatusRulers  *[]config.OpenAICompatibilityStatusRuler `json:"status-rulers"`
+		Name          *string                             `json:"name"`
+		Prefix        *string                             `json:"prefix"`
+		Disabled      *bool                               `json:"disabled"`
+		BaseURL       *string                             `json:"base-url"`
+		APIKeyEntries *[]config.OpenAICompatibilityAPIKey `json:"api-key-entries"`
+		Models        *[]config.OpenAICompatibilityModel  `json:"models"`
+		Headers       *map[string]string                  `json:"headers"`
 	}
 	var body struct {
 		Name  *string            `json:"name"`
@@ -529,9 +528,6 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	}
 	if body.Value.Headers != nil {
 		entry.Headers = config.NormalizeHeaders(*body.Value.Headers)
-	}
-	if body.Value.StatusRulers != nil {
-		entry.StatusRulers = append([]config.OpenAICompatibilityStatusRuler(nil), (*body.Value.StatusRulers)...)
 	}
 	normalizeOpenAICompatibilityEntry(&entry)
 	h.cfg.OpenAICompatibility[targetIndex] = entry

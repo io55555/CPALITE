@@ -1,70 +1,65 @@
 package api
 
 import (
-	"errors"
-	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-func TestAcceptMuxConnections_IdleConnectionDoesNotBlockHTTP(t *testing.T) {
-	listener, errListen := net.Listen("tcp", "127.0.0.1:0")
-	if errListen != nil {
-		t.Fatalf("listen: %v", errListen)
+func TestAcceptMuxNotBlockedByIdleConnection(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
 	}
 	defer listener.Close()
 
-	httpListener := newMuxListener(listener.Addr(), 4)
-	defer httpListener.Close()
+	var routed atomic.Int32
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		routed.Add(1)
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewUnstartedServer(handler)
+	defer srv.Close()
 
-	server := &Server{}
+	muxLn := newMuxListener(listener.Addr(), 1024)
+	server := &Server{managementRoutesEnabled: atomic.Bool{}}
+	server.managementRoutesEnabled.Store(false)
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- server.acceptMuxConnections(listener, httpListener)
-	}()
-	defer func() {
-		_ = listener.Close()
-		select {
-		case err := <-errCh:
-			if err != nil && !errors.Is(err, net.ErrClosed) {
-				t.Fatalf("accept loop error: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("timeout waiting for accept loop")
-		}
+		errCh <- server.acceptMuxConnections(listener, muxLn)
 	}()
 
-	idleConn, errIdle := net.Dial("tcp", listener.Addr().String())
-	if errIdle != nil {
-		t.Fatalf("dial idle: %v", errIdle)
+	srv.Listener = muxLn
+	srv.Start()
+
+	// Open an idle TCP connection that never sends any bytes.
+	idleConn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("failed to dial idle connection: %v", err)
 	}
 	defer idleConn.Close()
 
-	time.Sleep(100 * time.Millisecond)
+	// Give the accept loop time to pick up the idle connection.
+	time.Sleep(50 * time.Millisecond)
 
-	httpConn, errHTTP := net.Dial("tcp", listener.Addr().String())
-	if errHTTP != nil {
-		t.Fatalf("dial http: %v", errHTTP)
+	// Send a real HTTP request. Before the fix, the accept loop would be
+	// blocked on Peek(1) for the idle connection, causing this request to
+	// time out.
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + listener.Addr().String() + "/")
+	if err != nil {
+		listener.Close()
+		t.Fatalf("HTTP request failed (accept loop may be blocked by idle connection): %v", err)
 	}
-	defer httpConn.Close()
-	if _, errWrite := io.WriteString(httpConn, "GET / HTTP/1.1\r\nHost: local\r\n\r\n"); errWrite != nil {
-		t.Fatalf("write http: %v", errWrite)
-	}
+	resp.Body.Close()
 
-	acceptCh := make(chan net.Conn, 1)
-	go func() {
-		conn, _ := httpListener.Accept()
-		acceptCh <- conn
-	}()
+	listener.Close()
 
-	select {
-	case conn := <-acceptCh:
-		if conn == nil {
-			t.Fatal("expected routed HTTP connection")
-		}
-		_ = conn.Close()
-	case <-time.After(time.Second):
-		t.Fatal("idle connection blocked HTTP routing")
+	if routed.Load() == 0 {
+		t.Error("expected at least one request to be routed")
 	}
 }

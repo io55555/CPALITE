@@ -31,8 +31,7 @@ const (
 // It manages the HTTP client and provides methods for generating authorization URLs,
 // exchanging authorization codes for tokens, and refreshing access tokens.
 type CodexAuth struct {
-	httpClient        *http.Client
-	refreshLogContext string
+	httpClient *http.Client
 }
 
 // NewCodexAuth creates a new CodexAuth service instance.
@@ -56,13 +55,6 @@ func NewCodexAuthWithProxyURL(cfg *config.Config, proxyURL string) *CodexAuth {
 	return &CodexAuth{
 		httpClient: util.SetProxy(&sdkCfg, &http.Client{}),
 	}
-}
-
-func (o *CodexAuth) SetRefreshLogContext(value string) {
-	if o == nil {
-		return
-	}
-	o.refreshLogContext = strings.TrimSpace(value)
 }
 
 // GenerateAuthURL creates the OAuth authorization URL with PKCE (Proof Key for Code Exchange).
@@ -300,20 +292,12 @@ func (o *CodexAuth) RefreshTokensWithRetry(ctx context.Context, refreshToken str
 			return tokenData, nil
 		}
 		if isNonRetryableRefreshErr(err) {
-			if contextLabel := strings.TrimSpace(o.refreshLogContext); contextLabel != "" {
-				log.Warnf("Token refresh attempt %d failed with non-retryable error [%s]: %v", attempt+1, contextLabel, err)
-			} else {
-				log.Warnf("Token refresh attempt %d failed with non-retryable error: %v", attempt+1, err)
-			}
+			log.Warnf("Token refresh attempt %d failed with non-retryable error: %v", attempt+1, err)
 			return nil, err
 		}
 
 		lastErr = err
-		if contextLabel := strings.TrimSpace(o.refreshLogContext); contextLabel != "" {
-			log.Warnf("Token refresh attempt %d failed [%s]: %v", attempt+1, contextLabel, err)
-		} else {
-			log.Warnf("Token refresh attempt %d failed: %v", attempt+1, err)
-		}
+		log.Warnf("Token refresh attempt %d failed: %v", attempt+1, err)
 	}
 
 	return nil, fmt.Errorf("token refresh failed after %d attempts: %w", maxRetries, lastErr)

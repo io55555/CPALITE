@@ -22,10 +22,6 @@ type Record struct {
 	RequestedAt time.Time
 	Latency     time.Duration
 	Failed      bool
-	ClientUA    string
-	UpstreamUA  string
-	RawRequest  string
-	RawResponse string
 	Fail        Failure
 	Detail      Detail
 }

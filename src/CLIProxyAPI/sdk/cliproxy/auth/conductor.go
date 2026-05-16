@@ -92,8 +92,6 @@ func quotaCooldownDisabledForAuth(auth *Auth) bool {
 	return quotaCooldownDisabled.Load()
 }
 
-const defaultProxyFailureCooldown = 300 * time.Second
-
 // Result captures execution outcome used to adjust auth state.
 type Result struct {
 	// AuthID references the auth that produced this result.
@@ -153,7 +151,8 @@ type Manager struct {
 	mu        sync.RWMutex
 	auths     map[string]*Auth
 	scheduler *authScheduler
-	// homeRuntimeAuths caches Home auths so websocket sessions can reuse an upstream credential.
+	// homeRuntimeAuths caches auths returned by Home so websocket sessions can
+	// reuse an established upstream credential without dispatching every turn.
 	homeRuntimeAuths map[string]map[string]*Auth
 	// providerOffsets tracks per-model provider rotation state for multi-provider routing.
 	providerOffsets map[string]int
@@ -183,15 +182,7 @@ type Manager struct {
 	// Auto refresh state
 	refreshCancel context.CancelFunc
 	refreshLoop   *authAutoRefreshLoop
-
-	persistMu      sync.Mutex
-	persistDirty   map[string]*Auth
-	persistStarted sync.Once
 }
-
-// ApplyExternalState lets integrations merge independently persisted runtime state
-// into the selected auth without coupling this package to those integrations.
-var ApplyExternalState func(auth *Auth, now time.Time)
 
 // NewManager constructs a manager with optional custom selector and hook.
 func NewManager(store Store, selector Selector, hook Hook) *Manager {
@@ -210,7 +201,6 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		homeRuntimeAuths: make(map[string]map[string]*Auth),
 		providerOffsets:  make(map[string]int),
 		modelPoolOffsets: make(map[string]int),
-		persistDirty:     make(map[string]*Auth),
 	}
 	// atomic.Value requires non-nil initial value.
 	manager.runtimeConfig.Store(&internalconfig.Config{})
@@ -269,64 +259,7 @@ func (m *Manager) RefreshSchedulerEntry(authID string) {
 	}
 	snapshot := auth.Clone()
 	m.mu.RUnlock()
-	applyOpenAICompatPersistedState(snapshot, time.Now())
 	m.scheduler.upsertAuth(snapshot)
-}
-
-// MarkQuotaRecovered clears quota/runtime cooldown state and immediately returns the auth to scheduling.
-func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
-	if m == nil || authID == "" {
-		return
-	}
-	now := time.Now()
-	var snapshot *Auth
-	var beforeSnapshot *Auth
-	clearQuotaModels := make([]string, 0)
-	m.mu.Lock()
-	auth, ok := m.auths[authID]
-	if ok && auth != nil {
-		beforeSnapshot = auth.Clone()
-		auth.Unavailable = false
-		auth.NextRetryAfter = time.Time{}
-		auth.Quota = QuotaState{}
-		auth.Status = StatusActive
-		auth.StatusMessage = ""
-		auth.LastError = nil
-		for model, state := range auth.ModelStates {
-			if state == nil {
-				continue
-			}
-			if state.Quota.Exceeded || state.Quota.Reason != "" || !state.Quota.NextRecoverAt.IsZero() {
-				clearQuotaModels = append(clearQuotaModels, model)
-			}
-			state.Unavailable = false
-			state.NextRetryAfter = time.Time{}
-			state.Quota = QuotaState{}
-			state.Status = StatusActive
-			state.StatusMessage = ""
-			state.LastError = nil
-			state.UpdatedAt = now
-		}
-		auth.UpdatedAt = now
-		snapshot = auth.Clone()
-	}
-	m.mu.Unlock()
-	if snapshot == nil {
-		return
-	}
-	if err := m.persist(ctx, snapshot); err != nil {
-		logEntryWithRequestID(ctx).WithField("auth_id", snapshot.ID).Warnf("failed to persist quota recovery: %v", err)
-	}
-	if m.scheduler != nil {
-		m.scheduler.upsertAuth(snapshot)
-	}
-	for _, model := range clearQuotaModels {
-		registry.GetGlobalRegistry().ClearModelQuotaExceeded(snapshot.ID, model)
-		registry.GetGlobalRegistry().ResumeClientModel(snapshot.ID, model)
-	}
-	m.queueRefreshReschedule(snapshot.ID)
-	m.hook.OnAuthUpdated(ctx, snapshot.Clone())
-	logAuthStateTransition(ctx, beforeSnapshot, snapshot)
 }
 
 // ReconcileRegistryModelStates aligns per-model runtime state with the current
@@ -355,7 +288,6 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 	}
 
 	var snapshot *Auth
-	var persistSnapshot *Auth
 	now := time.Now()
 
 	m.mu.Lock()
@@ -395,17 +327,13 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 				auth.Status = StatusActive
 			}
 			auth.UpdatedAt = now
+			if errPersist := m.persist(ctx, auth); errPersist != nil {
+				logEntryWithRequestID(ctx).WithField("auth_id", auth.ID).Warnf("failed to persist auth changes during model state reconciliation: %v", errPersist)
+			}
 			snapshot = auth.Clone()
-			persistSnapshot = snapshot.Clone()
 		}
 	}
 	m.mu.Unlock()
-
-	if persistSnapshot != nil {
-		if errPersist := m.persist(ctx, persistSnapshot); errPersist != nil {
-			logEntryWithRequestID(ctx).WithField("auth_id", persistSnapshot.ID).Warnf("failed to persist auth changes during model state reconciliation: %v", errPersist)
-		}
-	}
 
 	if m.scheduler != nil && snapshot != nil {
 		m.scheduler.upsertAuth(snapshot)
@@ -780,66 +708,7 @@ func (m *Manager) authSupportsRouteModel(registryRef *registry.ModelRegistry, au
 		return true
 	}
 	selectionKey := m.selectionModelKeyForAuth(auth, routeModel)
-	if selectionKey != "" && selectionKey != routeKey && registryRef.ClientSupportsModel(auth.ID, selectionKey) {
-		return true
-	}
-	return m.openAICompatAuthSupportsConfiguredModel(auth, routeModel, selectionKey)
-}
-
-func (m *Manager) openAICompatAuthSupportsConfiguredModel(auth *Auth, routeModel, selectionModel string) bool {
-	if m == nil || auth == nil || auth.Attributes == nil {
-		return false
-	}
-	compatName := strings.TrimSpace(auth.Attributes["compat_name"])
-	providerKey := strings.TrimSpace(auth.Attributes["provider_key"])
-	if compatName == "" && providerKey == "" && !strings.EqualFold(strings.TrimSpace(auth.Provider), "openai-compatibility") {
-		return false
-	}
-	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
-	compat := resolveOpenAICompatConfig(cfg, providerKey, compatName, auth.Provider)
-	if compat == nil || len(compat.Models) == 0 {
-		return false
-	}
-	for _, candidate := range []string{routeModel, selectionModel} {
-		if openAICompatModelsContain(compat.Models, candidate, auth.Prefix, cfg != nil && cfg.ForceModelPrefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func openAICompatModelsContain(models []internalconfig.OpenAICompatibilityModel, requestedModel, prefix string, forcePrefix bool) bool {
-	requestedKey := canonicalModelKey(requestedModel)
-	if requestedKey == "" {
-		return true
-	}
-	prefix = strings.TrimSpace(prefix)
-	for i := range models {
-		for _, id := range openAICompatConfiguredModelIDs(models[i]) {
-			idKey := canonicalModelKey(id)
-			if idKey == "" {
-				continue
-			}
-			if !forcePrefix && strings.EqualFold(idKey, requestedKey) {
-				return true
-			}
-			if prefix != "" && strings.EqualFold(canonicalModelKey(prefix+"/"+id), requestedKey) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func openAICompatConfiguredModelIDs(model internalconfig.OpenAICompatibilityModel) []string {
-	ids := make([]string, 0, 2)
-	if alias := strings.TrimSpace(model.Alias); alias != "" {
-		ids = append(ids, alias)
-	}
-	if name := strings.TrimSpace(model.Name); name != "" {
-		ids = append(ids, name)
-	}
-	return ids
+	return selectionKey != "" && selectionKey != routeKey && registryRef.ClientSupportsModel(auth.ID, selectionKey)
 }
 
 func discardStreamChunks(ch <-chan cliproxyexecutor.StreamChunk) {
@@ -1266,7 +1135,6 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	authClone := auth.Clone()
-	applyOpenAICompatPersistedState(authClone, time.Now())
 	m.mu.Lock()
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
@@ -1286,9 +1154,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		return nil, nil
 	}
 	m.mu.Lock()
-	var beforeSnapshot *Auth
 	if existing, ok := m.auths[auth.ID]; ok && existing != nil {
-		beforeSnapshot = existing.Clone()
 		if !auth.indexAssigned && auth.Index == "" {
 			auth.Index = existing.Index
 			auth.indexAssigned = existing.indexAssigned
@@ -1304,7 +1170,6 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	authClone := auth.Clone()
-	applyOpenAICompatPersistedState(authClone, time.Now())
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
@@ -1314,7 +1179,6 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.queueRefreshReschedule(auth.ID)
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
-	logAuthStateTransition(ctx, beforeSnapshot, authClone)
 	return auth.Clone(), nil
 }
 
@@ -1336,9 +1200,7 @@ func (m *Manager) Load(ctx context.Context) error {
 			continue
 		}
 		auth.EnsureIndex()
-		authClone := auth.Clone()
-		applyOpenAICompatPersistedState(authClone, time.Now())
-		m.auths[auth.ID] = authClone
+		m.auths[auth.ID] = auth.Clone()
 	}
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
 	if cfg == nil {
@@ -2284,12 +2146,9 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	clearModelQuota := false
 	setModelQuota := false
 	var authSnapshot *Auth
-	var beforeSnapshot *Auth
-	var persistSnapshot *Auth
 
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
-		beforeSnapshot = auth.Clone()
 		now := time.Now()
 		auth.recordRecentRequest(now, result.Success)
 		if result.Success {
@@ -2330,13 +2189,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					}
 
 					statusCode := statusCodeFromResult(result.Error)
-					if isProxyFailureResultError(result.Error) {
-						next := now.Add(m.proxyFailureCooldown())
-						state.NextRetryAfter = next
-						state.StatusMessage = proxyFailureStatusMessage(result.Error)
-						suspendReason = "proxy_failure"
-						shouldSuspendModel = true
-					} else if isModelSupportResultError(result.Error) {
+					if isModelSupportResultError(result.Error) {
 						next := now.Add(12 * time.Hour)
 						state.NextRetryAfter = next
 						suspendReason = "model_not_supported"
@@ -2413,16 +2266,14 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					updateAggregatedAvailability(auth, now)
 				}
 			} else {
-				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown())
+				applyAuthFailureState(auth, result.Error, result.RetryAfter, now)
 			}
 		}
 
-		applyOpenAICompatPersistedState(auth, now)
+		_ = m.persist(ctx, auth)
 		authSnapshot = auth.Clone()
-		persistSnapshot = authSnapshot.Clone()
 	}
 	m.mu.Unlock()
-	m.queuePersist(ctx, persistSnapshot)
 	if m.scheduler != nil && authSnapshot != nil {
 		m.scheduler.upsertAuth(authSnapshot)
 	}
@@ -2440,7 +2291,6 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	}
 
 	m.hook.OnResult(ctx, result)
-	logAuthStateTransition(ctx, beforeSnapshot, authSnapshot)
 }
 
 func ensureModelState(auth *Auth, model string) *ModelState {
@@ -2603,17 +2453,6 @@ func clearAuthStateOnSuccess(auth *Auth, now time.Time) {
 	auth.UpdatedAt = now
 }
 
-func applyOpenAICompatPersistedState(auth *Auth, now time.Time) {
-	if ApplyExternalState == nil {
-		return
-	}
-	ApplyExternalState(auth, now)
-	if auth.Disabled || auth.Status == StatusDisabled || (auth.Unavailable && auth.NextRetryAfter.After(now)) {
-		auth.UpdatedAt = now
-		updateAggregatedAvailability(auth, now)
-	}
-}
-
 func cloneError(err *Error) *Error {
 	if err == nil {
 		return nil
@@ -2754,63 +2593,6 @@ func isModelSupportResultError(err *Error) bool {
 	return isModelSupportErrorMessage(err.Message)
 }
 
-func isProxyFailureResultError(err *Error) bool {
-	if err == nil {
-		return false
-	}
-	return isProxyFailureMessage(err.Message) || isProxyFailureMessage(err.Code)
-}
-
-func isProxyFailureMessage(message string) bool {
-	lower := strings.ToLower(strings.TrimSpace(message))
-	if lower == "" {
-		return false
-	}
-	hasProxySignal := strings.Contains(lower, "socks connect") ||
-		strings.Contains(lower, "proxyconnect") ||
-		strings.Contains(lower, "proxy connection") ||
-		strings.Contains(lower, "proxy error") ||
-		strings.Contains(lower, "proxy failed")
-	if !hasProxySignal {
-		return false
-	}
-	failureSignals := [...]string{
-		"dial tcp",
-		"connectex",
-		"connection refused",
-		"actively refused",
-		"no connection could be made",
-		"connection reset",
-		"i/o timeout",
-		"tls handshake timeout",
-		"no such host",
-	}
-	for _, signal := range failureSignals {
-		if strings.Contains(lower, signal) {
-			return true
-		}
-	}
-	return false
-}
-
-func proxyFailureStatusMessage(err *Error) string {
-	if err == nil || strings.TrimSpace(err.Message) == "" {
-		return "proxy failure"
-	}
-	return err.Message
-}
-
-func (m *Manager) proxyFailureCooldown() time.Duration {
-	if m == nil {
-		return defaultProxyFailureCooldown
-	}
-	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
-	if cfg == nil || cfg.ProxyFailureCooldownSeconds <= 0 {
-		return defaultProxyFailureCooldown
-	}
-	return time.Duration(cfg.ProxyFailureCooldownSeconds) * time.Second
-}
-
 func isRequestScopedNotFoundMessage(message string) bool {
 	if message == "" {
 		return false
@@ -2838,14 +2620,6 @@ func isRequestInvalidError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var stopRetry interface{ StopRetry() bool }
-	if errors.As(err, &stopRetry) && stopRetry.StopRetry() {
-		return true
-	}
-	var authFault interface{ AuthFault() bool }
-	if errors.As(err, &authFault) && authFault.AuthFault() {
-		return false
-	}
 	if isModelSupportError(err) {
 		return false
 	}
@@ -2869,7 +2643,7 @@ func isRequestInvalidError(err error) bool {
 	}
 }
 
-func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time, proxyCooldown time.Duration) {
+func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time) {
 	if auth == nil {
 		return
 	}
@@ -2885,14 +2659,6 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		if resultErr.Message != "" {
 			auth.StatusMessage = resultErr.Message
 		}
-	}
-	if isProxyFailureResultError(resultErr) {
-		auth.StatusMessage = proxyFailureStatusMessage(resultErr)
-		if proxyCooldown <= 0 {
-			proxyCooldown = defaultProxyFailureCooldown
-		}
-		auth.NextRetryAfter = now.Add(proxyCooldown)
-		return
 	}
 	statusCode := statusCodeFromResult(resultErr)
 	switch statusCode {
@@ -3651,6 +3417,7 @@ func (m *Manager) pickNextViaHome(ctx context.Context, model string, opts clipro
 			}
 		}
 	}
+
 	client := home.Current()
 	if client == nil || !client.HeartbeatOK() {
 		return nil, nil, "", &Error{Code: "home_unavailable", Message: "home control center unavailable", HTTPStatus: http.StatusServiceUnavailable}
@@ -3954,50 +3721,6 @@ func (m *Manager) persist(ctx context.Context, auth *Auth) error {
 	return err
 }
 
-func (m *Manager) queuePersist(ctx context.Context, auth *Auth) {
-	if m == nil || m.store == nil || auth == nil || shouldSkipPersist(ctx) {
-		return
-	}
-	if auth.Attributes != nil {
-		if v := strings.ToLower(strings.TrimSpace(auth.Attributes["runtime_only"])); v == "true" {
-			return
-		}
-	}
-	if auth.Metadata == nil {
-		return
-	}
-	snapshot := auth.Clone()
-	m.persistStarted.Do(func() {
-		go m.persistLoop()
-	})
-	m.persistMu.Lock()
-	m.persistDirty[snapshot.ID] = snapshot
-	m.persistMu.Unlock()
-}
-
-func (m *Manager) persistLoop() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		m.flushQueuedPersist(context.Background())
-	}
-}
-
-func (m *Manager) flushQueuedPersist(ctx context.Context) {
-	if m == nil || m.store == nil {
-		return
-	}
-	m.persistMu.Lock()
-	pending := m.persistDirty
-	m.persistDirty = make(map[string]*Auth)
-	m.persistMu.Unlock()
-	for _, auth := range pending {
-		if err := m.persist(ctx, auth); err != nil {
-			logEntryWithRequestID(ctx).WithField("auth_id", auth.ID).Warnf("failed to persist queued auth state: %v", err)
-		}
-	}
-}
-
 // StartAutoRefresh launches a background loop that evaluates auth freshness
 // every few seconds and triggers refresh operations when required.
 // Only one loop is kept alive; starting a new one cancels the previous run.
@@ -4046,7 +3769,6 @@ func (m *Manager) StopAutoRefresh() {
 	if stoppable, ok := m.selector.(StoppableSelector); ok {
 		stoppable.Stop()
 	}
-	m.flushQueuedPersist(context.Background())
 }
 
 func (m *Manager) queueRefreshReschedule(authID string) {
@@ -4416,6 +4138,9 @@ func logEntryWithRequestID(ctx context.Context) *log.Entry {
 }
 
 func debugLogAuthSelection(entry *log.Entry, auth *Auth, provider string, model string) {
+	if !log.IsLevelEnabled(log.DebugLevel) {
+		return
+	}
 	if entry == nil || auth == nil {
 		return
 	}
@@ -4427,18 +4152,8 @@ func debugLogAuthSelection(entry *log.Entry, auth *Auth, provider string, model 
 	}
 	switch accountType {
 	case "api_key":
-		if isOpenAICompatAPIKeyAuth(auth) {
-			entry.Debugf("[2/6][%s][api_key=%s auth=%s]CPA选择apikey或凭证账号(账号名 或 key)", provider, accountInfo, auth.ID)
-			entry.Debugf("selected OpenAI compatible key | provider=%s model=%s auth=%s api_key=%s%s", provider, model, auth.ID, accountInfo, suffix)
-			return
-		}
-		if log.IsLevelEnabled(log.DebugLevel) {
-			entry.Debugf("Use API key %s for model %s%s", util.HideAPIKey(accountInfo), model, suffix)
-		}
+		entry.Debugf("Use API key %s for model %s%s", util.HideAPIKey(accountInfo), model, suffix)
 	case "oauth":
-		if !log.IsLevelEnabled(log.DebugLevel) {
-			return
-		}
 		ident := formatOauthIdentity(auth, provider, accountInfo)
 		entry.Debugf("Use OAuth %s for model %s%s", ident, model, suffix)
 	}

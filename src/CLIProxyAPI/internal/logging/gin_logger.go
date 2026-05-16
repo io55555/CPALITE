@@ -74,9 +74,6 @@ func GinLogrusLogger() gin.HandlerFunc {
 		}
 
 		statusCode := c.Writer.Status()
-		if shouldSkipNoisyManagementRequest(c.Request.URL.Path, c.Request.Method, statusCode) {
-			return
-		}
 		clientIP := c.ClientIP()
 		method := c.Request.Method
 		errorMessage := c.Errors.ByType(gin.ErrorTypePrivate).String()
@@ -102,21 +99,6 @@ func GinLogrusLogger() gin.HandlerFunc {
 		default:
 			entry.Info(logLine)
 		}
-	}
-}
-
-func shouldSkipNoisyManagementRequest(path, method string, statusCode int) bool {
-	if statusCode >= http.StatusBadRequest {
-		return false
-	}
-	if method != http.MethodGet {
-		return false
-	}
-	switch path {
-	case "/v0/management/openai-compatibility/key-states":
-		return true
-	default:
-		return false
 	}
 }
 

@@ -33,10 +33,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
@@ -51,71 +48,6 @@ import (
 )
 
 const oauthCallbackSuccessHTML = `<html><head><meta charset="utf-8"><title>Authentication successful</title><script>setTimeout(function(){window.close();},5000);</script></head><body><h1>Authentication successful!</h1><p>You can close this window.</p><p>This window will close automatically in 5 seconds.</p></body></html>`
-
-const defaultManagementConcurrencyLimit = 16
-const defaultManagementQueueLimit = 16
-
-type managementProcessorPool struct {
-	workers chan struct{}
-	queue   chan struct{}
-}
-
-func newManagementProcessorPool(workers, queue int) *managementProcessorPool {
-	if workers <= 0 {
-		workers = defaultManagementConcurrencyLimit
-	}
-	if queue < 0 {
-		queue = 0
-	}
-	return &managementProcessorPool{
-		workers: make(chan struct{}, workers),
-		queue:   make(chan struct{}, queue),
-	}
-}
-
-func (p *managementProcessorPool) middleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if p == nil || !isManagementRequestPath(c.Request.URL.Path) {
-			c.Next()
-			return
-		}
-		if p.tryRun(c) {
-			return
-		}
-		select {
-		case p.queue <- struct{}{}:
-			defer func() { <-p.queue }()
-			p.run(c)
-		default:
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "management processor pool is busy"})
-		}
-	}
-}
-
-func (p *managementProcessorPool) tryRun(c *gin.Context) bool {
-	select {
-	case p.workers <- struct{}{}:
-		defer func() { <-p.workers }()
-		c.Next()
-		return true
-	default:
-		return false
-	}
-}
-
-func (p *managementProcessorPool) run(c *gin.Context) {
-	for {
-		select {
-		case p.workers <- struct{}{}:
-			defer func() { <-p.workers }()
-			c.Next()
-			return
-		case <-c.Request.Context().Done():
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "management request cancelled"})
-			return
-		}
-	}
-}
 
 type serverOptionConfig struct {
 	extraMiddleware      []gin.HandlerFunc
@@ -239,8 +171,7 @@ type Server struct {
 	wsAuthEnabled atomic.Bool
 
 	// management handler
-	mgmt                          *managementHandlers.Handler
-	managementAssetRefreshRunning atomic.Bool
+	mgmt *managementHandlers.Handler
 
 	// ampModule is the Amp routing module for model mapping hot-reload
 	ampModule *ampmodule.AmpModule
@@ -289,16 +220,13 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	if optionState.engineConfigurator != nil {
 		optionState.engineConfigurator(engine)
 	}
-	managementPool := newManagementProcessorPool(defaultManagementConcurrencyLimit, defaultManagementQueueLimit)
 
 	// Add middleware
 	engine.Use(logging.GinLogrusLogger())
 	engine.Use(logging.GinLogrusRecovery())
-	engine.Use(managementPool.middleware())
 	for _, mw := range optionState.extraMiddleware {
 		engine.Use(mw)
 	}
-	engine.Use(middleware.PacketCaptureMiddleware(cfg))
 
 	// Add request logging middleware (positioned after recovery, before auth)
 	// Resolve logs directory relative to the configuration file directory.
@@ -309,7 +237,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 			requestLogger = optionState.requestLoggerFactory(cfg, configFilePath)
 		}
 		if requestLogger != nil {
-			engine.Use(middleware.RequestLoggingMiddleware(requestLogger, cfg))
+			engine.Use(middleware.RequestLoggingMiddleware(requestLogger))
 			if setter, ok := requestLogger.(interface{ SetEnabled(bool) }); ok {
 				toggle = setter.SetEnabled
 			}
@@ -340,7 +268,6 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		wsRoutes:            make(map[string]struct{}),
 	}
 	s.wsAuthEnabled.Store(cfg.WebsocketAuth)
-	s.configurePacketCaptureRulesProvider()
 	// Save initial YAML snapshot
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
 	s.applyAccessConfig(nil, cfg)
@@ -349,7 +276,6 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	managementasset.SetCurrentConfig(cfg)
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
-	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	applySignatureCacheConfig(nil, cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
@@ -358,18 +284,6 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	logDir := logging.ResolveLogDirectory(cfg)
 	s.mgmt.SetLogDirectory(logDir)
-	if gin.Mode() != gin.TestMode {
-		if err := usage.InitDefaultStoreInLogDir(logDir); err != nil {
-			log.WithError(err).Warn("usage store unavailable")
-		}
-		if err := packetcapture.InitDefaultInLogDir(logDir); err != nil {
-			log.WithError(err).Warn("packet capture store unavailable")
-		}
-	}
-	s.ensureOpenAICompatKeyState(cfg)
-	s.mgmt.SetUsageStore(usage.DefaultStore())
-	s.mgmt.SetOpenAICompatKeyState(openai_compat_state.DefaultService())
-	s.applyOpenAICompatKeyStateToAuths(context.Background())
 	if optionState.postAuthHook != nil {
 		s.mgmt.SetPostAuthHook(optionState.postAuthHook)
 	}
@@ -443,74 +357,6 @@ func (s *Server) homeHeartbeatMiddleware() gin.HandlerFunc {
 	}
 }
 
-func (s *Server) configurePacketCaptureRulesProvider() {
-	packetcapture.SetDefaultRulesProvider(func(context.Context) ([]packetcapture.Rule, error) {
-		if s == nil || s.cfg == nil {
-			return nil, nil
-		}
-		return configPacketRulesToRuntimeRules(s.cfg.PacketCapture.FilterRules), nil
-	})
-}
-
-func configPacketRulesToRuntimeRules(in []config.PacketFilterRule) []packetcapture.Rule {
-	out := make([]packetcapture.Rule, 0, len(in))
-	for _, rule := range in {
-		out = append(out, packetcapture.Rule{
-			ID:              rule.ID,
-			Name:            rule.Name,
-			Enabled:         rule.Enabled,
-			RecordHistory:   rule.RecordHistory,
-			Priority:        rule.Priority,
-			MatchLogic:      rule.MatchLogic,
-			Provider:        rule.Provider,
-			ProviderKeyword: rule.ProviderKeyword,
-			Model:           rule.Model,
-			ModelKeyword:    rule.ModelKeyword,
-			Packet:          rule.Packet,
-			Part:            rule.Part,
-			JSONPath:        rule.JSONPath,
-			Header:          rule.Header,
-			Operator:        rule.Operator,
-			Value:           rule.Value,
-			ValueNumber:     rule.ValueNumber,
-			Action:          rule.Action,
-			Replacement:     rule.Replacement,
-			ReplaceLimit:    rule.ReplaceLimit,
-			CooldownSeconds: rule.CooldownSeconds,
-			Target:          rule.Target,
-			Notes:           rule.Notes,
-			Conditions:      configPacketConditionsToRuntime(rule.Conditions),
-			Actions:         configPacketActionsToRuntime(rule.Actions),
-			CreatedAt:       rule.CreatedAt,
-			UpdatedAt:       rule.UpdatedAt,
-		})
-	}
-	return out
-}
-
-func configPacketConditionsToRuntime(in []config.PacketFilterCondition) []packetcapture.Condition {
-	out := make([]packetcapture.Condition, 0, len(in))
-	for _, item := range in {
-		out = append(out, packetcapture.Condition{
-			Packet: item.Packet, Part: item.Part, JSONPath: item.JSONPath, Header: item.Header,
-			Operator: item.Operator, Value: item.Value, ValueNumber: item.ValueNumber,
-		})
-	}
-	return out
-}
-
-func configPacketActionsToRuntime(in []config.PacketFilterAction) []packetcapture.Action {
-	out := make([]packetcapture.Action, 0, len(in))
-	for _, item := range in {
-		out = append(out, packetcapture.Action{
-			Type: item.Type, Packet: item.Packet, Part: item.Part, JSONPath: item.JSONPath, Header: item.Header,
-			Value: item.Value, Replacement: item.Replacement, ReplaceLimit: item.ReplaceLimit,
-			Target: item.Target, CooldownSeconds: item.CooldownSeconds,
-		})
-	}
-	return out
-}
-
 // setupRoutes configures the API routes for the server.
 // It defines the endpoints and associates them with their respective handlers.
 func (s *Server) setupRoutes() {
@@ -569,7 +415,7 @@ func (s *Server) setupRoutes() {
 	// Root endpoint
 	s.engine.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			//"message": "CLI Proxy API Server",
+			"message": "CLI Proxy API Server",
 			"endpoints": []string{
 				"POST /v1/chat/completions",
 				"POST /v1/completions",
@@ -808,11 +654,6 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/openai-compatibility", s.mgmt.PutOpenAICompat)
 		mgmt.PATCH("/openai-compatibility", s.mgmt.PatchOpenAICompat)
 		mgmt.DELETE("/openai-compatibility", s.mgmt.DeleteOpenAICompat)
-		mgmt.GET("/openai-compatibility/key-states", s.mgmt.GetOpenAICompatKeyStates)
-		mgmt.PATCH("/openai-compatibility/key-state", s.mgmt.PatchOpenAICompatKeyState)
-		mgmt.GET("/openai-compatibility/key-state/detail", s.mgmt.GetOpenAICompatKeyStateDetail)
-		mgmt.POST("/openai-compatibility/test-key", s.mgmt.TestOpenAICompatKey)
-		mgmt.POST("/openai-compatibility/test-all", s.mgmt.TestAllOpenAICompatKeys)
 
 		mgmt.GET("/vertex-api-key", s.mgmt.GetVertexCompatKeys)
 		mgmt.PUT("/vertex-api-key", s.mgmt.PutVertexCompatKeys)
@@ -831,25 +672,6 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/auth-files", s.mgmt.ListAuthFiles)
 		mgmt.GET("/auth-files/models", s.mgmt.GetAuthFileModels)
-		mgmt.GET("/auth-refresh-queue", s.mgmt.GetAuthRefreshQueue)
-		mgmt.GET("/usage", s.mgmt.GetFwindyUsage)
-		mgmt.DELETE("/usage", s.mgmt.DeleteFwindyUsage)
-		mgmt.GET("/usage/statistics", s.mgmt.GetUsageStatistics)
-		mgmt.DELETE("/usage/records", s.mgmt.DeleteUsageRecords)
-		mgmt.GET("/packet-capture/state", s.mgmt.GetPacketCaptureState)
-		mgmt.PUT("/packet-capture/state", s.mgmt.PutPacketCaptureState)
-		mgmt.PATCH("/packet-capture/state", s.mgmt.PutPacketCaptureState)
-		mgmt.GET("/packet-capture/records", s.mgmt.ListPacketCaptures)
-		mgmt.GET("/packet-capture/records/:id", s.mgmt.GetPacketCapture)
-		mgmt.DELETE("/packet-capture/records", s.mgmt.DeletePacketCaptures)
-		mgmt.GET("/packet-capture/rules", s.mgmt.ListPacketFilterRules)
-		mgmt.GET("/packet-capture/rules/export", s.mgmt.ExportPacketFilterRules)
-		mgmt.POST("/packet-capture/rules/import", s.mgmt.ImportPacketFilterRules)
-		mgmt.PUT("/packet-capture/rules", s.mgmt.PutPacketFilterRule)
-		mgmt.PATCH("/packet-capture/rules", s.mgmt.PutPacketFilterRule)
-		mgmt.DELETE("/packet-capture/rules/:id", s.mgmt.DeletePacketFilterRule)
-		mgmt.GET("/packet-capture/triggers", s.mgmt.ListPacketFilterTriggers)
-		mgmt.DELETE("/packet-capture/triggers", s.mgmt.DeletePacketFilterTriggers)
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
 		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)
 		mgmt.POST("/auth-files", s.mgmt.UploadAuthFile)
@@ -886,10 +708,6 @@ func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 	}
 }
 
-func isManagementRequestPath(path string) bool {
-	return path == "/management.html" || path == "/v0/management" || strings.HasPrefix(path, "/v0/management/")
-}
-
 func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	cfg := s.cfg
 	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
@@ -904,9 +722,12 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 
 	if _, err := os.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
-			s.ensureManagementControlPanelAsync(cfg)
-			c.AbortWithStatus(http.StatusNotFound)
-			return
+			// Synchronously ensure management.html is available with a detached context.
+			// Control panel bootstrap should not be canceled by client disconnects.
+			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
 		} else {
 			log.WithError(err).Error("failed to stat management control panel asset")
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -915,24 +736,6 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	}
 
 	c.File(filePath)
-}
-
-func (s *Server) ensureManagementControlPanelAsync(cfg *config.Config) {
-	if s == nil || cfg == nil {
-		return
-	}
-	if !s.managementAssetRefreshRunning.CompareAndSwap(false, true) {
-		return
-	}
-	proxyURL := cfg.ProxyURL
-	repository := cfg.RemoteManagement.PanelGitHubRepository
-	staticDir := managementasset.StaticDir(s.configFilePath)
-	go func() {
-		defer s.managementAssetRefreshRunning.Store(false)
-		if !managementasset.EnsureLatestManagementHTML(context.Background(), staticDir, proxyURL, repository) {
-			log.Warn("management control panel asset is missing and async refresh did not produce management.html")
-		}
-	}()
 }
 
 func (s *Server) enableKeepAlive(timeout time.Duration, onTimeout func()) {
@@ -1440,63 +1243,14 @@ func (s *Server) Stop(ctx context.Context) error {
 			log.Debugf("failed to close shared listener: %v", errClose)
 		}
 	}
+
 	// Shutdown the HTTP server.
 	if err := s.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", err)
 	}
-	_ = usage.CloseDefaultStore()
-	_ = openai_compat_state.CloseDefault()
-	_ = packetcapture.CloseDefault()
 
 	log.Debug("API server stopped")
 	return nil
-}
-
-func (s *Server) ensureOpenAICompatKeyState(cfg *config.Config) *openai_compat_state.Service {
-	if cfg == nil || len(cfg.OpenAICompatibility) == 0 {
-		return openai_compat_state.DefaultService()
-	}
-	if service := openai_compat_state.DefaultService(); service != nil {
-		return service
-	}
-	logDir := logging.ResolveLogDirectory(cfg)
-	if err := openai_compat_state.InitDefault(filepath.Join(logDir, "openai_compat_key_state.db")); err != nil {
-		log.WithError(err).Warn("openai compatibility key state unavailable")
-		return nil
-	}
-	return openai_compat_state.DefaultService()
-}
-
-func (s *Server) applyOpenAICompatKeyStateToAuths(ctx context.Context) {
-	if s == nil || s.handlers == nil || s.handlers.AuthManager == nil {
-		return
-	}
-	service := openai_compat_state.DefaultService()
-	if service == nil {
-		return
-	}
-	for _, authEntry := range s.handlers.AuthManager.List() {
-		if !isOpenAICompatRuntimeAuth(authEntry) {
-			continue
-		}
-		service.ApplyToAuth(authEntry)
-		_, _ = s.handlers.AuthManager.Update(auth.WithSkipPersist(ctx), authEntry)
-		s.handlers.AuthManager.RefreshSchedulerEntry(authEntry.ID)
-	}
-}
-
-func isOpenAICompatRuntimeAuth(authEntry *auth.Auth) bool {
-	if authEntry == nil {
-		return false
-	}
-	if strings.EqualFold(strings.TrimSpace(authEntry.Provider), "openai-compatibility") {
-		return true
-	}
-	if authEntry.Attributes == nil {
-		return false
-	}
-	return strings.TrimSpace(authEntry.Attributes["compat_name"]) != "" ||
-		(strings.TrimSpace(authEntry.Attributes["provider_key"]) != "" && strings.TrimSpace(authEntry.Attributes["api_key"]) != "")
 }
 
 // corsMiddleware returns a Gin middleware handler that adds CORS headers
@@ -1648,11 +1402,6 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 		s.mgmt.SetConfig(cfg)
 		s.mgmt.SetAuthManager(s.handlers.AuthManager)
 	}
-	s.ensureOpenAICompatKeyState(cfg)
-	if s.mgmt != nil {
-		s.mgmt.SetOpenAICompatKeyState(openai_compat_state.DefaultService())
-	}
-	s.applyOpenAICompatKeyStateToAuths(context.Background())
 
 	// Notify Amp module only when Amp config has changed.
 	ampConfigChanged := oldCfg == nil || !reflect.DeepEqual(oldCfg.AmpCode, cfg.AmpCode)
