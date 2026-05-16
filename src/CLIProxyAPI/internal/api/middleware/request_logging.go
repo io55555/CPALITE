@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
@@ -286,7 +287,7 @@ func captureRequestInfo(c *gin.Context, captureBody bool) (*RequestInfo, error) 
 
 		// Restore the body for the actual request processing
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		body = bodyBytes
+		body = decodeCapturedRequestBodyForLog(bodyBytes, c.Request.Header.Get("Content-Encoding"))
 	}
 
 	return &RequestInfo{
@@ -297,6 +298,57 @@ func captureRequestInfo(c *gin.Context, captureBody bool) (*RequestInfo, error) 
 		RequestID: logging.GetGinRequestID(c),
 		Timestamp: time.Now(),
 	}, nil
+}
+
+func decodeCapturedRequestBodyForLog(raw []byte, encoding string) []byte {
+	if len(raw) == 0 {
+		return raw
+	}
+	decoded, err := decodeCapturedRequestBody(raw, encoding)
+	if err != nil {
+		return raw
+	}
+	return decoded
+}
+
+func decodeCapturedRequestBody(raw []byte, encoding string) ([]byte, error) {
+	encoding = strings.TrimSpace(encoding)
+	if encoding == "" || strings.EqualFold(encoding, "identity") {
+		return raw, nil
+	}
+
+	parts := strings.Split(encoding, ",")
+	body := raw
+	for i := len(parts) - 1; i >= 0; i-- {
+		enc := strings.ToLower(strings.TrimSpace(parts[i]))
+		switch enc {
+		case "", "identity":
+			continue
+		case "zstd":
+			decoded, err := decodeCapturedZstdRequestBody(body)
+			if err != nil {
+				return nil, err
+			}
+			body = decoded
+		default:
+			return nil, fmt.Errorf("unsupported request content encoding: %s", enc)
+		}
+	}
+	return body, nil
+}
+
+func decodeCapturedZstdRequestBody(raw []byte) ([]byte, error) {
+	decoder, err := zstd.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create zstd request decoder: %w", err)
+	}
+	defer decoder.Close()
+
+	decoded, err := io.ReadAll(decoder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode zstd request body: %w", err)
+	}
+	return decoded, nil
 }
 
 // shouldLogRequest determines whether the request should be logged.
