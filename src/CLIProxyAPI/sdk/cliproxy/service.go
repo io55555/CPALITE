@@ -13,13 +13,10 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/authrecovery"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor"
-	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/diff"
@@ -450,30 +447,10 @@ func (s *Service) registerResolvedModelsForAuth(a *coreauth.Auth, providerKey st
 		return
 	}
 	if len(models) == 0 {
-		logOpenAICompatModelSnapshot(a, providerKey, 0, "cleared: empty model list")
 		GlobalModelRegistry().UnregisterClient(a.ID)
 		return
 	}
-	logOpenAICompatModelSnapshot(a, providerKey, len(models), "registered")
 	GlobalModelRegistry().RegisterClient(a.ID, providerKey, models)
-}
-
-func logOpenAICompatModelSnapshot(a *coreauth.Auth, providerKey string, modelCount int, action string) {
-	if a == nil || a.Attributes == nil {
-		return
-	}
-	compatName := strings.TrimSpace(a.Attributes["compat_name"])
-	if compatName == "" && strings.TrimSpace(a.Attributes["provider_key"]) == "" {
-		return
-	}
-	log.WithFields(log.Fields{
-		"auth_id":      a.ID,
-		"provider":     a.Provider,
-		"provider_key": strings.TrimSpace(providerKey),
-		"compat_name":  compatName,
-		"api_key":      strings.TrimSpace(a.Attributes["api_key"]),
-		"model_count":  modelCount,
-	}).Infof("OpenAI兼容凭证模型快照%s", action)
 }
 
 // rebindExecutors refreshes provider executors so they observe the latest configuration.
@@ -577,6 +554,9 @@ func (s *Service) applyConfigUpdate(newCfg *config.Config) {
 	if s.coreManager != nil {
 		s.coreManager.SetConfig(newCfg)
 		s.coreManager.SetOAuthModelAlias(newCfg.OAuthModelAlias)
+	}
+	if newCfg.Home.Enabled {
+		s.registerHomeExecutors()
 	}
 	s.rebindExecutors()
 }
@@ -950,7 +930,6 @@ func (s *Service) Run(ctx context.Context) error {
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(context.Background(), interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
-		authrecovery.Start(ctx, s.cfg, s.coreManager)
 	}
 
 	select {
@@ -1039,12 +1018,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		}
 
 		usage.StopDefault()
-		if err := internalusage.CloseDefaultStore(); err != nil && shutdownErr == nil {
-			shutdownErr = err
-		}
-		if err := openai_compat_state.CloseDefault(); err != nil && shutdownErr == nil {
-			shutdownErr = err
-		}
 	})
 	return shutdownErr
 }
@@ -1261,7 +1234,6 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 						s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
 					} else {
 						// Ensure stale registrations are cleared when model list becomes empty.
-						logOpenAICompatModelSnapshot(a, providerKey, 0, "cleared: provider model list is empty")
 						GlobalModelRegistry().UnregisterClient(a.ID)
 					}
 					return
@@ -1269,7 +1241,6 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 			}
 			if isCompatAuth {
 				// No matching provider found or models removed entirely; drop any prior registration.
-				logOpenAICompatModelSnapshot(a, providerKey, 0, "cleared: provider config not found")
 				GlobalModelRegistry().UnregisterClient(a.ID)
 				return
 			}

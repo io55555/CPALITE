@@ -106,7 +106,8 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 			return false
 		}
 		appendRegularMessage := func(message []byte) {
-			// Keep strict assistant(tool_calls) -> tool(tool_call_id) adjacency for providers that require it.
+			// Keep tool-call adjacency strict for providers that require
+			// assistant(tool_calls) -> tool(tool_call_id) with no message in between.
 			if hasAwaitingToolOutput() {
 				deferredMessages = append(deferredMessages, message)
 				return
@@ -213,6 +214,7 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 					flushDeferredMessages()
 				}
 			}
+
 		}
 		flushPendingToolCalls()
 		flushDeferredMessages()

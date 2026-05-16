@@ -12,11 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	muxProtocolDetectTimeout = 5 * time.Second
-	muxProtocolDetectLimit   = 1024
-)
-
 func normalizeHTTPServeError(err error) error {
 	if err == nil {
 		return nil
@@ -45,7 +40,6 @@ func (s *Server) acceptMuxConnections(listener net.Listener, httpListener *muxLi
 		return net.ErrClosed
 	}
 
-	detectSem := make(chan struct{}, muxProtocolDetectLimit)
 	for {
 		conn, errAccept := listener.Accept()
 		if errAccept != nil {
@@ -54,20 +48,23 @@ func (s *Server) acceptMuxConnections(listener net.Listener, httpListener *muxLi
 		if conn == nil {
 			continue
 		}
-		detectSem <- struct{}{}
-		go func(conn net.Conn) {
-			defer func() { <-detectSem }()
-			s.routeMuxConnection(conn, httpListener)
-		}(conn)
+
+		// Dispatch each connection to a goroutine so that slow/idle clients
+		// cannot block the accept loop. Previously, TLS handshake and
+		// reader.Peek(1) were performed inline; an idle TCP connection that
+		// never sent bytes would block Peek indefinitely, preventing all
+		// subsequent connections from being accepted (issue #3267).
+		go s.routeMuxConnection(conn, httpListener)
 	}
 }
 
+// routeMuxConnection performs per-connection protocol detection and routing.
 func (s *Server) routeMuxConnection(conn net.Conn, httpListener *muxListener) {
-	if s == nil || conn == nil {
-		return
-	}
-	_ = conn.SetDeadline(time.Now().Add(muxProtocolDetectTimeout))
-	defer func() { _ = conn.SetDeadline(time.Time{}) }()
+	// Set a read deadline so that idle connections that never send bytes do not
+	// leak goroutines and file descriptors. The deadline is cleared once the
+	// connection is successfully routed to its handler.
+	const muxSniffDeadline = 10 * time.Second
+	_ = conn.SetReadDeadline(time.Now().Add(muxSniffDeadline))
 
 	tlsConn, ok := conn.(*tls.Conn)
 	if ok {
@@ -85,11 +82,12 @@ func (s *Server) routeMuxConnection(conn net.Conn, httpListener *muxListener) {
 				}
 				return
 			}
-			_ = conn.SetDeadline(time.Time{})
 			if errPut := httpListener.Put(tlsConn); errPut != nil {
 				if errClose := conn.Close(); errClose != nil {
 					log.Errorf("failed to close connection after HTTP routing failure: %v", errClose)
 				}
+			} else {
+				_ = conn.SetReadDeadline(time.Time{})
 			}
 			return
 		}
@@ -117,7 +115,7 @@ func (s *Server) routeMuxConnection(conn net.Conn, httpListener *muxListener) {
 			}
 			return
 		}
-		_ = conn.SetDeadline(time.Time{})
+		_ = conn.SetReadDeadline(time.Time{})
 		s.handleRedisConnection(conn, reader)
 		return
 	}
@@ -129,10 +127,11 @@ func (s *Server) routeMuxConnection(conn net.Conn, httpListener *muxListener) {
 		return
 	}
 
-	_ = conn.SetDeadline(time.Time{})
 	if errPut := httpListener.Put(&bufferedConn{Conn: conn, reader: reader}); errPut != nil {
 		if errClose := conn.Close(); errClose != nil {
 			log.Errorf("failed to close connection after HTTP routing failure: %v", errClose)
 		}
+	} else {
+		_ = conn.SetReadDeadline(time.Time{})
 	}
 }

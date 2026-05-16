@@ -24,11 +24,7 @@ const (
 	apiRequestKey           = "API_REQUEST"
 	apiResponseKey          = "API_RESPONSE"
 	apiWebsocketTimelineKey = "API_WEBSOCKET_TIMELINE"
-	usageRawRequestKey      = "USAGE_RAW_REQUEST"
-	usageRawResponseKey     = "USAGE_RAW_RESPONSE"
-	usageStatusRulersKey    = "USAGE_STATUS_RULERS"
 	creditsUsedKey          = "__antigravity_credits_used__"
-	usageRawPacketMaxBytes  = 256 * 1024
 )
 
 // UpstreamRequestLog captures the outbound upstream request details for logging.
@@ -57,159 +53,11 @@ type upstreamAttempt struct {
 	errorWritten         bool
 }
 
-func RecordUsageRawRequest(ctx context.Context, raw string) {
-	ginCtx := ginContextFrom(ctx)
-	if ginCtx == nil || strings.TrimSpace(raw) == "" {
-		return
-	}
-	ginCtx.Set(usageRawRequestKey, truncateUsageRawPacket(raw))
-}
-
-func RecordUsageRawResponse(ctx context.Context, raw string) {
-	ginCtx := ginContextFrom(ctx)
-	if ginCtx == nil || strings.TrimSpace(raw) == "" {
-		return
-	}
-	ginCtx.Set(usageRawResponseKey, truncateUsageRawPacket(raw))
-}
-
-func UsageRawPackets(ctx context.Context) (string, string) {
-	ginCtx := ginContextFrom(ctx)
-	if ginCtx == nil {
-		return "", ""
-	}
-	valueString := func(key string) string {
-		value, exists := ginCtx.Get(key)
-		if !exists {
-			return ""
-		}
-		switch v := value.(type) {
-		case string:
-			return v
-		case []byte:
-			return string(v)
-		default:
-			return fmt.Sprintf("%v", v)
-		}
-	}
-	return valueString(usageRawRequestKey), valueString(usageRawResponseKey)
-}
-
-func RecordUsageStatusRulers(ctx context.Context, detail string) {
-	ginCtx := ginContextFrom(ctx)
-	if ginCtx == nil || strings.TrimSpace(detail) == "" {
-		return
-	}
-	ginCtx.Set(usageStatusRulersKey, truncateUsageRawPacket(detail))
-}
-
-func UsageStatusRulers(ctx context.Context) string {
-	ginCtx := ginContextFrom(ctx)
-	if ginCtx == nil {
-		return ""
-	}
-	value, exists := ginCtx.Get(usageStatusRulersKey)
-	if !exists {
-		return ""
-	}
-	switch v := value.(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
-
-func BuildDownstreamRawRequest(ctx context.Context, body []byte) string {
-	if ctx == nil {
-		return string(body)
-	}
-	ginCtx := ginContextFrom(ctx)
-	if ginCtx == nil || ginCtx.Request == nil {
-		return string(body)
-	}
-	req := ginCtx.Request
-	path := "/"
-	if req.URL != nil && req.URL.RequestURI() != "" {
-		path = req.URL.RequestURI()
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s %s\n", req.Method, path, formatHTTPProto(req.ProtoMajor, req.ProtoMinor))
-	writeDownstreamHeaders(&b, req, len(body))
-	b.WriteByte('\n')
-	b.Write(body)
-	return b.String()
-}
-
-func writeDownstreamHeaders(b *strings.Builder, req *http.Request, bodyLen int) {
-	if b == nil || req == nil {
-		return
-	}
-	if req.Host != "" {
-		fmt.Fprintf(b, "Host: %s\n", req.Host)
-	}
-	hasContentLength := false
-	for key := range req.Header {
-		if strings.EqualFold(key, "Content-Length") {
-			hasContentLength = true
-			break
-		}
-	}
-	_ = req.Header.Write(b)
-	if !hasContentLength {
-		contentLength := req.ContentLength
-		if contentLength <= 0 && bodyLen > 0 {
-			contentLength = int64(bodyLen)
-		}
-		if contentLength > 0 {
-			fmt.Fprintf(b, "Content-Length: %d\n", contentLength)
-		}
-	}
-}
-
-func truncateUsageRawPacket(value string) string {
-	if len(value) <= usageRawPacketMaxBytes {
-		return value
-	}
-	return value[:usageRawPacketMaxBytes]
-}
-
-func formatHTTPProto(major, minor int) string {
-	if major <= 0 {
-		return "HTTP/1.1"
-	}
-	if major == 2 && minor == 0 {
-		return "HTTP/2"
-	}
-	return fmt.Sprintf("HTTP/%d.%d", major, minor)
-}
-
-func APIRequestResponsePackets(ctx context.Context) (string, string) {
-	ginCtx := ginContextFrom(ctx)
-	if ginCtx == nil {
-		return "", ""
-	}
-	valueString := func(key string) string {
-		value, exists := ginCtx.Get(key)
-		if !exists {
-			return ""
-		}
-		switch v := value.(type) {
-		case string:
-			return v
-		case []byte:
-			return string(v)
-		default:
-			return fmt.Sprintf("%v", v)
-		}
-	}
-	return valueString(apiRequestKey), valueString(apiResponseKey)
-}
-
 // RecordAPIRequest stores the upstream request metadata in Gin context for request logging.
 func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequestLog) {
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 	ginCtx := ginContextFrom(ctx)
 	if ginCtx == nil {
 		return
@@ -250,13 +98,13 @@ func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequ
 	attempts = append(attempts, attempt)
 	ginCtx.Set(apiAttemptsKey, attempts)
 	updateAggregatedRequest(ginCtx, attempts)
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 }
 
 // RecordAPIResponseMetadata captures upstream response status/header information for the latest attempt.
 func RecordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status int, headers http.Header) {
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 	ginCtx := ginContextFrom(ctx)
 	if ginCtx == nil {
 		return
@@ -276,14 +124,11 @@ func RecordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status i
 	}
 
 	updateAggregatedResponse(ginCtx, attempts)
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 }
 
 // RecordAPIResponseError adds an error entry for the latest attempt when no HTTP response is available.
 func RecordAPIResponseError(ctx context.Context, cfg *config.Config, err error) {
-	if err == nil {
+	if cfg == nil || !cfg.RequestLog || err == nil {
 		return
 	}
 	ginCtx := ginContextFrom(ctx)
@@ -304,13 +149,13 @@ func RecordAPIResponseError(ctx context.Context, cfg *config.Config, err error) 
 	attempt.errorWritten = true
 
 	updateAggregatedResponse(ginCtx, attempts)
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 }
 
 // AppendAPIResponseChunk appends an upstream response chunk to Gin context for request logging.
 func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byte) {
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 	data := bytes.TrimSpace(chunk)
 	if len(data) == 0 {
 		return
@@ -346,9 +191,6 @@ func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byt
 	attempt.prevWasSSEEvent = currentChunkIsSSEEvent
 
 	updateAggregatedResponse(ginCtx, attempts)
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 }
 
 // RecordAPIWebsocketRequest stores an upstream websocket request event in Gin context.
@@ -487,9 +329,6 @@ func RecordAPIWebsocketError(ctx context.Context, cfg *config.Config, stage stri
 }
 
 func ginContextFrom(ctx context.Context) *gin.Context {
-	if ctx == nil {
-		return nil
-	}
 	ginCtx, _ := ctx.Value("gin").(*gin.Context)
 	return ginCtx
 }
