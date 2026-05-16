@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	log "github.com/sirupsen/logrus"
@@ -66,7 +67,7 @@ type Config struct {
 	// When exceeded, the oldest error log files are deleted. Default is 10. Set to 0 to disable cleanup.
 	ErrorLogsMaxFiles int `yaml:"error-logs-max-files" json:"error-logs-max-files"`
 
-	// UsageStatisticsEnabled toggles in-memory usage aggregation; when false, usage data is discarded.
+	// UsageStatisticsEnabled toggles the legacy Redis usage queue. SQLite monitor records are independent.
 	UsageStatisticsEnabled bool `yaml:"usage-statistics-enabled" json:"usage-statistics-enabled"`
 
 	// RedisUsageQueueRetentionSeconds controls how long (in seconds) usage queue items
@@ -76,6 +77,13 @@ type Config struct {
 
 	// DisableCooling disables quota cooldown scheduling when true.
 	DisableCooling bool `yaml:"disable-cooling" json:"disable-cooling"`
+
+	// ProxyFailureCooldownSeconds controls how long an auth/model is cooled down after a per-key proxy connection failure.
+	// Default: 300 seconds.
+	ProxyFailureCooldownSeconds int `yaml:"proxy-failure-cooldown-seconds" json:"proxy-failure-cooldown-seconds"`
+	// ProxyFailureMaxCooldownSeconds caps progressive proxy failure cooldown.
+	// Default: 600 seconds.
+	ProxyFailureMaxCooldownSeconds int `yaml:"proxy-failure-max-cooldown-seconds" json:"proxy-failure-max-cooldown-seconds"`
 
 	// AuthAutoRefreshWorkers overrides the size of the core auth auto-refresh worker pool.
 	// When <= 0, the default worker count is used.
@@ -125,6 +133,12 @@ type Config struct {
 	// OpenAICompatibility defines OpenAI API compatibility configurations for external providers.
 	OpenAICompatibility []OpenAICompatibility `yaml:"openai-compatibility" json:"openai-compatibility"`
 
+	// QuotaRecoveryRefreshIntervalSeconds controls periodic refresh for non-disabled quota-exhausted accounts.
+	QuotaRecoveryRefreshIntervalSeconds int `yaml:"quota-recovery-refresh-interval-seconds,omitempty" json:"quota-recovery-refresh-interval-seconds,omitempty"`
+
+	// QuotaRecoveryRefreshWorkers limits concurrent quota recovery refresh jobs.
+	QuotaRecoveryRefreshWorkers int `yaml:"quota-recovery-refresh-workers,omitempty" json:"quota-recovery-refresh-workers,omitempty"`
+
 	// VertexCompatAPIKey defines Vertex AI-compatible API key configurations for third-party providers.
 	// Used for services that use Vertex AI-style paths but with simple API key authentication.
 	VertexCompatAPIKey []VertexCompatKey `yaml:"vertex-api-key" json:"vertex-api-key"`
@@ -146,7 +160,72 @@ type Config struct {
 	// Payload defines default and override rules for provider payload parameters.
 	Payload PayloadConfig `yaml:"payload" json:"payload"`
 
+	// PacketCapture stores packet filter rules in config.yaml; packet records remain in sqlite.
+	PacketCapture PacketCaptureConfig `yaml:"packet-capture" json:"packet-capture"`
+
 	legacyMigrationPending bool `yaml:"-" json:"-"`
+}
+
+type PacketCaptureConfig struct {
+	FilterRules    []PacketFilterRule `yaml:"filter-rules" json:"filter-rules"`
+	CLIDetailedLog *bool              `yaml:"cli-detailed-log,omitempty" json:"cli-detailed-log,omitempty"`
+}
+
+func (c PacketCaptureConfig) CLIDetailedLogEnabled() bool {
+	return c.CLIDetailedLog == nil || *c.CLIDetailedLog
+}
+
+type PacketFilterRule struct {
+	ID              string                  `yaml:"id,omitempty" json:"id"`
+	Name            string                  `yaml:"name" json:"name"`
+	Enabled         bool                    `yaml:"enabled" json:"enabled"`
+	RecordHistory   bool                    `yaml:"record-history" json:"record_history"`
+	Priority        int                     `yaml:"priority" json:"priority"`
+	MatchLogic      string                  `yaml:"match-logic,omitempty" json:"match_logic,omitempty"`
+	Provider        string                  `yaml:"provider,omitempty" json:"provider,omitempty"`
+	ProviderKeyword string                  `yaml:"provider-keyword,omitempty" json:"provider_keyword,omitempty"`
+	Model           string                  `yaml:"model,omitempty" json:"model,omitempty"`
+	ModelKeyword    string                  `yaml:"model-keyword,omitempty" json:"model_keyword,omitempty"`
+	Packet          string                  `yaml:"packet" json:"packet"`
+	Part            string                  `yaml:"part" json:"part"`
+	JSONPath        string                  `yaml:"json-path,omitempty" json:"json_path,omitempty"`
+	Header          string                  `yaml:"header,omitempty" json:"header,omitempty"`
+	Operator        string                  `yaml:"operator" json:"operator"`
+	Value           string                  `yaml:"value,omitempty" json:"value,omitempty"`
+	ValueNumber     float64                 `yaml:"value-number,omitempty" json:"value_number,omitempty"`
+	Action          string                  `yaml:"action" json:"action"`
+	Replacement     string                  `yaml:"replacement,omitempty" json:"replacement,omitempty"`
+	ReplaceLimit    int                     `yaml:"replace-limit,omitempty" json:"replace_limit,omitempty"`
+	CooldownSeconds int                     `yaml:"cooldown-seconds,omitempty" json:"cooldown_seconds,omitempty"`
+	Target          string                  `yaml:"target,omitempty" json:"target,omitempty"`
+	Notes           string                  `yaml:"notes,omitempty" json:"notes,omitempty"`
+	Conditions      []PacketFilterCondition `yaml:"conditions,omitempty" json:"conditions,omitempty"`
+	Actions         []PacketFilterAction    `yaml:"actions,omitempty" json:"actions,omitempty"`
+	CreatedAt       time.Time               `yaml:"created-at,omitempty" json:"created_at"`
+	UpdatedAt       time.Time               `yaml:"updated-at,omitempty" json:"updated_at"`
+}
+
+type PacketFilterCondition struct {
+	Packet      string  `yaml:"packet,omitempty" json:"packet,omitempty"`
+	Part        string  `yaml:"part,omitempty" json:"part,omitempty"`
+	JSONPath    string  `yaml:"json-path,omitempty" json:"json_path,omitempty"`
+	Header      string  `yaml:"header,omitempty" json:"header,omitempty"`
+	Operator    string  `yaml:"operator,omitempty" json:"operator,omitempty"`
+	Value       string  `yaml:"value,omitempty" json:"value,omitempty"`
+	ValueNumber float64 `yaml:"value-number,omitempty" json:"value_number,omitempty"`
+}
+
+type PacketFilterAction struct {
+	Type            string `yaml:"type" json:"type"`
+	Packet          string `yaml:"packet,omitempty" json:"packet,omitempty"`
+	Part            string `yaml:"part,omitempty" json:"part,omitempty"`
+	JSONPath        string `yaml:"json-path,omitempty" json:"json_path,omitempty"`
+	Header          string `yaml:"header,omitempty" json:"header,omitempty"`
+	Value           string `yaml:"value,omitempty" json:"value,omitempty"`
+	Replacement     string `yaml:"replacement,omitempty" json:"replacement,omitempty"`
+	ReplaceLimit    int    `yaml:"replace-limit,omitempty" json:"replace_limit,omitempty"`
+	Target          string `yaml:"target,omitempty" json:"target,omitempty"`
+	CooldownSeconds int    `yaml:"cooldown-seconds,omitempty" json:"cooldown_seconds,omitempty"`
 }
 
 // ClaudeHeaderDefaults configures default header values injected into Claude API requests.
@@ -551,6 +630,9 @@ type OpenAICompatibility struct {
 	// Headers optionally adds extra HTTP headers for requests sent to this provider.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 
+	// StatusRulers defines response rules that disable or cool down API keys.
+	StatusRulers []OpenAICompatibilityStatusRuler `yaml:"status-rulers,omitempty" json:"status-rulers,omitempty"`
+
 	// DisableCooling disables auth/model cooldown scheduling for this provider when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 }
@@ -562,6 +644,25 @@ type OpenAICompatibilityAPIKey struct {
 
 	// ProxyURL overrides the global proxy setting for this API key if provided.
 	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+}
+
+// OpenAICompatibilityStatusRuler describes how a provider response updates key status.
+type OpenAICompatibilityStatusRuler struct {
+	Name          string                             `yaml:"name" json:"name"`
+	When          OpenAICompatibilityStatusRulerWhen `yaml:"when" json:"when"`
+	Action        string                             `yaml:"action" json:"action"`
+	ClientStatus  int                                `yaml:"client-status,omitempty" json:"client-status,omitempty"`
+	ClientMessage string                             `yaml:"client-message,omitempty" json:"client-message,omitempty"`
+}
+
+// OpenAICompatibilityStatusRulerWhen describes the matching condition.
+type OpenAICompatibilityStatusRulerWhen struct {
+	Status       int    `yaml:"status" json:"status"`
+	JSONPath     string `yaml:"json-path,omitempty" json:"json-path,omitempty"`
+	JSONEquals   string `yaml:"json-equals,omitempty" json:"json-equals,omitempty"`
+	JSONContains string `yaml:"json-contains,omitempty" json:"json-contains,omitempty"`
+	BodyEquals   string `yaml:"body-equals,omitempty" json:"body-equals,omitempty"`
+	BodyContains string `yaml:"body-contains,omitempty" json:"body-contains,omitempty"`
 }
 
 // OpenAICompatibilityModel represents a model configuration for OpenAI compatibility,
@@ -623,9 +724,11 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.LoggingToFile = false
 	cfg.LogsMaxTotalSizeMB = 0
 	cfg.ErrorLogsMaxFiles = 10
-	cfg.UsageStatisticsEnabled = false
+	cfg.UsageStatisticsEnabled = true
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
+	cfg.ProxyFailureCooldownSeconds = 300
+	cfg.ProxyFailureMaxCooldownSeconds = 600
 	cfg.DisableImageGeneration = DisableImageGenerationOff
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
@@ -695,7 +798,19 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	}
 
 	if cfg.MaxRetryCredentials < 0 {
-		cfg.MaxRetryCredentials = 0
+		cfg.MaxRetryCredentials = 10
+	}
+	if cfg.MaxRetryCredentials == 0 {
+		cfg.MaxRetryCredentials = 10
+	}
+	if cfg.ProxyFailureCooldownSeconds <= 0 {
+		cfg.ProxyFailureCooldownSeconds = 300
+	}
+	if cfg.ProxyFailureMaxCooldownSeconds <= 0 {
+		cfg.ProxyFailureMaxCooldownSeconds = 600
+	}
+	if cfg.ProxyFailureMaxCooldownSeconds < cfg.ProxyFailureCooldownSeconds {
+		cfg.ProxyFailureMaxCooldownSeconds = cfg.ProxyFailureCooldownSeconds
 	}
 
 	// Sanitize Gemini API key configuration and migrate legacy entries.

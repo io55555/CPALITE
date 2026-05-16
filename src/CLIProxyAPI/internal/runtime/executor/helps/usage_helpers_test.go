@@ -2,9 +2,12 @@ package helps
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 )
 
@@ -25,6 +28,36 @@ func TestParseOpenAIUsageChatCompletions(t *testing.T) {
 	}
 	if detail.ReasoningTokens != 5 {
 		t.Fatalf("reasoning tokens = %d, want %d", detail.ReasoningTokens, 5)
+	}
+}
+
+func TestBuildDownstreamRawRequestIncludesHostHeadersAndBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	req, err := http.NewRequest(http.MethodPost, "http://ip.99.tf/v1/chat/completions", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.ProtoMajor = 2
+	req.ProtoMinor = 0
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer 123456")
+	ginCtx := &gin.Context{Request: req}
+	raw := BuildDownstreamRawRequest(context.WithValue(context.Background(), "gin", ginCtx), []byte(`{"model":"llama"}`))
+
+	if !strings.Contains(raw, "POST /v1/chat/completions HTTP/2") {
+		t.Fatalf("raw request missing request line: %s", raw)
+	}
+	if !strings.Contains(raw, "Host: ip.99.tf") {
+		t.Fatalf("raw request missing host: %s", raw)
+	}
+	if !strings.Contains(raw, "Authorization: Bearer 123456") {
+		t.Fatalf("raw request missing authorization: %s", raw)
+	}
+	if !strings.Contains(raw, "Content-Length: 17") {
+		t.Fatalf("raw request missing content length: %s", raw)
+	}
+	if !strings.HasSuffix(raw, "\n{\"model\":\"llama\"}") {
+		t.Fatalf("raw request missing body: %s", raw)
 	}
 }
 

@@ -13,14 +13,14 @@ builds:
       - amd64
       - arm64
     main: ./cmd/server/
-    binary: cli-proxy-api
+    binary: CPA
     ldflags:
       - -s -w -X 'main.Version={{.Version}}' -X 'main.Commit={{.ShortCommit}}' -X 'main.BuildDate={{.Date}}'
 archives:
   - id: "cli-proxy-api"
     format: tar.gz
     name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{- if eq .Arch "arm64" -}}aarch64{{- else -}}{{ .Arch }}{{- end -}}
+      CPA_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     format_overrides:
       - goos: windows
         format: zip

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -709,6 +710,7 @@ func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 		return auth, nil
 	}
 	svc := codexauth.NewCodexAuthWithProxyURL(e.cfg, auth.ProxyURL)
+	svc.SetRefreshLogContext(formatCodexRefreshLogContext(auth))
 	td, err := svc.RefreshTokensWithRetry(ctx, refreshToken, 3)
 	if err != nil {
 		return nil, err
@@ -731,6 +733,39 @@ func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 	now := time.Now().Format(time.RFC3339)
 	auth.Metadata["last_refresh"] = now
 	return auth, nil
+}
+
+func formatCodexRefreshLogContext(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	parts := make([]string, 0, 7)
+	if provider := strings.TrimSpace(auth.Provider); provider != "" {
+		parts = append(parts, "provider="+provider)
+	}
+	if label := strings.TrimSpace(auth.Label); label != "" {
+		parts = append(parts, "label="+label)
+	}
+	if authFile := strings.TrimSpace(auth.FileName); authFile != "" {
+		parts = append(parts, "auth_file="+filepath.Base(authFile))
+	}
+	if authID := strings.TrimSpace(auth.ID); authID != "" {
+		parts = append(parts, "auth_id="+authID)
+	}
+	if auth.Metadata != nil {
+		if accountID, ok := auth.Metadata["account_id"].(string); ok && strings.TrimSpace(accountID) != "" {
+			parts = append(parts, "account_id="+strings.TrimSpace(accountID))
+		}
+		if email, ok := auth.Metadata["email"].(string); ok && strings.TrimSpace(email) != "" {
+			parts = append(parts, "email="+strings.TrimSpace(email))
+		}
+	}
+	if auth.Attributes != nil {
+		if apiKey := strings.TrimSpace(auth.Attributes["api_key"]); apiKey != "" {
+			parts = append(parts, "api_key="+util.HideAPIKey(apiKey))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func (e *CodexExecutor) cacheHelper(ctx context.Context, from sdktranslator.Format, url string, req cliproxyexecutor.Request, rawJSON []byte) (*http.Request, error) {

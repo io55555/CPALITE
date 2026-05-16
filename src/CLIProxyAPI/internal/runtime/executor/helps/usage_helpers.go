@@ -1,15 +1,18 @@
 package helps
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	"github.com/tidwall/gjson"
@@ -17,16 +20,21 @@ import (
 )
 
 type UsageReporter struct {
-	provider    string
-	model       string
-	alias       string
-	authID      string
-	authIndex   string
-	authType    string
-	apiKey      string
-	source      string
-	requestedAt time.Time
-	once        sync.Once
+	ctx                             context.Context
+	provider                        string
+	model                           string
+	alias                           string
+	authID                          string
+	authIndex                       string
+	authType                        string
+	apiKey                          string
+	source                          string
+	requestedAt                     time.Time
+	once                            sync.Once
+	rawMu                           sync.RWMutex
+	rawRequest                      string
+	rawResponse                     string
+	deferFailureUntilClientResponse bool
 }
 
 func NewUsageReporter(ctx context.Context, provider, model string, auth *cliproxyauth.Auth) *UsageReporter {
@@ -36,6 +44,7 @@ func NewUsageReporter(ctx context.Context, provider, model string, auth *cliprox
 		alias = model
 	}
 	reporter := &UsageReporter{
+		ctx:         ctx,
 		provider:    provider,
 		model:       model,
 		alias:       strings.TrimSpace(alias),
@@ -82,6 +91,38 @@ func (r *UsageReporter) PublishFailure(ctx context.Context, errs ...error) {
 	r.publishWithOutcome(ctx, usage.Detail{}, true, failFromErrors(errs...))
 }
 
+func (r *UsageReporter) SetRawRequest(raw string) {
+	if r == nil || strings.TrimSpace(raw) == "" {
+		return
+	}
+	r.rawMu.Lock()
+	r.rawRequest = raw
+	r.rawMu.Unlock()
+}
+
+func (r *UsageReporter) SetRawResponse(raw string) {
+	if r == nil || strings.TrimSpace(raw) == "" {
+		return
+	}
+	r.rawMu.Lock()
+	r.rawResponse = raw
+	r.rawMu.Unlock()
+}
+
+func (r *UsageReporter) SetRawPackets(rawRequest, rawResponse string) {
+	r.SetRawRequest(rawRequest)
+	r.SetRawResponse(rawResponse)
+}
+
+func (r *UsageReporter) DeferFailureUntilClientResponse() {
+	if r == nil {
+		return
+	}
+	r.rawMu.Lock()
+	r.deferFailureUntilClientResponse = true
+	r.rawMu.Unlock()
+}
+
 func (r *UsageReporter) TrackFailure(ctx context.Context, errPtr *error) {
 	if r == nil || errPtr == nil {
 		return
@@ -97,7 +138,14 @@ func (r *UsageReporter) publishWithOutcome(ctx context.Context, detail usage.Det
 	}
 	detail = normalizeUsageDetailTotal(detail)
 	r.once.Do(func() {
-		usage.PublishRecord(ctx, r.buildRecord(detail, failed, fail))
+		record := r.buildRecord(detail, failed, fail)
+		r.rawMu.RLock()
+		deferFailure := r.deferFailureUntilClientResponse
+		r.rawMu.RUnlock()
+		if failed && deferFailure && internalusage.QueuePendingRecord(ctx, record) {
+			return
+		}
+		usage.PublishRecord(ctx, record)
 	})
 }
 
@@ -149,6 +197,34 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 	if r == nil {
 		return usage.Record{Model: model, Detail: detail, Failed: failed, Fail: fail}
 	}
+	r.rawMu.RLock()
+	rawRequest, rawResponse := r.rawRequest, r.rawResponse
+	r.rawMu.RUnlock()
+	ctxRawRequest, ctxRawResponse := UsageRawPackets(r.ctx)
+	if rawRequest == "" {
+		rawRequest = ctxRawRequest
+	}
+	if rawResponse == "" {
+		rawResponse = ctxRawResponse
+	}
+	if rawRequest == "" || rawResponse == "" {
+		apiRequest, apiResponse := APIRequestResponsePackets(r.ctx)
+		if rawRequest == "" {
+			rawRequest = apiRequest
+		}
+		if rawResponse == "" {
+			rawResponse = apiResponse
+		}
+	}
+	if rawResponse == "" && strings.TrimSpace(fail.Body) != "" {
+		if fail.StatusCode > 0 {
+			rawResponse = fmt.Sprintf("HTTP/1.1 %d\n\n%s", fail.StatusCode, fail.Body)
+		} else {
+			rawResponse = fail.Body
+		}
+	}
+	clientUA := clientUserAgentFromContext(r.ctx)
+	upstreamUA := userAgentFromPacket(rawRequest)
 	return usage.Record{
 		Provider:    r.provider,
 		Model:       model,
@@ -161,9 +237,85 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 		RequestedAt: r.requestedAt,
 		Latency:     r.latency(),
 		Failed:      failed,
+		ClientUA:    clientUA,
+		UpstreamUA:  upstreamUA,
+		RawRequest:  rawRequest,
+		RawResponse: rawResponse,
 		Fail:        fail,
 		Detail:      detail,
 	}
+}
+
+func clientUserAgentFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	ginCtx, _ := ctx.Value("gin").(*gin.Context)
+	if ginCtx == nil || ginCtx.Request == nil {
+		return ""
+	}
+	return strings.TrimSpace(ginCtx.Request.UserAgent())
+}
+
+func userAgentFromPacket(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if packet := namedUsageSection(raw, "CPA发给供应商的完整数据包"); packet != "" {
+		if ua := headerValueFromHTTPPacket(packet, "User-Agent"); ua != "" {
+			return ua
+		}
+	}
+	if ua := headerValueFromHTTPPacket(raw, "User-Agent"); ua != "" {
+		return ua
+	}
+	return headerValueFromAPIRequestLog(raw, "User-Agent")
+}
+
+func namedUsageSection(content, title string) string {
+	marker := "=== " + title + " ==="
+	start := strings.Index(content, marker)
+	if start < 0 {
+		return ""
+	}
+	from := start + len(marker)
+	next := strings.Index(content[from:], "=== ")
+	if next >= 0 {
+		return strings.TrimSpace(content[from : from+next])
+	}
+	return strings.TrimSpace(content[from:])
+}
+
+func headerValueFromHTTPPacket(packet, name string) string {
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(packet)))
+	if err == nil && req != nil {
+		return strings.TrimSpace(req.Header.Get(name))
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	head, _, ok := strings.Cut(packet, "\r\n\r\n")
+	if !ok {
+		head, _, _ = strings.Cut(packet, "\n\n")
+	}
+	for _, line := range strings.Split(head, "\n") {
+		key, value, ok := strings.Cut(strings.TrimRight(line, "\r"), ":")
+		if ok && strings.ToLower(strings.TrimSpace(key)) == name {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func headerValueFromAPIRequestLog(raw, name string) string {
+	start := strings.Index(strings.ToLower(raw), "\nheaders:")
+	if start < 0 {
+		return ""
+	}
+	block := raw[start+len("\nheaders:"):]
+	if end := strings.Index(strings.ToLower(block), "\nbody:"); end >= 0 {
+		block = block[:end]
+	}
+	return headerValueFromHTTPPacket("GET / HTTP/1.1\n"+strings.TrimSpace(block)+"\n\n", name)
 }
 
 func failFromErrors(errs ...error) usage.Failure {

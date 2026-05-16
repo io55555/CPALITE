@@ -1,15 +1,49 @@
 package management
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 )
+
+const (
+	usageQueryTimeout  = 10 * time.Second
+	usageQueryMaxRows  = 50000
+	usageQueryCacheTTL = 2 * time.Second
+)
+
+var usageQueryCache = newUsageQueryCache()
+
+type usageQueryCacheEntry struct {
+	result    usage.APIUsage
+	expiresAt time.Time
+	ready     chan struct{}
+	loading   bool
+	err       error
+}
+
+type usageQueryCacheStore struct {
+	mu      sync.Mutex
+	entries map[string]*usageQueryCacheEntry
+}
+
+func newUsageQueryCache() *usageQueryCacheStore {
+	return &usageQueryCacheStore{entries: make(map[string]*usageQueryCacheEntry)}
+}
+
+type deleteUsageRequest struct {
+	IDs []string `json:"ids"`
+	All bool     `json:"all"`
+}
 
 type usageQueueRecord []byte
 
@@ -18,6 +52,181 @@ func (r usageQueueRecord) MarshalJSON() ([]byte, error) {
 		return append([]byte(nil), r...), nil
 	}
 	return json.Marshal(string(r))
+}
+
+// GetFwindyUsage keeps Fwindy's /usage frontend API.
+func (h *Handler) GetFwindyUsage(c *gin.Context) {
+	h.GetUsageStatistics(c)
+}
+
+// DeleteFwindyUsage keeps Fwindy's /usage deletion API.
+func (h *Handler) DeleteFwindyUsage(c *gin.Context) {
+	h.DeleteUsageRecords(c)
+}
+
+// GetUsageStatistics 返回已持久化的请求统计。
+func (h *Handler) GetUsageStatistics(c *gin.Context) {
+	rng, ok := parseUsageRange(c)
+	if !ok {
+		return
+	}
+
+	store := h.currentUsageStore()
+	if store == nil {
+		store = h.ensureUsageStoreForMonitoring()
+	}
+	if store == nil {
+		c.JSON(http.StatusOK, usage.APIUsage{})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), usageQueryTimeout)
+	defer cancel()
+	result, err := usageQueryCache.query(ctx, store, rng)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query usage"})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *usageQueryCacheStore) query(ctx context.Context, store usage.Store, rng usage.QueryRange) (usage.APIUsage, error) {
+	if s == nil || store == nil {
+		return usage.APIUsage{}, nil
+	}
+	key := usageQueryCacheKey(rng)
+	now := time.Now()
+	s.mu.Lock()
+	if entry := s.entries[key]; entry != nil {
+		if !entry.loading && now.Before(entry.expiresAt) {
+			result, err := entry.result, entry.err
+			s.mu.Unlock()
+			return result, err
+		}
+		if entry.loading {
+			ready := entry.ready
+			s.mu.Unlock()
+			select {
+			case <-ready:
+				s.mu.Lock()
+				latest := s.entries[key]
+				if latest == nil {
+					s.mu.Unlock()
+					return usage.APIUsage{}, nil
+				}
+				result, err := latest.result, latest.err
+				s.mu.Unlock()
+				return result, err
+			case <-ctx.Done():
+				return usage.APIUsage{}, ctx.Err()
+			}
+		}
+	}
+	entry := &usageQueryCacheEntry{ready: make(chan struct{}), loading: true}
+	s.entries[key] = entry
+	s.mu.Unlock()
+
+	result, err := store.Query(ctx, rng)
+
+	s.mu.Lock()
+	entry.result = result
+	entry.err = err
+	entry.expiresAt = time.Now().Add(usageQueryCacheTTL)
+	entry.loading = false
+	close(entry.ready)
+	for cacheKey, cached := range s.entries {
+		if cached == nil || cached.loading || time.Now().Before(cached.expiresAt) {
+			continue
+		}
+		delete(s.entries, cacheKey)
+	}
+	s.mu.Unlock()
+	return result, err
+}
+
+func usageQueryCacheKey(rng usage.QueryRange) string {
+	start, end := "", ""
+	if rng.Start != nil && !rng.Start.IsZero() {
+		start = rng.Start.UTC().Format(time.RFC3339Nano)
+	}
+	if rng.End != nil && !rng.End.IsZero() {
+		end = rng.End.UTC().Format(time.RFC3339Nano)
+	}
+	return start + "|" + end + "|" + strconv.Itoa(rng.Limit) + "|" + strconv.FormatBool(rng.IncludeRaw)
+}
+
+func (h *Handler) ensureUsageStoreForMonitoring() usage.Store {
+	if h == nil || strings.TrimSpace(h.logDir) == "" {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.usageStore != nil {
+		return h.usageStore
+	}
+	if err := usage.InitDefaultStoreInLogDir(h.logDir); err != nil {
+		return nil
+	}
+	h.usageStore = usage.DefaultStore()
+	return h.usageStore
+}
+
+// DeleteUsageRecords 按记录 ID 删除已持久化的统计记录。
+func (h *Handler) DeleteUsageRecords(c *gin.Context) {
+	store := h.currentUsageStore()
+	if store == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "usage store unavailable"})
+		return
+	}
+
+	var body deleteUsageRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+
+	if body.All {
+		if clearStore, ok := store.(interface {
+			DeleteAll(context.Context) (usage.DeleteResult, error)
+		}); ok {
+			result, err := clearStore.DeleteAll(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete usage records"})
+				return
+			}
+			usageQueryCache = newUsageQueryCache()
+			c.JSON(http.StatusOK, result)
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "usage store does not support delete all"})
+		return
+	}
+
+	ids := make([]string, 0, len(body.IDs))
+	seen := make(map[string]struct{}, len(body.IDs))
+	for _, id := range body.IDs {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		ids = append(ids, trimmed)
+	}
+	if len(ids) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ids required"})
+		return
+	}
+
+	result, err := store.Delete(c.Request.Context(), ids)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete usage records"})
+		return
+	}
+	usageQueryCache = newUsageQueryCache()
+	c.JSON(http.StatusOK, result)
 }
 
 // GetUsageQueue pops queued usage records from the usage queue.
@@ -40,6 +249,43 @@ func (h *Handler) GetUsageQueue(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, records)
+}
+
+func parseUsageRange(c *gin.Context) (usage.QueryRange, bool) {
+	var rng usage.QueryRange
+
+	if rawStart := strings.TrimSpace(c.Query("start")); rawStart != "" {
+		start, err := time.Parse(time.RFC3339, rawStart)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start"})
+			return rng, false
+		}
+		start = start.UTC()
+		rng.Start = &start
+	}
+
+	if rawEnd := strings.TrimSpace(c.Query("end")); rawEnd != "" {
+		end, err := time.Parse(time.RFC3339, rawEnd)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end"})
+			return rng, false
+		}
+		end = end.UTC()
+		rng.End = &end
+	}
+	rng.Limit = usageQueryMaxRows
+	rng.IncludeRaw = parseUsageIncludeRaw(c.Query("include_raw"))
+
+	return rng, true
+}
+
+func parseUsageIncludeRaw(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "all":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseUsageQueueCount(value string) (int, error) {

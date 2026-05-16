@@ -69,8 +69,17 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 		cfg.RedisUsageQueueRetentionSeconds = 3600
 	}
 
-	if cfg.MaxRetryCredentials < 0 {
-		cfg.MaxRetryCredentials = 0
+	if cfg.MaxRetryCredentials <= 0 {
+		cfg.MaxRetryCredentials = 10
+	}
+	if cfg.ProxyFailureCooldownSeconds <= 0 {
+		cfg.ProxyFailureCooldownSeconds = 300
+	}
+	if cfg.ProxyFailureMaxCooldownSeconds <= 0 {
+		cfg.ProxyFailureMaxCooldownSeconds = 600
+	}
+	if cfg.ProxyFailureMaxCooldownSeconds < cfg.ProxyFailureCooldownSeconds {
+		cfg.ProxyFailureMaxCooldownSeconds = cfg.ProxyFailureCooldownSeconds
 	}
 
 	// Apply the same sanitization pipeline.
