@@ -7,4 +7,5 @@
 
 ## Cli-Proxy-API-Management-Center
 - branch: main
-- commit: 62092cc875a2b8d2e73e27b9d57919ec5dadf718
+- commit: 57eeff505f9ad9faaba52d736b057696008cb0a3
+- tag: v1.11.0
