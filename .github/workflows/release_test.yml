@@ -65,7 +65,7 @@ jobs:
           RELEASE_NOTES_FILE="$RUNNER_TEMP/release_notes.md"
           cat > "$RELEASE_NOTES_FILE" <<EOF
           Official base version: $VERSION
-          Upstream baselines: CLIProxyAPI@785b00c / Management-Center@126f7fa
+          Upstream baselines: CLIProxyAPI@bb5ac40 / Management-Center@65f8b23
           Includes: management.html, CLIProxyAPI multi-platform archives, checksums.txt
           Enhancements: state persistence / monitoring / rules engine / packet debug
 

@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,8 @@ type Record struct {
 	RawResponse string
 	Fail        Failure
 	Detail      Detail
+	// ResponseHeaders stores a snapshot of upstream response headers for usage sinks.
+	ResponseHeaders http.Header
 }
 
 // Failure holds HTTP failure metadata for an upstream request attempt.

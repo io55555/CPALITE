@@ -257,6 +257,7 @@ func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequ
 
 // RecordAPIResponseMetadata captures upstream response status/header information for the latest attempt.
 func RecordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status int, headers http.Header) {
+	logging.SetResponseHeaders(ctx, headers)
 	ginCtx := ginContextFrom(ctx)
 	if ginCtx == nil {
 		return
@@ -385,6 +386,7 @@ func RecordAPIWebsocketRequest(ctx context.Context, cfg *config.Config, info Ups
 
 // RecordAPIWebsocketHandshake stores the upstream websocket handshake response metadata.
 func RecordAPIWebsocketHandshake(ctx context.Context, cfg *config.Config, status int, headers http.Header) {
+	logging.SetResponseHeaders(ctx, headers)
 	if cfg == nil || !cfg.RequestLog {
 		return
 	}
@@ -408,6 +410,7 @@ func RecordAPIWebsocketHandshake(ctx context.Context, cfg *config.Config, status
 
 // RecordAPIWebsocketUpgradeRejection stores a rejected websocket upgrade as an HTTP attempt.
 func RecordAPIWebsocketUpgradeRejection(ctx context.Context, cfg *config.Config, info UpstreamRequestLog, status int, headers http.Header, body []byte) {
+	logging.SetResponseHeaders(ctx, headers)
 	if cfg == nil || !cfg.RequestLog {
 		return
 	}
