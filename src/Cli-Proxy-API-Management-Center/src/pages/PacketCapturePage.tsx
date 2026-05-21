@@ -190,6 +190,29 @@ const ruleTemplates: RuleTemplate[] = [
     },
   },
   {
+    value: 'gemini-403-permission-denied-disable-key',
+    label: '[运营商到CPA]Gemini 403 Permission denied禁用Key',
+    rule: {
+      name: '[运营商到CPA]Gemini 403 Permission denied禁用Key',
+      provider: 'gemini',
+      packet: 'upstream_response',
+      part: 'status',
+      operator: 'num_eq',
+      value_number: 403,
+      action: 'disable',
+      target: 'api_key',
+      match_logic: 'all',
+      conditions: [
+        { packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 403 },
+        { packet: 'upstream_response', part: 'body_json', json_path: 'error.message', operator: 'contains', value: 'Permission denied' },
+      ],
+      actions: [
+        { type: 'disable', packet: 'upstream_response', target: 'api_key' },
+      ],
+      notes: 'Gemini原生API Key返回403且error.message包含Permission denied时，禁用本次选中的Key。',
+    },
+  },
+  {
     value: 'upstream-status-500-clean',
     label: '上游响应码500返回纯净500',
     rule: { name: '[运营商到CPA]响应码500直接返回纯净500', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 500, action: 'return_clean_500', target: 'response' },

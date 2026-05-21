@@ -3,7 +3,17 @@ package auth
 import (
 	"context"
 	"testing"
+	"time"
 )
+
+type packetFilterTestGin struct {
+	values map[string]any
+}
+
+func (g packetFilterTestGin) Get(key string) (any, bool) {
+	value, ok := g.values[key]
+	return value, ok
+}
 
 func TestManager_Update_PreservesModelStates(t *testing.T) {
 	m := NewManager(nil, nil, nil)
@@ -45,6 +55,43 @@ func TestManager_Update_PreservesModelStates(t *testing.T) {
 	}
 	if state.Quota.BackoffLevel != backoffLevel {
 		t.Fatalf("expected BackoffLevel to be %d, got %d", backoffLevel, state.Quota.BackoffLevel)
+	}
+}
+
+func TestApplyPacketFilterActionStateDisablesMatchingAuth(t *testing.T) {
+	ginCtx := packetFilterTestGin{values: map[string]any{
+		packetFilterActionContextKey: "disable",
+		packetFilterTargetContextKey: "api_key",
+		packetFilterAuthIDContextKey: "auth-1",
+		packetFilterRuleContextKey:   "gemini permission denied",
+	}}
+	ctx := context.WithValue(context.Background(), "gin", ginCtx)
+	auth := &Auth{ID: "auth-1", Provider: "gemini"}
+
+	applyPacketFilterActionState(ctx, auth, "auth-1", "gemini-3-pro-preview", time.Now())
+
+	if !auth.Disabled || auth.Status != StatusDisabled {
+		t.Fatalf("auth state = disabled:%v status:%s, want disabled", auth.Disabled, auth.Status)
+	}
+	state := auth.ModelStates["gemini-3-pro-preview"]
+	if state == nil || state.Status != StatusDisabled {
+		t.Fatalf("model state = %+v, want disabled", state)
+	}
+}
+
+func TestApplyPacketFilterActionStateIgnoresOtherAuth(t *testing.T) {
+	ginCtx := packetFilterTestGin{values: map[string]any{
+		packetFilterActionContextKey: "disable",
+		packetFilterTargetContextKey: "api_key",
+		packetFilterAuthIDContextKey: "auth-1",
+	}}
+	ctx := context.WithValue(context.Background(), "gin", ginCtx)
+	auth := &Auth{ID: "auth-2", Provider: "gemini"}
+
+	applyPacketFilterActionState(ctx, auth, "auth-2", "gemini-3-pro-preview", time.Now())
+
+	if auth.Disabled || auth.Status == StatusDisabled {
+		t.Fatalf("auth state = disabled:%v status:%s, want unchanged", auth.Disabled, auth.Status)
 	}
 }
 

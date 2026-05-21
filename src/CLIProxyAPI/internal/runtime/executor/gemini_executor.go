@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
@@ -34,6 +36,12 @@ const (
 
 	// streamScannerBuffer is the buffer size for SSE stream scanning.
 	streamScannerBuffer = 52_428_800
+
+	packetFilterActionContextKey          = "cliproxy.packet_filter_action"
+	packetFilterTargetContextKey          = "cliproxy.packet_filter_target"
+	packetFilterCooldownSecondsContextKey = "cliproxy.packet_filter_cooldown_seconds"
+	packetFilterRuleContextKey            = "cliproxy.packet_filter_rule"
+	packetFilterAuthIDContextKey          = "cliproxy.packet_filter_auth_id"
 )
 
 // GeminiExecutor is a stateless executor for the official Gemini API using API keys.
@@ -180,6 +188,7 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		AuthType:  authType,
 		AuthValue: authValue,
 	})
+	rawRequestPacket := formatGeminiUpstreamRequest(httpReq.Method, httpReq.URL.RequestURI(), httpReq.Header, body)
 
 	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
@@ -196,6 +205,7 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+		e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, rawRequestPacket, httpResp.StatusCode, httpResp.Header, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
 		return resp, err
@@ -285,6 +295,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		AuthType:  authType,
 		AuthValue: authValue,
 	})
+	rawRequestPacket := formatGeminiUpstreamRequest(httpReq.Method, httpReq.URL.RequestURI(), httpReq.Header, body)
 
 	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
@@ -296,6 +307,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+		e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, rawRequestPacket, httpResp.StatusCode, httpResp.Header, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("gemini executor: close response body error: %v", errClose)
@@ -430,6 +442,8 @@ func (e *GeminiExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	}
 	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		rawRequestPacket := formatGeminiUpstreamRequest(httpReq.Method, httpReq.URL.RequestURI(), httpReq.Header, translatedReq)
+		e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, rawRequestPacket, resp.StatusCode, resp.Header, data)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", resp.StatusCode, helps.SummarizeErrorBody(resp.Header.Get("Content-Type"), data))
 		return cliproxyexecutor.Response{}, statusErr{code: resp.StatusCode, msg: string(data)}
 	}
@@ -520,6 +534,97 @@ func (e *GeminiExecutor) resolveGeminiConfig(auth *cliproxyauth.Auth) *config.Ge
 		}
 	}
 	return nil
+}
+
+func (e *GeminiExecutor) applyUpstreamResponsePacketFilters(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, rawRequest string, status int, headers http.Header, body []byte) {
+	rawResponse := formatGeminiUpstreamResponse(status, headers, body)
+	meta := packetcapture.Record{
+		ID:            logging.GetRequestID(ctx),
+		RequestID:     logging.GetRequestID(ctx),
+		Provider:      e.Identifier(),
+		ProviderGroup: "gemini",
+		Source:        e.Identifier(),
+		Model:         strings.TrimSpace(model),
+		APIKey:        util.HideAPIKey(apiKey),
+	}
+	if auth != nil {
+		meta.AuthType, meta.AuthLabel = auth.AccountInfo()
+		meta.AuthIndex = auth.EnsureIndex()
+	}
+	filtered, _, triggers := packetcapture.ApplyRules(ctx, meta, "upstream_response", rawResponse)
+	e.publishPacketFilterActions(ctx, auth, apiKey, model, rawRequest, filtered, triggers)
+}
+
+func (e *GeminiExecutor) publishPacketFilterActions(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, rawRequest, filteredResponse string, triggers []packetcapture.TriggerRecord) {
+	if len(triggers) == 0 || strings.TrimSpace(apiKey) == "" {
+		return
+	}
+	ginCtx, _ := ctx.Value("gin").(interface {
+		Set(string, any)
+	})
+	if ginCtx == nil {
+		return
+	}
+	for _, trigger := range triggers {
+		action := strings.TrimSpace(trigger.Action)
+		target := strings.TrimSpace(trigger.Target)
+		if target != "api_key" && target != "auth" {
+			continue
+		}
+		switch action {
+		case "disable", "cooldown":
+			ginCtx.Set(packetFilterActionContextKey, action)
+			ginCtx.Set(packetFilterTargetContextKey, target)
+			ginCtx.Set(packetFilterCooldownSecondsContextKey, trigger.CooldownSeconds)
+			ginCtx.Set(packetFilterRuleContextKey, strings.TrimSpace(trigger.RuleName))
+			ginCtx.Set(packetFilterAuthIDContextKey, authIDForLog(auth))
+			log.Infof("gemini api key packet filter action: action=%s target=%s model=%s auth=%s api_key=%s rule=%s raw_request_bytes=%d raw_response_bytes=%d detail=%s", action, target, model, authIDForLog(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(rawRequest), len(filteredResponse), trigger.Detail)
+			return
+		}
+	}
+}
+
+func formatGeminiUpstreamRequest(method, path string, headers http.Header, body []byte) string {
+	if strings.TrimSpace(method) == "" {
+		method = http.MethodPost
+	}
+	if strings.TrimSpace(path) == "" {
+		path = "/"
+	}
+	return strings.TrimSpace(method + " " + path + " HTTP/1.1\n" + formatGeminiHeaders(headers) + "\n\n" + string(body))
+}
+
+func formatGeminiUpstreamResponse(status int, headers http.Header, body []byte) string {
+	text := http.StatusText(status)
+	if text == "" {
+		text = "Status"
+	}
+	return strings.TrimSpace(fmt.Sprintf("HTTP/1.1 %d %s\n%s\n\n%s", status, text, formatGeminiHeaders(headers), string(body)))
+}
+
+func formatGeminiHeaders(headers http.Header) string {
+	if len(headers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for key, values := range headers {
+		for _, value := range values {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(key)
+			b.WriteString(": ")
+			b.WriteString(value)
+		}
+	}
+	return b.String()
+}
+
+func authIDForLog(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	return auth.ID
 }
 
 func applyGeminiHeaders(req *http.Request, auth *cliproxyauth.Auth) {

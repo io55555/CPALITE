@@ -230,6 +230,12 @@ func matchValue(actual string, rule Rule) bool {
 	expected := rule.Value
 	switch op {
 	case "equals":
+		if rule.ValueNumber != 0 {
+			value, err := strconv.ParseFloat(strings.TrimSpace(actual), 64)
+			if err == nil && !math.IsNaN(value) && value == rule.ValueNumber {
+				return true
+			}
+		}
 		return actual == expected
 	case "not_equals":
 		return actual != expected

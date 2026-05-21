@@ -63,6 +63,12 @@ const (
 	// CloseAllExecutionSessionsID asks an executor to release all active execution sessions.
 	// Executors that do not support this marker may ignore it.
 	CloseAllExecutionSessionsID = "__all_execution_sessions__"
+
+	packetFilterActionContextKey          = "cliproxy.packet_filter_action"
+	packetFilterTargetContextKey          = "cliproxy.packet_filter_target"
+	packetFilterCooldownSecondsContextKey = "cliproxy.packet_filter_cooldown_seconds"
+	packetFilterRuleContextKey            = "cliproxy.packet_filter_rule"
+	packetFilterAuthIDContextKey          = "cliproxy.packet_filter_auth_id"
 )
 
 // RefreshEvaluator allows runtime state to override refresh decisions.
@@ -2535,6 +2541,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			} else {
 				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown())
 			}
+			applyPacketFilterActionState(ctx, auth, result.AuthID, result.Model, now)
 		}
 
 		applyOpenAICompatPersistedState(auth, now)
@@ -2561,6 +2568,89 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 	m.hook.OnResult(ctx, result)
 	logAuthStateTransition(ctx, beforeSnapshot, authSnapshot)
+}
+
+func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID, model string, now time.Time) {
+	if auth == nil {
+		return
+	}
+	action, target, actionAuthID, seconds, ruleName := packetFilterActionFromContext(ctx)
+	if action == "" || (target != "api_key" && target != "auth") {
+		return
+	}
+	if actionAuthID != "" && resultAuthID != "" && actionAuthID != resultAuthID {
+		return
+	}
+	message := "packet filter matched"
+	if ruleName != "" {
+		message += ": " + ruleName
+	}
+	switch action {
+	case "disable":
+		auth.Disabled = true
+		auth.Unavailable = true
+		auth.Status = StatusDisabled
+		auth.StatusMessage = message
+		auth.NextRetryAfter = time.Time{}
+		if model != "" {
+			state := ensureModelState(auth, model)
+			state.Status = StatusDisabled
+			state.Unavailable = true
+			state.StatusMessage = message
+			state.NextRetryAfter = time.Time{}
+			state.UpdatedAt = now
+		}
+	case "cooldown":
+		if seconds <= 0 {
+			seconds = 300
+		}
+		next := now.Add(time.Duration(seconds) * time.Second)
+		auth.Unavailable = true
+		auth.Status = StatusError
+		auth.StatusMessage = message
+		auth.NextRetryAfter = next
+		if model != "" {
+			state := ensureModelState(auth, model)
+			state.Status = StatusError
+			state.Unavailable = true
+			state.StatusMessage = message
+			state.NextRetryAfter = next
+			state.UpdatedAt = now
+		}
+	}
+	auth.UpdatedAt = now
+}
+
+func packetFilterActionFromContext(ctx context.Context) (action, target, authID string, seconds int, ruleName string) {
+	ginCtx, _ := ctx.Value("gin").(interface {
+		Get(string) (any, bool)
+	})
+	if ginCtx == nil {
+		return "", "", "", 0, ""
+	}
+	if value, ok := ginCtx.Get(packetFilterActionContextKey); ok {
+		action, _ = value.(string)
+	}
+	if value, ok := ginCtx.Get(packetFilterTargetContextKey); ok {
+		target, _ = value.(string)
+	}
+	if value, ok := ginCtx.Get(packetFilterCooldownSecondsContextKey); ok {
+		switch typed := value.(type) {
+		case int:
+			seconds = typed
+		case int64:
+			seconds = int(typed)
+		case float64:
+			seconds = int(typed)
+		}
+	}
+	if value, ok := ginCtx.Get(packetFilterRuleContextKey); ok {
+		ruleName, _ = value.(string)
+	}
+	if value, ok := ginCtx.Get(packetFilterAuthIDContextKey); ok {
+		authID, _ = value.(string)
+	}
+	return strings.TrimSpace(action), strings.TrimSpace(target), strings.TrimSpace(authID), seconds, strings.TrimSpace(ruleName)
 }
 
 func ensureModelState(auth *Auth, model string) *ModelState {

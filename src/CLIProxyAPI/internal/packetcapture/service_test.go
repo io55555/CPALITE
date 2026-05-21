@@ -215,6 +215,49 @@ func TestApplyRulesMatchesHTTPStatusWithoutScanningWholePacket(t *testing.T) {
 	}
 }
 
+func TestApplyRulesEqualsStatusUsesValueNumber(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	defaultMu.Lock()
+	previous := defaultService
+	defaultService = &Service{store: store}
+	defaultMu.Unlock()
+	defer func() {
+		defaultMu.Lock()
+		defaultService = previous
+		defaultMu.Unlock()
+	}()
+
+	previousProvider := defaultRulesProvider
+	SetDefaultRulesProvider(func(context.Context) ([]Rule, error) {
+		return []Rule{{
+			Name:     "legacy equals status",
+			Enabled:  true,
+			Packet:   "upstream_response",
+			Part:     "status",
+			Operator: "equals",
+			Value:    "unauthorized",
+			// 兼容旧表单写法：状态码字段应优先按 value_number 精确匹配。
+			ValueNumber: 403,
+			Action:      "disable",
+			Target:      "api_key",
+		}}, nil
+	})
+	defer SetDefaultRulesProvider(previousProvider)
+
+	packet := "HTTP/1.1 403 Forbidden\nContent-Type: application/json\n\n{}"
+	_, blockErr, triggers := ApplyRules(context.Background(), Record{Provider: "gemini"}, "upstream_response", packet)
+	if blockErr != nil {
+		t.Fatalf("ApplyRules block: %v", blockErr)
+	}
+	if len(triggers) != 1 || triggers[0].Action != "disable" || triggers[0].Target != "api_key" {
+		t.Fatalf("triggers = %+v, want disable api_key", triggers)
+	}
+}
+
 func TestApplyRulesMatchesStatusAndBodyConditions(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
 	if err != nil {
