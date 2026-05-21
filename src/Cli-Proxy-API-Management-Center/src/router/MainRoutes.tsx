@@ -20,6 +20,7 @@ import { MonitoringCenterPage } from '@/pages/MonitoringCenterPage';
 import { PacketCapturePage } from '@/pages/PacketCapturePage';
 import { MonitoringCenterPage as MonitoringCenterSeakeePage } from '@/pages/MonitoringCenterSeakeePage';
 import { CodexInspectionPage as CodexInspectionSeakeePage } from '@/pages/CodexInspectionSeakeePage';
+import { MonitoringCenterSsfunPage } from '@/pages/MonitoringCenterSsfunPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SystemPage } from '@/pages/SystemPage';
@@ -79,6 +80,7 @@ const mainRoutes = [
   { path: '/packet-capture', element: <PacketCapturePage /> },
   { path: '/monitorseakee', element: <MonitoringCenterSeakeePage /> },
   { path: '/monitorseakee/codex-inspection', element: <CodexInspectionSeakeePage /> },
+  { path: '/monitorssfun', element: <MonitoringCenterSsfunPage /> },
   { path: '/credential-center', element: <Navigate to="/monitor" replace /> },
   { path: '/config', element: <ConfigPage /> },
   { path: '/logs', element: <LogsPage /> },

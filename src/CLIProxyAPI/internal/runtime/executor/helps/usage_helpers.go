@@ -30,6 +30,7 @@ type UsageReporter struct {
 	authType                        string
 	apiKey                          string
 	source                          string
+	reasoning                       string
 	requestedAt                     time.Time
 	once                            sync.Once
 	rawMu                           sync.RWMutex
@@ -53,6 +54,7 @@ func NewUsageReporter(ctx context.Context, provider, model string, auth *cliprox
 		apiKey:      apiKey,
 		source:      resolveUsageSource(auth, apiKey),
 		authType:    resolveUsageAuthType(auth),
+		reasoning:   usage.ReasoningEffortFromContext(ctx),
 	}
 	if auth != nil {
 		reporter.authID = auth.ID
@@ -232,23 +234,24 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 	clientUA := clientUserAgentFromContext(r.ctx)
 	upstreamUA := userAgentFromPacket(rawRequest)
 	return usage.Record{
-		Provider:    r.provider,
-		Model:       model,
-		Alias:       r.alias,
-		Source:      r.source,
-		APIKey:      r.apiKey,
-		AuthID:      r.authID,
-		AuthIndex:   r.authIndex,
-		AuthType:    r.authType,
-		RequestedAt: r.requestedAt,
-		Latency:     r.latency(),
-		Failed:      failed,
-		ClientUA:    clientUA,
-		UpstreamUA:  upstreamUA,
-		RawRequest:  rawRequest,
-		RawResponse: rawResponse,
-		Fail:        fail,
-		Detail:      detail,
+		Provider:        r.provider,
+		Model:           model,
+		Alias:           r.alias,
+		Source:          r.source,
+		APIKey:          r.apiKey,
+		AuthID:          r.authID,
+		AuthIndex:       r.authIndex,
+		AuthType:        r.authType,
+		ReasoningEffort: r.reasoning,
+		RequestedAt:     r.requestedAt,
+		Latency:         r.latency(),
+		Failed:          failed,
+		ClientUA:        clientUA,
+		UpstreamUA:      upstreamUA,
+		RawRequest:      rawRequest,
+		RawResponse:     rawResponse,
+		Fail:            fail,
+		Detail:          detail,
 	}
 }
 

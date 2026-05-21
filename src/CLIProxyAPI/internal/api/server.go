@@ -855,6 +855,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/usage", s.mgmt.DeleteFwindyUsage)
 		mgmt.GET("/usage/statistics", s.mgmt.GetUsageStatistics)
 		mgmt.DELETE("/usage/records", s.mgmt.DeleteUsageRecords)
+		s.mgmt.RegisterAccountInspectionRoutes(mgmt)
 		mgmt.GET("/packet-capture/state", s.mgmt.GetPacketCaptureState)
 		mgmt.PUT("/packet-capture/state", s.mgmt.PutPacketCaptureState)
 		mgmt.PATCH("/packet-capture/state", s.mgmt.PutPacketCaptureState)

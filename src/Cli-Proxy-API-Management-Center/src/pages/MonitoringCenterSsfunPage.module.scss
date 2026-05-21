@@ -1,0 +1,39 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.tabButton {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.tabButton:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.tabButtonActive {
+  color: var(--button-primary-text);
+  background: var(--button-primary-bg);
+}
+
+.panel {
+  min-width: 0;
+}

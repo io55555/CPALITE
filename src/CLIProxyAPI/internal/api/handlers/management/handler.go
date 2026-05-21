@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,7 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 		envSecret:           envSecret,
 	}
 	h.startAttemptCleanup()
+	h.startAccountInspectionScheduler()
 	return h
 }
 
@@ -215,6 +217,14 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 		}
 		if provided == "" {
 			provided = c.GetHeader("X-Management-Key")
+		}
+		if provided == "" {
+			if proto := c.GetHeader("Sec-WebSocket-Protocol"); strings.HasPrefix(proto, "cpa-management.") {
+				provided = strings.TrimPrefix(proto, "cpa-management.")
+				if decoded, err := url.QueryUnescape(provided); err == nil {
+					provided = decoded
+				}
+			}
 		}
 
 		allowed, statusCode, errMsg := h.AuthenticateManagementKey(clientIP, localClient, provided)
