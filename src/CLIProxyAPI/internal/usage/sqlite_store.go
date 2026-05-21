@@ -2,7 +2,9 @@ package usage
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -585,12 +587,22 @@ func addRecordToUsage(result APIUsage, record Record) {
 }
 
 func addUsageDetail(result APIUsage, apiKey, endpoint, provider, model string, detail RequestDetail) {
+	detail.APIKeyHash = apiKeyHash(apiKey)
 	key := groupingKey(apiKey, endpoint, provider)
 	modelKey := normalizeModel(model)
 	if result[key] == nil {
 		result[key] = map[string][]RequestDetail{}
 	}
 	result[key][modelKey] = append(result[key][modelKey], detail)
+}
+
+func apiKeyHash(apiKey string) string {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(sum[:])
 }
 
 func truncateUsageRaw(value string) string {

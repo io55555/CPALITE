@@ -11,6 +11,7 @@ import { getAuthFileStatusMessage } from '@/features/authFiles/constants';
 import { useInterval } from '@/hooks/useInterval';
 import { authFilesApi } from '@/services/api/authFiles';
 import { logsApi } from '@/services/api/logs';
+import { packetCaptureApi, type PacketRecord } from '@/services/api/packetCapture';
 import { useNotificationStore, useUsageStatsStore } from '@/stores';
 import type { GeminiKeyConfig, ProviderKeyConfig, OpenAIProviderConfig } from '@/types';
 import type { AuthFileItem } from '@/types/authFile';
@@ -354,6 +355,9 @@ const buildFallbackResponsePacket = (row: RequestEventRow, message: string): str
   ].join('\n');
 };
 
+const packetCaptureSection = (record: PacketRecord | null, key: keyof PacketRecord['packets']) =>
+  record?.packets?.[key]?.trim() || '';
+
 export interface RequestEventsDetailsCardProps {
   usage: unknown;
   loading: boolean;
@@ -493,6 +497,7 @@ export function RequestEventsDetailsCard({
   );
   const [localAuthFiles, setLocalAuthFiles] = useState<AuthFileItem[]>([]);
   const [selectedFailureRow, setSelectedFailureRow] = useState<RequestEventRow | null>(null);
+  const [selectedFailurePacketRecord, setSelectedFailurePacketRecord] = useState<PacketRecord | null>(null);
   const [selectedUAInspection, setSelectedUAInspection] = useState<UAInspection | null>(null);
   const [selectedFailureLogText, setSelectedFailureLogText] = useState('');
   const [selectedFailureLogLoading, setSelectedFailureLogLoading] = useState(false);
@@ -1131,6 +1136,32 @@ export function RequestEventsDetailsCard({
     }
     return summarizeMissingFailureReason(selectedFailureRow, selectedCredentialInfo ?? undefined);
   }, [selectedCredentialInfo, selectedFailureCapturedResponse, selectedFailureRow]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSelectedFailurePacketRecord(null);
+    const requestId = selectedFailureRow?.requestId?.trim();
+    if (!requestId) return;
+    void packetCaptureApi
+      .listRecords({ request_id: requestId, limit: 1 })
+      .then(async (records) => {
+        const match = records?.[0];
+        if (!match?.id) return;
+        const record = await packetCaptureApi.getRecord(match.id);
+        if (!cancelled) {
+          setSelectedFailurePacketRecord(record);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedFailurePacketRecord(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFailureRow]);
+
   useEffect(() => {
     let cancelled = false;
     if (!selectedFailureRow?.requestId) {
@@ -1170,35 +1201,44 @@ export function RequestEventsDetailsCard({
   }, [selectedFailureRow]);
   const selectedFailureRequestPacket = useMemo(() => {
     if (!selectedFailureRow) return '';
+    const captured = packetCaptureSection(selectedFailurePacketRecord, 'client_request');
+    if (captured) return captured;
     const client = extractNamedSection(selectedFailureCapturedRequest, '客户端发给CPA的完整数据包');
     if (client) return client;
     if (selectedFailureCapturedRequest) return selectedFailureCapturedRequest;
     return buildFallbackRequestPacket(selectedFailureRow);
-  }, [selectedFailureCapturedRequest, selectedFailureRow]);
+  }, [selectedFailureCapturedRequest, selectedFailurePacketRecord, selectedFailureRow]);
   const selectedFailureUpstreamRequestPacket = useMemo(() => {
     if (!selectedFailureRow) return '';
-    return extractNamedSection(selectedFailureCapturedRequest, 'CPA发给供应商的完整数据包');
-  }, [selectedFailureCapturedRequest, selectedFailureRow]);
+    return (
+      packetCaptureSection(selectedFailurePacketRecord, 'upstream_request') ||
+      extractNamedSection(selectedFailureCapturedRequest, 'CPA发给供应商的完整数据包')
+    );
+  }, [selectedFailureCapturedRequest, selectedFailurePacketRecord, selectedFailureRow]);
   const selectedFailureUpstreamResponsePacket = useMemo(() => {
     if (!selectedFailureRow) return '';
     return firstNonEmpty(
+      packetCaptureSection(selectedFailurePacketRecord, 'upstream_response'),
       extractNamedSection(selectedFailureCapturedResponse, '供应商返回CPA的完整数据包'),
       selectedFailureCapturedResponse
     );
-  }, [selectedFailureCapturedResponse, selectedFailureRow]);
+  }, [selectedFailureCapturedResponse, selectedFailurePacketRecord, selectedFailureRow]);
   const selectedFailureStatusRulers = useMemo(() => {
     if (!selectedFailureRow) return '';
     return extractNamedSection(selectedFailureCapturedResponse, '触发status-rulers');
   }, [selectedFailureCapturedResponse, selectedFailureRow]);
   const selectedFailureResponsePacket = useMemo(() => {
     if (!selectedFailureRow) return '';
+    const captured = packetCaptureSection(selectedFailurePacketRecord, 'client_response');
+    if (captured) return captured;
     const client = extractNamedSection(selectedFailureCapturedResponse, 'CPA发送给客户端的完整数据包');
     if (client) return client;
     if (selectedFailureCapturedResponse) return selectedFailureCapturedResponse;
     return buildFallbackResponsePacket(selectedFailureRow, selectedFailureMessage);
-  }, [selectedFailureCapturedResponse, selectedFailureMessage, selectedFailureRow]);
+  }, [selectedFailureCapturedResponse, selectedFailureMessage, selectedFailurePacketRecord, selectedFailureRow]);
   const selectedFailureNote = useMemo(() => {
     if (
+      selectedFailurePacketRecord ||
       selectedFailureCapturedRequest ||
       selectedFailureCapturedResponse ||
       selectedFailureUpstreamRequestPacket ||
@@ -1214,6 +1254,7 @@ export function RequestEventsDetailsCard({
     selectedCredentialInfo,
     selectedFailureCapturedRequest,
     selectedFailureCapturedResponse,
+    selectedFailurePacketRecord,
     selectedFailureUpstreamRequestPacket,
     selectedFailureUpstreamResponsePacket,
   ]);

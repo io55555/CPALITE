@@ -320,6 +320,12 @@ type RealtimeLogRow = MonitoringEventRow & {
   recentFailureCount: number;
 };
 
+type UAInspection = {
+  title: string;
+  clientUA: string;
+  upstreamUA: string;
+};
+
 type UsageImportResult = {
   added?: number;
   skipped?: number;
@@ -558,6 +564,51 @@ type AccountSummaryMetric = {
 };
 
 const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
+
+const formatTokenSharePercent = (value: number, total: number) => {
+  if (!Number.isFinite(value) || !Number.isFinite(total) || total <= 0) return '0%';
+  const rounded = ((value / total) * 100).toFixed(2);
+  return `${rounded.replace(/\.?0+$/, '')}%`;
+};
+
+const tokenShareValue = (value: number, total: number) => (
+  <span className={styles.tokenShareValue}>
+    <span>{formatCompactNumber(value)}</span>
+    <span className={styles.goodText}>{formatTokenSharePercent(value, total)}</span>
+  </span>
+);
+
+const compactUserAgent = (ua: string | null | undefined) => {
+  const text = (ua || '').trim();
+  if (!text || text === '-') return '-';
+  const lower = text.toLowerCase();
+  const known: Array<[RegExp, string]> = [
+    [/claude[-_\s]?code|claude-cli|anthropic-cli/, 'ClaudeCode'],
+    [/codex|openai-codex/, 'Codex'],
+    [/openclaw/, 'OpenClaw'],
+    [/opencode/, 'OpenCode'],
+    [/antigravity/, 'Antigravity'],
+    [/\bzed\b|zed\//, 'Zed'],
+    [/\bcurl\//, 'curl'],
+    [/\bwget\//, 'Wget'],
+    [/chrome|chromium|edg\//, 'Chrome'],
+    [/firefox/, 'Firefox'],
+    [/safari/, 'Safari'],
+    [/postman/, 'Postman'],
+    [/insomnia/, 'Insomnia'],
+    [/python-requests|aiohttp|httpx/, 'Python'],
+    [/node-fetch|undici|axios|node\.js/, 'Node'],
+    [/go-http-client/, 'Go'],
+  ];
+  const found = known.find(([pattern]) => pattern.test(lower));
+  if (found) return found[1];
+  const firstProduct = text.match(/^([A-Za-z][A-Za-z0-9._-]{1,30})(?:\/|\s|$)/)?.[1];
+  if (firstProduct) return firstProduct;
+  return text.length > 18 ? `${text.slice(0, 16)}...` : text;
+};
+
+const formatUASummary = (row: MonitoringEventRow) =>
+  `客户:${compactUserAgent(row.clientUA)} / CPA:${compactUserAgent(row.upstreamUA)}`;
 
 const getProgressWidth = (value: number) => {
   if (value <= 0) return '0%';
@@ -2389,6 +2440,7 @@ export function MonitoringCenterSsfunRequestPanel() {
   const [usageTrendApiKey, setUsageTrendApiKey] = useState('all');
   const [accountStatsMetric, setAccountStatsMetric] = useState<AccountSortMetric>('recent');
   const [isAccountStatsHidden, setIsAccountStatsHidden] = useState(false);
+  const [selectedUAInspection, setSelectedUAInspection] = useState<UAInspection | null>(null);
   const accountQuotaStatesRef = useRef<Record<string, AccountQuotaState>>({});
   const accountQuotaRequestIdsRef = useRef<Record<string, number>>({});
   const deferredSearch = useDeferredValue(searchInput);
@@ -2782,7 +2834,18 @@ export function MonitoringCenterSsfunRequestPanel() {
       accent: 'purple',
       footer: [
         { label: t('monitoring.total_tokens_label'), value: formatCompactNumber(topSummary.totalTokens) },
-        { label: t('monitoring.input_output_reasoning'), value: `${formatCompactNumber(topSummary.inputTokens)} / ${formatCompactNumber(topSummary.outputTokens)} / ${formatCompactNumber(topSummary.reasoningTokens)}` },
+        {
+          label: t('monitoring.input_output_reasoning'),
+          value: (
+            <span className={styles.tokenBreakdownValue}>
+              {tokenShareValue(topSummary.inputTokens, topSummary.totalTokens)}
+              <span>/</span>
+              {tokenShareValue(topSummary.outputTokens, topSummary.totalTokens)}
+              <span>/</span>
+              {tokenShareValue(topSummary.reasoningTokens, topSummary.totalTokens)}
+            </span>
+          ),
+        },
       ],
     },
     {
@@ -3184,6 +3247,7 @@ export function MonitoringCenterSsfunRequestPanel() {
                 <th>{t('monitoring.column_type')}</th>
                 <th>{t('monitoring.column_model')}</th>
                 <th>{t('monitoring.api_key_label')}</th>
+                <th>UA</th>
                 <th>{t('monitoring.recent_status')}</th>
                 <th>{t('monitoring.request_status')}</th>
                 <th>{t('monitoring.column_success_rate')}</th>
@@ -3211,6 +3275,22 @@ export function MonitoringCenterSsfunRequestPanel() {
                   </td>
                   <td>
                     <span className={styles.monoCell}>{row.clientApiKey.masked}</span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={styles.uaDetailButton}
+                      title="查看完整UA"
+                      onClick={() =>
+                        setSelectedUAInspection({
+                          title: `${row.provider} / ${row.model}`,
+                          clientUA: row.clientUA || '-',
+                          upstreamUA: row.upstreamUA || '-',
+                        })
+                      }
+                    >
+                      <span className={styles.monoCell}>{formatUASummary(row)}</span>
+                    </button>
                   </td>
                   <td>
                     <div className={styles.recentStatusCell}>
@@ -3267,7 +3347,7 @@ export function MonitoringCenterSsfunRequestPanel() {
               ))}
               {realtimeLogRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>
+                  <td colSpan={12}>
                     <div className={styles.emptyTable}>
                       {deferredSearch.trim() ? t('monitoring.no_filtered_data') : t('monitoring.no_data')}
                     </div>
@@ -3381,6 +3461,25 @@ export function MonitoringCenterSsfunRequestPanel() {
             <Button variant="primary" size="sm" onClick={() => void handleSaveMonitoringSettings()} disabled={isMonitoringSettingsSaving}>
               {isMonitoringSettingsSaving ? t('common.loading') : t('common.save')}
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={selectedUAInspection !== null}
+        onClose={() => setSelectedUAInspection(null)}
+        title={selectedUAInspection ? `UA 明细 · ${selectedUAInspection.title}` : 'UA 明细'}
+        width={760}
+        className={styles.monitorModal}
+      >
+        <div className={styles.uaModalBody}>
+          <div className={styles.uaModalBlock}>
+            <h3>客户UA</h3>
+            <pre>{selectedUAInspection?.clientUA || '-'}</pre>
+          </div>
+          <div className={styles.uaModalBlock}>
+            <h3>CPA的UA</h3>
+            <pre>{selectedUAInspection?.upstreamUA || '-'}</pre>
           </div>
         </div>
       </Modal>

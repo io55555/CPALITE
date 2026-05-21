@@ -26,6 +26,10 @@ export interface UsageDetail {
   source: string;
   auth_index: string | number | null;
   api_key_hash?: string;
+  client_ua?: string;
+  upstream_ua?: string;
+  raw_request?: string;
+  raw_response?: string;
   latency_ms?: number;
   tokens: UsageTokens;
   failed: boolean;
@@ -239,6 +243,26 @@ const buildUsageDetail = (
       ? detailRaw.api_key_hash
       : typeof detailRaw.apiKeyHash === 'string'
         ? detailRaw.apiKeyHash
+        : undefined,
+    client_ua: typeof detailRaw.client_ua === 'string'
+      ? detailRaw.client_ua
+      : typeof detailRaw.clientUA === 'string'
+        ? detailRaw.clientUA
+        : undefined,
+    upstream_ua: typeof detailRaw.upstream_ua === 'string'
+      ? detailRaw.upstream_ua
+      : typeof detailRaw.upstreamUA === 'string'
+        ? detailRaw.upstreamUA
+        : undefined,
+    raw_request: typeof detailRaw.raw_request === 'string'
+      ? detailRaw.raw_request
+      : typeof detailRaw.rawRequest === 'string'
+        ? detailRaw.rawRequest
+        : undefined,
+    raw_response: typeof detailRaw.raw_response === 'string'
+      ? detailRaw.raw_response
+      : typeof detailRaw.rawResponse === 'string'
+        ? detailRaw.rawResponse
         : undefined,
     latency_ms: latencyMs ?? undefined,
     tokens: readTokens(detailRaw),

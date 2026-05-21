@@ -5,6 +5,7 @@ import type { AuthFileItem } from '@/types/authFile';
 import type { Config } from '@/types/config';
 import type { CredentialInfo } from '@/types/sourceInfo';
 import { sha256Hex } from '@/utils/hash';
+import { resolveUsageUserAgents } from '@/utils/packetUserAgent';
 import { isRecordValue, readBooleanValue, readStringValue } from '@/utils/quota';
 import { buildSourceInfoMap, resolveSourceDisplay, type SourceInfoMapInput } from '@/utils/sourceResolverSsfun';
 import {
@@ -296,6 +297,8 @@ export type MonitoringEventRow = {
   channel: string;
   channelHost: string;
   channelDisabled: boolean;
+  clientUA: string;
+  upstreamUA: string;
   failed: boolean;
   statsIncluded: boolean;
   latencyMs: number | null;
@@ -1456,6 +1459,11 @@ const buildEventRows = (
       );
       const totalTokens = Math.max(Number(detail.tokens?.total_tokens) || 0, extractTotalTokens(detail));
       const totalCost = calculateCost(detail, modelPrices);
+      const userAgents = resolveUsageUserAgents({
+        client_ua: detail.client_ua,
+        upstream_ua: detail.upstream_ua,
+        raw_request: detail.raw_request,
+      });
       const apiKeyHash = readStringValue(detail.api_key_hash) || '-';
       const configuredApiKey = apiKeyHash === '-' ? null : configuredApiKeys.byHash.get(apiKeyHash);
       const singleConfiguredApiKey = configuredApiKeys.keys.length === 1 ? configuredApiKeys.keys[0] : null;
@@ -1501,6 +1509,8 @@ const buildEventRows = (
         channel: channelLabel,
         channelHost: channelMeta?.host || '-',
         channelDisabled: channelMeta?.disabled || false,
+        clientUA: userAgents.clientUA,
+        upstreamUA: userAgents.upstreamUA,
         failed: detail.failed === true,
         statsIncluded,
         latencyMs: typeof detail.latency_ms === 'number' ? detail.latency_ms : null,

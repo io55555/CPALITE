@@ -2609,6 +2609,14 @@
   color: var(--monitor-green);
 }
 
+.tokenBreakdownValue,
+.tokenShareValue {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  flex-wrap: wrap;
+}
+
 .warnText {
   color: var(--monitor-amber);
 }
@@ -3223,6 +3231,48 @@
 
 .monoCell {
   font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.uaDetailButton {
+  display: inline-flex;
+  max-width: 190px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.uaDetailButton:hover {
+  color: var(--monitor-accent);
+}
+
+.uaModalBody {
+  display: grid;
+  gap: 14px;
+}
+
+.uaModalBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.uaModalBlock h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.uaModalBlock pre {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--monitor-line);
+  background: var(--monitor-surface);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .statusCell {

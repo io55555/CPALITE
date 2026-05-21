@@ -43,6 +43,7 @@ type RequestDetail struct {
 	Timestamp          time.Time  `json:"timestamp"`
 	Endpoint           string     `json:"endpoint,omitempty"`
 	RequestID          string     `json:"request_id,omitempty"`
+	APIKeyHash         string     `json:"api_key_hash,omitempty"`
 	LatencyMs          int64      `json:"latency_ms"`
 	FirstByteLatencyMs int64      `json:"first_byte_latency_ms"`
 	GenerationMs       int64      `json:"generation_ms"`
