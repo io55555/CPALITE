@@ -1993,8 +1993,8 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 
 	useAntigravitySchema := strings.Contains(modelName, "claude") || strings.Contains(modelName, "gemini-3-pro") || strings.Contains(modelName, "gemini-3.1-pro")
 	var (
-		bodyReader io.Reader
-		payloadLog []byte
+		bodyReader  io.Reader
+		requestBody []byte
 	)
 	if antigravityRequestNeedsSchemaSanitization(payload) {
 		payloadStr := string(payload)
@@ -2017,10 +2017,8 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 			payloadStr, _ = sjson.Delete(payloadStr, "request.generationConfig.maxOutputTokens")
 		}
 
-		bodyReader = strings.NewReader(payloadStr)
-		if e.cfg != nil && e.cfg.RequestLog {
-			payloadLog = []byte(payloadStr)
-		}
+		requestBody = []byte(payloadStr)
+		bodyReader = bytes.NewReader(requestBody)
 	} else {
 		if strings.Contains(modelName, "claude") {
 			payload, _ = sjson.SetBytes(payload, "request.toolConfig.functionCallingConfig.mode", "VALIDATED")
@@ -2028,10 +2026,8 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 			payload, _ = sjson.DeleteBytes(payload, "request.generationConfig.maxOutputTokens")
 		}
 
-		bodyReader = bytes.NewReader(payload)
-		if e.cfg != nil && e.cfg.RequestLog {
-			payloadLog = append([]byte(nil), payload...)
-		}
+		requestBody = append([]byte(nil), payload...)
+		bodyReader = bytes.NewReader(requestBody)
 	}
 
 	// if useAntigravitySchema {
@@ -2064,6 +2060,11 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 	}
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs)
 
+	rawUpstreamRequest := buildAntigravityRawRequest(httpReq, requestBody)
+	if strings.TrimSpace(rawUpstreamRequest) != "" {
+		helps.RecordUsageRawRequest(ctx, formatAntigravityUsageRequests(antigravityClientRawRequest(ctx), rawUpstreamRequest))
+	}
+
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -2074,7 +2075,7 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 		URL:       requestURL.String(),
 		Method:    http.MethodPost,
 		Headers:   httpReq.Header.Clone(),
-		Body:      payloadLog,
+		Body:      requestBody,
 		Provider:  e.Identifier(),
 		AuthID:    authID,
 		AuthLabel: authLabel,
@@ -2083,6 +2084,60 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 	})
 
 	return httpReq, nil
+}
+
+func buildAntigravityRawRequest(req *http.Request, body []byte) string {
+	if req == nil {
+		return ""
+	}
+	path := "/"
+	if req.URL != nil && req.URL.RequestURI() != "" {
+		path = req.URL.RequestURI()
+	}
+	protoMajor, protoMinor := req.ProtoMajor, req.ProtoMinor
+	if protoMajor == 0 {
+		protoMajor = 1
+		protoMinor = 1
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s HTTP/%d.%d\n", req.Method, path, protoMajor, protoMinor)
+	_ = req.Header.Write(&b)
+	b.WriteByte('\n')
+	b.Write(body)
+	return b.String()
+}
+
+func antigravityClientRawRequest(ctx context.Context) string {
+	raw, _ := helps.UsageRawPackets(ctx)
+	if section := extractAntigravityNamedSection(raw, "客户端发给CPA的完整数据包"); section != "" {
+		return section
+	}
+	if strings.TrimSpace(raw) != "" && extractAntigravityNamedSection(raw, "CPA发给供应商的完整数据包") == "" {
+		return raw
+	}
+	return helps.BuildDownstreamRawRequest(ctx, nil)
+}
+
+func formatAntigravityUsageRequests(clientRaw, upstreamRaw string) string {
+	sections := []string{
+		"=== 客户端发给CPA的完整数据包 ===\n" + strings.TrimSpace(clientRaw),
+		"=== CPA发给供应商的完整数据包 ===\n" + strings.TrimSpace(upstreamRaw),
+	}
+	return strings.TrimSpace(strings.Join(sections, "\n\n"))
+}
+
+func extractAntigravityNamedSection(content, title string) string {
+	marker := "=== " + title + " ==="
+	start := strings.Index(content, marker)
+	if start < 0 {
+		return ""
+	}
+	from := start + len(marker)
+	next := strings.Index(content[from:], "=== ")
+	if next >= 0 {
+		return strings.TrimSpace(content[from : from+next])
+	}
+	return strings.TrimSpace(content[from:])
 }
 
 func antigravityRequestNeedsSchemaSanitization(payload []byte) bool {

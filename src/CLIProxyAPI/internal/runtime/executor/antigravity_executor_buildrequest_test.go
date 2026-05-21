@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
@@ -166,6 +168,49 @@ func TestAntigravityBuildRequest_RejectsMissingProjectID(t *testing.T) {
 	}
 	if got := status.StatusCode(); got != http.StatusBadRequest {
 		t.Fatalf("status code = %d, want %d", got, http.StatusBadRequest)
+	}
+}
+
+func TestAntigravityBuildRequest_RecordsFullUsagePacketsWithFinalUpstreamUA(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	req, err := http.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"input-model"}`))
+	if err != nil {
+		t.Fatalf("new request error: %v", err)
+	}
+	req.Header.Set("User-Agent", "curl/8.17.0")
+	c.Request = req
+	c.Set("USAGE_RAW_REQUEST", "POST /v1/chat/completions HTTP/2\nUser-Agent: curl/8.17.0\n\n{\"model\":\"input-model\"}")
+
+	ctx := context.WithValue(context.Background(), "gin", c)
+	executor := &AntigravityExecutor{}
+	auth := &cliproxyauth.Auth{
+		Metadata: map[string]any{"project_id": "project-1"},
+		Attributes: map[string]string{
+			"user_agent": "antigravity/2.0.1 darwin/arm64",
+		},
+	}
+
+	builtReq, err := executor.buildRequest(ctx, auth, "token", "gemini-3.1-pro", []byte(`{"request":{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}}`), false, "", "https://example.com")
+	if err != nil {
+		t.Fatalf("buildRequest error: %v", err)
+	}
+
+	rawRequest, _ := helps.UsageRawPackets(ctx)
+	if !strings.Contains(rawRequest, "=== 客户端发给CPA的完整数据包 ===") {
+		t.Fatalf("client section missing: %s", rawRequest)
+	}
+	if !strings.Contains(rawRequest, "=== CPA发给供应商的完整数据包 ===") {
+		t.Fatalf("upstream section missing: %s", rawRequest)
+	}
+	if !strings.Contains(rawRequest, "User-Agent: curl/8.17.0") {
+		t.Fatalf("client UA missing: %s", rawRequest)
+	}
+	if want := "User-Agent: " + builtReq.Header.Get("User-Agent"); !strings.Contains(rawRequest, want) {
+		t.Fatalf("final upstream UA missing, want %q in %s", want, rawRequest)
+	}
+	if !strings.Contains(rawRequest, `"project":"project-1"`) || !strings.Contains(rawRequest, `"model":"gemini-3.1-pro"`) {
+		t.Fatalf("upstream body missing final payload: %s", rawRequest)
 	}
 }
 
