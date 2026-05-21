@@ -1469,7 +1469,7 @@ const buildEventRows = (
           : singleConfiguredApiKey ?? {
               id: 'clientApiKey:unknown',
               hash: '-',
-              masked: 'Unknown API Key',
+              masked: '未知 API Key',
             });
       const statsIncluded = detail.failed === true || inputTokens > 0 || outputTokens > 0;
       const dayKey = buildLocalDayKey(timestampMs);

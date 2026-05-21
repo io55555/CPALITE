@@ -928,7 +928,7 @@ function UsageTrendHeader({
 
 function TopUsageStats({ cards }: { cards: UsageMetricCard[] }) {
   return (
-    <section className={styles.usageStatsGrid} aria-label="Usage statistics">
+    <section className={styles.usageStatsGrid} aria-label="用量统计">
       {cards.map((card) => (
         <Card key={card.key} className={`${styles.usageStatsCard} ${card.key === 'tokens' ? styles.usageStatsCardTokens : ''}`}>
           <div className={styles.usageStatsCardHeader}>
@@ -1491,7 +1491,7 @@ function ApiKeyRankingPanel({
                   </div>
                   <div className={styles.apiKeyRankingMetaLine}>
                     <span>{`${formatCompactNumber(row.totalCalls)} ${t('monitoring.ranking_metric_requests')}`}</span>
-                    <span>{`${formatCompactNumber(row.totalTokens)} Token`}</span>
+                    <span>{`${formatCompactNumber(row.totalTokens)} ${t('monitoring.total_tokens')}`}</span>
                     <span>{`${formatCompactNumber(row.failureCalls)} ${t('monitoring.errors_label')}`}</span>
                     <span>{hasPrices ? formatUsd(row.totalCost) : '--'}</span>
                   </div>
@@ -2336,7 +2336,7 @@ function RecentPattern({
   const normalized = pattern.length > 0 ? pattern : Array.from({ length: 10 }, () => true);
   const successCount = normalized.filter(Boolean).length;
   const failureCount = normalized.length - successCount;
-  const ariaLabel = label ?? `Recent ${normalized.length} requests: ${successCount} succeeded, ${failureCount} failed`;
+  const ariaLabel = label ?? `最近 ${normalized.length} 次请求：成功 ${successCount} 次，失败 ${failureCount} 次`;
   const containerClassName = [
     styles.patternBars,
     variant === 'plain' ? styles.patternBarsPlain : '',
@@ -3259,7 +3259,7 @@ export function MonitoringCenterSsfunRequestPanel() {
                   <td>
                     <div className={styles.primaryCell}>
                       <span>{formatCompactNumber(row.totalTokens)}</span>
-                      <small>{`I ${formatCompactNumber(row.inputTokens)} · O ${formatCompactNumber(row.outputTokens)} · C ${formatCompactNumber(row.cachedTokens)}`}</small>
+                      <small>{`输入 ${formatCompactNumber(row.inputTokens)} · 输出 ${formatCompactNumber(row.outputTokens)} · 缓存 ${formatCompactNumber(row.cachedTokens)}`}</small>
                     </div>
                   </td>
                   <td>{hasPrices ? formatUsd(row.totalCost) : '--'}</td>

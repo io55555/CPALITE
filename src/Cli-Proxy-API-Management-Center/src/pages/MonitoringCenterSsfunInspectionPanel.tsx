@@ -692,7 +692,7 @@ const summaryToneClass: Record<NonNullable<SummaryCard['tone']>, string> = {
 };
 
 const INSPECTION_TARGET_OPTIONS = [
-  { value: ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE, label: 'All' },
+  { value: ACCOUNT_INSPECTION_ALL_PROVIDER_TYPE, label: '全部' },
   ...ACCOUNT_INSPECTION_SUPPORTED_PROVIDERS.map((provider) => ({
     value: provider,
     label: resolveProviderDisplayLabel(provider),

@@ -217,7 +217,7 @@ const connectUsageStream = async ({
     signal,
   });
   if (!response.ok || !response.body) {
-    throw new Error(`Usage stream failed: ${response.status}`);
+    throw new Error(`用量实时流连接失败：${response.status}`);
   }
 
   const reader = response.body.getReader();
@@ -296,7 +296,7 @@ export function useUsageData(): UseUsageDataReturn {
           await saveModelPricesToSqlite(legacyPrices);
         }
       } catch (err) {
-        console.error('Failed to sync model prices with sqlite:', err);
+        console.error('同步模型价格失败：', err);
       }
     };
 
@@ -328,7 +328,7 @@ export function useUsageData(): UseUsageDataReturn {
         reconnectDelay = 1000;
       } catch (err) {
         if (!controller.signal.aborted) {
-          console.warn('Usage SSE stream disconnected:', err);
+          console.warn('用量实时流已断开：', err);
         }
       }
 
@@ -351,7 +351,7 @@ export function useUsageData(): UseUsageDataReturn {
   const setModelPrices = useCallback((prices: Record<string, ModelPrice>) => {
     setModelPricesState(prices);
     void saveModelPricesToSqlite(prices).catch((err) => {
-      console.error('Failed to save model prices to sqlite:', err);
+      console.error('保存模型价格失败：', err);
     });
   }, []);
 

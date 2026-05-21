@@ -1717,7 +1717,7 @@
     "codex_pool_bucket_unknown": "未知"
   },
   "monitoring": {
-    "eyebrow": "Runtime Overview",
+    "eyebrow": "运行概览",
     "title": "请求监控",
     "subtitle": "围绕模型层调用、上游渠道、认证凭证和估算花费建立统一视图。这里默认以模型调用为统计口径，同时补充近似任务桶，避免把 usage.total_requests 误读成业务请求数。",
     "connection_status": "连接状态",
@@ -1840,7 +1840,7 @@
     "account_overview_title": "账号汇总",
     "account_overview_desc": "按账号实时汇总调用次数、成功失败、Token 结构和总花费，可展开查看模型花费明细，并拉取该账号的 Codex 配额。",
     "codex_inspection_entry": "Codex 账号巡检",
-    "codex_inspection_eyebrow": "Codex Account Inspection",
+    "codex_inspection_eyebrow": "Codex 账号巡检",
     "codex_inspection_title": "Codex 账号巡检",
     "codex_inspection_desc": "独立检查 Codex 账号的额度、失效状态和禁用状态，仅在用户确认后才执行删除、禁用或启用动作。",
     "codex_inspection_back": "返回请求监控",

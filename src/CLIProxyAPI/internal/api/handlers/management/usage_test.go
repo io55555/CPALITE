@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 )
 
 func TestGetUsageQueuePopsRequestedRecords(t *testing.T) {
@@ -66,6 +68,57 @@ func TestGetUsageQueueInvalidCountDoesNotPop(t *testing.T) {
 			t.Fatalf("remaining queue = %q, want original item", remaining)
 		}
 	})
+}
+
+func TestBuildUsagePayloadWrapsDetailsForSsfunFrontend(t *testing.T) {
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	payload := buildUsagePayload(usage.APIUsage{
+		"POST /v1/chat/completions": {
+			"gpt-test": {
+				{
+					ID:        "older",
+					Timestamp: now,
+					Tokens:    usage.TokenStats{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+				},
+				{
+					ID:        "newer",
+					Timestamp: now.Add(time.Second),
+					Tokens:    usage.TokenStats{InputTokens: 2, OutputTokens: 3, TotalTokens: 5},
+					Failed:    true,
+				},
+			},
+		},
+	}, 0, 50)
+
+	if payload["latest_id"] != 2 {
+		t.Fatalf("latest_id = %v, want 2", payload["latest_id"])
+	}
+	if payload["total_requests"] != 2 || payload["success_count"] != 1 || payload["failure_count"] != 1 {
+		t.Fatalf("unexpected summary: %#v", payload)
+	}
+	apis, ok := payload["apis"].(gin.H)
+	if !ok || len(apis) != 1 {
+		t.Fatalf("apis = %#v, want one wrapped api entry", payload["apis"])
+	}
+}
+
+func TestBuildUsagePayloadSupportsAfterIDIncrementalSlice(t *testing.T) {
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	payload := buildUsagePayload(usage.APIUsage{
+		"POST /v1/messages": {
+			"claude-test": {
+				{ID: "1", Timestamp: now, Tokens: usage.TokenStats{TotalTokens: 1}},
+				{ID: "2", Timestamp: now.Add(time.Second), Tokens: usage.TokenStats{TotalTokens: 2}},
+			},
+		},
+	}, 1, 10)
+
+	if payload["latest_id"] != 2 {
+		t.Fatalf("latest_id = %v, want 2", payload["latest_id"])
+	}
+	if payload["total_requests"] != 1 || payload["total_tokens"] != int64(2) {
+		t.Fatalf("incremental summary = %#v, want only the second record", payload)
+	}
 }
 
 func withManagementUsageQueue(t *testing.T, fn func()) {
