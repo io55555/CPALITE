@@ -81,6 +81,7 @@ func (s *ConfigSynthesizer) synthesizeGeminiKeys(ctx *SynthesisContext) []*corea
 			Label:      "gemini-apikey",
 			Prefix:     prefix,
 			Status:     coreauth.StatusActive,
+			Disabled:   entry.Disabled,
 			ProxyURL:   proxyURL,
 			Attributes: attrs,
 			Metadata:   metadata,
@@ -90,6 +91,10 @@ func (s *ConfigSynthesizer) synthesizeGeminiKeys(ctx *SynthesisContext) []*corea
 		ApplyAuthExcludedModelsMeta(a, cfg, entry.ExcludedModels, "apikey")
 		if len(a.Metadata) == 0 {
 			a.Metadata = nil
+		}
+		if entry.Disabled {
+			a.Status = coreauth.StatusDisabled
+			a.StatusMessage = "disabled via config"
 		}
 		out = append(out, a)
 	}

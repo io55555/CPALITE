@@ -487,6 +487,7 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 				Timestamp:       nowUTC(),
 				Action:          actionRule.Action,
 				Target:          actionRule.Target,
+				Account:         triggerAccount(meta),
 				Detail:          detail,
 				CooldownSeconds: actionRule.CooldownSeconds,
 			}
@@ -507,6 +508,22 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 		}
 	}
 	return current, nil, triggers
+}
+
+func triggerAccount(meta Record) string {
+	if value := strings.TrimSpace(meta.APIKey); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(meta.AuthLabel); value != "" {
+		if meta.AuthIndex != "" {
+			return value + " (" + meta.AuthIndex + ")"
+		}
+		return value
+	}
+	if value := strings.TrimSpace(meta.AuthIndex); value != "" {
+		return value
+	}
+	return strings.TrimSpace(meta.UserToken)
 }
 
 func enabledRules(ctx context.Context, store *Store) ([]Rule, error) {

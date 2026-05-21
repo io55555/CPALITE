@@ -58,6 +58,27 @@ func TestCapGeminiMaxOutputTokensLeavesAllowedOrUnknown(t *testing.T) {
 	}
 }
 
+func TestGeminiPacketFilterDisableMarksConfigKeyDisabled(t *testing.T) {
+	cfg := &config.Config{GeminiKey: []config.GeminiKey{
+		{APIKey: "key-a"},
+		{APIKey: "key-b", BaseURL: "https://example.test"},
+	}}
+	exec := NewGeminiExecutor(cfg)
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"api_key":  "key-b",
+		"base_url": "https://example.test",
+	}}
+
+	exec.applyConfigPacketFilterAction(auth, "key-b", "disable")
+
+	if cfg.GeminiKey[0].Disabled {
+		t.Fatal("unmatched gemini key was disabled")
+	}
+	if !cfg.GeminiKey[1].Disabled {
+		t.Fatal("matched gemini key was not disabled")
+	}
+}
+
 func TestGeminiExecutorExecuteCapsMaxOutputTokensBeforeUpstream(t *testing.T) {
 	var upstreamMaxOutputTokens int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
@@ -43,6 +44,8 @@ const (
 	packetFilterRuleContextKey            = "cliproxy.packet_filter_rule"
 	packetFilterAuthIDContextKey          = "cliproxy.packet_filter_auth_id"
 )
+
+var geminiConfigStateMu sync.Mutex
 
 // GeminiExecutor is a stateless executor for the official Gemini API using API keys.
 // It handles both API key and OAuth bearer token authentication, supporting both
@@ -578,8 +581,41 @@ func (e *GeminiExecutor) publishPacketFilterActions(ctx context.Context, auth *c
 			ginCtx.Set(packetFilterCooldownSecondsContextKey, trigger.CooldownSeconds)
 			ginCtx.Set(packetFilterRuleContextKey, strings.TrimSpace(trigger.RuleName))
 			ginCtx.Set(packetFilterAuthIDContextKey, authIDForLog(auth))
+			e.applyConfigPacketFilterAction(auth, apiKey, action)
 			log.Infof("gemini api key packet filter action: action=%s target=%s model=%s auth=%s api_key=%s rule=%s raw_request_bytes=%d raw_response_bytes=%d detail=%s", action, target, model, authIDForLog(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(rawRequest), len(filteredResponse), trigger.Detail)
 			return
+		}
+	}
+}
+
+func (e *GeminiExecutor) applyConfigPacketFilterAction(auth *cliproxyauth.Auth, apiKey, action string) {
+	if e == nil || e.cfg == nil || strings.TrimSpace(apiKey) == "" || action != "disable" {
+		return
+	}
+	baseURL := ""
+	if auth != nil && auth.Attributes != nil {
+		baseURL = strings.TrimSpace(auth.Attributes["base_url"])
+	}
+	geminiConfigStateMu.Lock()
+	defer geminiConfigStateMu.Unlock()
+	changed := false
+	for i := range e.cfg.GeminiKey {
+		entry := &e.cfg.GeminiKey[i]
+		if strings.TrimSpace(entry.APIKey) != strings.TrimSpace(apiKey) {
+			continue
+		}
+		if baseURL != "" && strings.TrimSpace(entry.BaseURL) != baseURL {
+			continue
+		}
+		if !entry.Disabled {
+			entry.Disabled = true
+			changed = true
+		}
+		break
+	}
+	if changed && strings.TrimSpace(e.cfg.ConfigFilePath) != "" {
+		if err := config.SaveConfigPreserveComments(e.cfg.ConfigFilePath, e.cfg); err != nil {
+			log.Warnf("failed to persist gemini api key disabled by packet filter: %v", err)
 		}
 	}
 }

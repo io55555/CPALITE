@@ -258,6 +258,44 @@ func TestApplyRulesEqualsStatusUsesValueNumber(t *testing.T) {
 	}
 }
 
+func TestTriggerRecordsIncludeAccountAndLookupByRequestID(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.InsertTrigger(ctx, TriggerRecord{
+		RuleID:   "rule-1",
+		RuleName: "disable key",
+		RecordID: "req-1",
+		Action:   "disable",
+		Target:   "api_key",
+		Account:  "AIza...EHkY",
+	}); err != nil {
+		t.Fatalf("InsertTrigger: %v", err)
+	}
+	triggers, err := store.ListTriggers(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListTriggers: %v", err)
+	}
+	if len(triggers) != 1 || triggers[0].Account != "AIza...EHkY" {
+		t.Fatalf("triggers = %+v, want account", triggers)
+	}
+
+	if err := store.Insert(ctx, Record{RequestID: "req-1", Provider: "gemini", Packets: PacketSet{UpstreamResponse: "HTTP/1.1 403 Forbidden\n\n{}"}}); err != nil {
+		t.Fatalf("Insert record: %v", err)
+	}
+	record, ok, err := store.GetByRequestID(ctx, "req-1")
+	if err != nil {
+		t.Fatalf("GetByRequestID: %v", err)
+	}
+	if !ok || record.Provider != "gemini" {
+		t.Fatalf("record = %+v ok=%v, want gemini record", record, ok)
+	}
+}
+
 func TestApplyRulesMatchesStatusAndBodyConditions(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
 	if err != nil {

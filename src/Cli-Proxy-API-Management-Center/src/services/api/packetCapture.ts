@@ -97,6 +97,7 @@ export interface PacketTrigger {
   timestamp: string;
   action: string;
   target?: string;
+  account?: string;
   detail?: string;
   cooldown_seconds?: number;
 }

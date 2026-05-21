@@ -126,6 +126,7 @@ type TriggerRecord struct {
 	Timestamp       time.Time `json:"timestamp"`
 	Action          string    `json:"action"`
 	Target          string    `json:"target,omitempty"`
+	Account         string    `json:"account,omitempty"`
 	Detail          string    `json:"detail,omitempty"`
 	CooldownSeconds int       `json:"cooldown_seconds,omitempty"`
 }

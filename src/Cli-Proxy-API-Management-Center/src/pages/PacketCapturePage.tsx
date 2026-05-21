@@ -969,6 +969,7 @@ export function PacketCapturePage() {
               <strong>{item.rule_name}</strong>
               <span>{item.action}</span>
               <span>{item.target || '-'}</span>
+              <span>{item.account || '-'}</span>
               <span>{item.detail}</span>
               <Button size="sm" variant="secondary" onClick={() => void showTriggerDetail(item)}>详情</Button>
               <button

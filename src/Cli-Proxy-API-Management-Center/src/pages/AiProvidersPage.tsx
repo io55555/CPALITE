@@ -199,8 +199,8 @@ export function AiProvidersPage() {
       const previousList = geminiKeys;
       const nextExcluded = enabled
         ? withoutDisableAllModelsRule(current.excludedModels)
-        : withDisableAllModelsRule(current.excludedModels);
-      const nextItem: GeminiKeyConfig = { ...current, excludedModels: nextExcluded };
+        : current.excludedModels;
+      const nextItem: GeminiKeyConfig = { ...current, disabled: !enabled, excludedModels: nextExcluded };
       const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
       setGeminiKeys(nextList);

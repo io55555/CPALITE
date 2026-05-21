@@ -53,6 +53,7 @@ export interface CloakConfig {
 
 export interface GeminiKeyConfig {
   apiKey: string;
+  disabled?: boolean;
   priority?: number;
   prefix?: string;
   baseUrl?: string;

@@ -86,11 +86,11 @@ export function GeminiSection({
           onEdit={(_, index) => onEdit(index)}
           onDelete={(_, index) => onDelete(index)}
           actionsDisabled={actionsDisabled}
-          getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
+          getRowDisabled={(item) => item.disabled === true || hasDisableAllModelsRule(item.excludedModels)}
           renderExtraActions={(item, index) => (
             <ToggleSwitch
               label={t('ai_providers.config_toggle_label')}
-              checked={!hasDisableAllModelsRule(item.excludedModels)}
+              checked={item.disabled !== true && !hasDisableAllModelsRule(item.excludedModels)}
               disabled={toggleDisabled}
               onChange={(value) => void onToggle(index, value)}
             />
@@ -103,7 +103,7 @@ export function GeminiSection({
               item.baseUrl
             );
             const headerEntries = Object.entries(item.headers || {});
-            const configDisabled = hasDisableAllModelsRule(item.excludedModels);
+            const configDisabled = item.disabled === true || hasDisableAllModelsRule(item.excludedModels);
             const excludedModels = item.excludedModels ?? [];
             const statusData =
               statusBarCache.get(getProviderConfigKey(item, index)) ||

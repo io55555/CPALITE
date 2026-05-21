@@ -133,8 +133,15 @@ func (h *Handler) GetPacketCapture(c *gin.Context) {
 		return
 	}
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "packet capture not found"})
-		return
+		record, ok, err = store.GetByRequestID(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load packet capture"})
+			return
+		}
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "packet capture not found"})
+			return
+		}
 	}
 	c.JSON(http.StatusOK, record)
 }

@@ -163,6 +163,8 @@ type Config struct {
 	// PacketCapture stores packet filter rules in config.yaml; packet records remain in sqlite.
 	PacketCapture PacketCaptureConfig `yaml:"packet-capture" json:"packet-capture"`
 
+	ConfigFilePath string `yaml:"-" json:"-"`
+
 	legacyMigrationPending bool `yaml:"-" json:"-"`
 }
 
@@ -466,6 +468,9 @@ type ClaudeKey struct {
 	// APIKey is the authentication key for accessing Claude API services.
 	APIKey string `yaml:"api-key" json:"api-key"`
 
+	// Disabled prevents this API key from being used for routing.
+	Disabled bool `yaml:"disabled,omitempty" json:"disabled,omitempty"`
+
 	// Priority controls selection preference when multiple credentials match.
 	// Higher values are preferred; defaults to 0.
 	Priority int `yaml:"priority,omitempty" json:"priority,omitempty"`
@@ -572,6 +577,9 @@ func (m CodexModel) GetAlias() string { return m.Alias }
 type GeminiKey struct {
 	// APIKey is the authentication key for accessing Gemini API services.
 	APIKey string `yaml:"api-key" json:"api-key"`
+
+	// Disabled prevents this API key from being used for routing.
+	Disabled bool `yaml:"disabled,omitempty" json:"disabled,omitempty"`
 
 	// Priority controls selection preference when multiple credentials match.
 	// Higher values are preferred; defaults to 0.
@@ -734,6 +742,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Unmarshal the YAML data into the Config struct.
 	var cfg Config
+	cfg.ConfigFilePath = configFile
 	// Set defaults before unmarshal so that absent keys keep defaults.
 	cfg.Host = "" // Default empty: binds to all interfaces (IPv4 + IPv6)
 	cfg.LoggingToFile = false
