@@ -138,6 +138,9 @@ func (s *FileTokenStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error)
 			return walkErr
 		}
 		if d.IsDir() {
+			if isIgnoredAuthListDir(path, dir) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".json") {
@@ -156,6 +159,22 @@ func (s *FileTokenStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error)
 		return nil, err
 	}
 	return entries, nil
+}
+
+func isIgnoredAuthListDir(path, baseDir string) bool {
+	rel, err := filepath.Rel(baseDir, path)
+	if err != nil || rel == "." {
+		return false
+	}
+	parts := strings.FieldsFunc(rel, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	for _, part := range parts {
+		if strings.EqualFold(part, "logs") {
+			return true
+		}
+	}
+	return false
 }
 
 // Delete removes the auth file.
@@ -198,8 +217,9 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 		return nil, fmt.Errorf("unmarshal auth json: %w", err)
 	}
 	provider, _ := metadata["type"].(string)
+	provider = strings.TrimSpace(provider)
 	if provider == "" {
-		provider = "unknown"
+		return nil, nil
 	}
 	if provider == "antigravity" || provider == "gemini" {
 		projectID := ""

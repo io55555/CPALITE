@@ -1,6 +1,46 @@
 package auth
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestFileTokenStoreListIgnoresLogsAndNonAuthJSON(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	logsDir := filepath.Join(baseDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o700); err != nil {
+		t.Fatalf("create logs dir: %v", err)
+	}
+	files := map[string]string{
+		filepath.Join(baseDir, "codex.json"):                `{"type":"codex","email":"u@example.com"}`,
+		filepath.Join(baseDir, "settings.json"):             `{"prices":{"gpt":1}}`,
+		filepath.Join(logsDir, "usage_model_prices.json"):   `{"gpt-5":{"input":1}}`,
+		filepath.Join(logsDir, "accidental-auth-like.json"): `{"type":"codex","email":"log@example.com"}`,
+	}
+	for path, raw := range files {
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	store := NewFileTokenStore()
+	store.SetBaseDir(baseDir)
+
+	auths, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("len(auths)=%d, want 1: %#v", len(auths), auths)
+	}
+	if auths[0].ID != "codex.json" || auths[0].Provider != "codex" {
+		t.Fatalf("auth=%#v, want codex.json/codex", auths[0])
+	}
+}
 
 func TestExtractAccessToken(t *testing.T) {
 	t.Parallel()
