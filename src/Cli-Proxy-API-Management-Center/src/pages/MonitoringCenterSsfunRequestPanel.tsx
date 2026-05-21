@@ -505,17 +505,17 @@ const buildAccountSummaryMetrics = (
   {
     key: 'input-tokens',
     label: t('monitoring.input_tokens'),
-    value: formatCompactNumber(row.inputTokens),
+    value: tokenShareMetricValue(row.inputTokens, row.totalTokens),
   },
   {
     key: 'output-tokens',
     label: t('monitoring.output_tokens'),
-    value: formatCompactNumber(row.outputTokens),
+    value: tokenShareMetricValue(row.outputTokens, row.totalTokens),
   },
   {
     key: 'cached-tokens',
     label: t('monitoring.cached_tokens'),
-    value: formatCompactNumber(row.cachedTokens),
+    value: tokenShareMetricValue(row.cachedTokens, row.inputTokens),
   },
   {
     key: 'estimated-cost',
@@ -574,7 +574,14 @@ const formatTokenSharePercent = (value: number, total: number) => {
 const tokenShareValue = (value: number, total: number) => (
   <span className={styles.tokenShareValue}>
     <span>{formatCompactNumber(value)}</span>
-    <span className={styles.goodText}>{formatTokenSharePercent(value, total)}</span>
+    <span className={styles.tokenSharePercent}>{formatTokenSharePercent(value, total)}</span>
+  </span>
+);
+
+const tokenShareMetricValue = (value: number, total: number) => (
+  <span className={styles.tokenShareMetricValue}>
+    <span>{formatCompactNumber(value)}</span>
+    <small className={styles.tokenSharePercent}>{formatTokenSharePercent(value, total)}</small>
   </span>
 );
 
@@ -3339,7 +3346,17 @@ export function MonitoringCenterSsfunRequestPanel() {
                   <td>
                     <div className={styles.primaryCell}>
                       <span>{formatCompactNumber(row.totalTokens)}</span>
-                      <small>{`输入 ${formatCompactNumber(row.inputTokens)} · 输出 ${formatCompactNumber(row.outputTokens)} · 缓存 ${formatCompactNumber(row.cachedTokens)}`}</small>
+                      <small className={styles.realtimeUsageBreakdown}>
+                        <span>{`输入 ${formatCompactNumber(row.inputTokens)}`}</span>
+                        <span>
+                          {`输出 ${formatCompactNumber(row.outputTokens)}`}
+                          <span className={styles.tokenSharePercent}>{formatTokenSharePercent(row.outputTokens, row.totalTokens)}</span>
+                        </span>
+                        <span>
+                          {`缓存 ${formatCompactNumber(row.cachedTokens)}`}
+                          <span className={styles.tokenSharePercent}>{formatTokenSharePercent(row.cachedTokens, row.inputTokens)}</span>
+                        </span>
+                      </small>
                     </div>
                   </td>
                   <td>{hasPrices ? formatUsd(row.totalCost) : '--'}</td>

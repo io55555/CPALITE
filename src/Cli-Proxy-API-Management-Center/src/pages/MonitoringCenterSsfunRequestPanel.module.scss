@@ -2335,7 +2335,7 @@
   font-size: 16px;
   font-weight: 750;
   line-height: 1.35;
-  white-space: nowrap;
+  white-space: normal;
   overflow-wrap: normal;
   word-break: normal;
 }
@@ -2615,6 +2615,19 @@
   align-items: baseline;
   gap: 0.35em;
   flex-wrap: wrap;
+}
+
+.tokenSharePercent {
+  color: var(--monitor-green) !important;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.tokenShareMetricValue {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .warnText {
@@ -3055,17 +3068,17 @@
 
 .realtimeTable th:nth-child(1),
 .realtimeTable td:nth-child(1) {
-  width: 11%;
+  width: 10%;
 }
 
 .realtimeTable th:nth-child(2),
 .realtimeTable td:nth-child(2) {
-  width: 15%;
+  width: 10%;
 }
 
 .realtimeTable th:nth-child(3),
 .realtimeTable td:nth-child(3) {
-  width: 12%;
+  width: 8%;
 }
 
 .realtimeTable th:nth-child(4),
@@ -3083,20 +3096,28 @@
 .realtimeTable th:nth-child(7),
 .realtimeTable td:nth-child(7),
 .realtimeTable th:nth-child(8),
-.realtimeTable td:nth-child(8),
-.realtimeTable th:nth-child(11),
-.realtimeTable td:nth-child(11) {
-  width: 6%;
+.realtimeTable td:nth-child(8) {
+  width: 5%;
 }
 
 .realtimeTable th:nth-child(9),
 .realtimeTable td:nth-child(9) {
-  width: 13%;
+  width: 7%;
 }
 
 .realtimeTable th:nth-child(10),
 .realtimeTable td:nth-child(10) {
+  width: 10%;
+}
+
+.realtimeTable th:nth-child(11),
+.realtimeTable td:nth-child(11) {
   width: 12%;
+}
+
+.realtimeTable th:nth-child(12),
+.realtimeTable td:nth-child(12) {
+  width: 7%;
 }
 
 .table thead th {
@@ -3234,14 +3255,24 @@
 }
 
 .uaDetailButton {
-  display: inline-flex;
-  max-width: 190px;
+  display: block;
+  width: 100%;
+  max-width: none;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
   text-align: left;
+}
+
+.uaDetailButton .monoCell {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 10.5px;
+  line-height: 1.35;
 }
 
 .uaDetailButton:hover {
@@ -3651,6 +3682,25 @@
   white-space: normal;
   word-break: break-word;
   line-height: 1.45;
+}
+
+.realtimeTable th:nth-child(4),
+.realtimeTable td:nth-child(4),
+.realtimeTable th:nth-child(11),
+.realtimeTable td:nth-child(11) {
+  white-space: normal;
+}
+
+.realtimeUsageBreakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.realtimeUsageBreakdown > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .logRowFailed td {
