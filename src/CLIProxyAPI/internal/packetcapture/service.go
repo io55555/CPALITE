@@ -488,6 +488,8 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 				Action:          actionRule.Action,
 				Target:          actionRule.Target,
 				Account:         triggerAccount(meta),
+				Packet:          current,
+				PacketName:      packetName,
 				Detail:          detail,
 				CooldownSeconds: actionRule.CooldownSeconds,
 			}

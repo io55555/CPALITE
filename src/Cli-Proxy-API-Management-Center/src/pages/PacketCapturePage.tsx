@@ -486,6 +486,7 @@ export function PacketCapturePage() {
   const [autoRefresh, setAutoRefresh] = useState('off');
   const [detail, setDetail] = useState<PacketRecord | null>(null);
   const [triggerDetail, setTriggerDetail] = useState<PacketRecord | null>(null);
+  const [triggerPacketDetail, setTriggerPacketDetail] = useState<PacketTrigger | null>(null);
   const [triggerDetailError, setTriggerDetailError] = useState('');
   const [editingRule, setEditingRule] = useState<PacketRule | null>(null);
   const [triggerPageSize, setTriggerPageSize] = useState('50');
@@ -700,6 +701,7 @@ export function PacketCapturePage() {
   const showTriggerDetail = async (item: PacketTrigger) => {
     setTriggerDetailError('');
     setTriggerDetail(null);
+    setTriggerPacketDetail(null);
     try {
       try {
         setTriggerDetail(await packetCaptureApi.getRecord(item.record_id));
@@ -710,6 +712,10 @@ export function PacketCapturePage() {
           setTriggerDetail(await packetCaptureApi.getRecord(matches[0].id));
           return;
         }
+      }
+      if (item.packet) {
+        setTriggerPacketDetail(item);
+        return;
       }
       setTriggerDetailError('未找到对应抓包记录。触发历史可能早于抓包记录写入，或相关抓包记录已被删除。');
     } catch {
@@ -781,7 +787,7 @@ export function PacketCapturePage() {
           </div>
         }
         extra={
-          <div className={styles.actions}>
+          <div className={styles.triggerActions}>
             <Button variant="secondary" size="sm" onClick={() => void deleteIds(selectedList)} disabled={selectedList.length === 0}>删除勾选条目</Button>
             <Button variant="secondary" size="sm" onClick={() => void deleteIds(records.map((row) => row.id))} disabled={records.length === 0}>删除当前页条目</Button>
             <Button variant="secondary" size="sm" onClick={async () => { await packetCaptureApi.deleteAllRecords(); await load(); }} disabled={records.length === 0}>删除所有条目</Button>
@@ -1001,7 +1007,7 @@ export function PacketCapturePage() {
         ))}
       </Modal>
 
-      <Modal open={triggerDetail !== null || triggerDetailError !== ''} title="规则触发详情" onClose={() => { setTriggerDetail(null); setTriggerDetailError(''); }} width={760}>
+      <Modal open={triggerDetail !== null || triggerPacketDetail !== null || triggerDetailError !== ''} title="规则触发详情" onClose={() => { setTriggerDetail(null); setTriggerPacketDetail(null); setTriggerDetailError(''); }} width={760}>
         {triggerDetailError && <p className={styles.errorText}>{triggerDetailError}</p>}
         {triggerDetail && packetOptions.map((item) => (
           <div className={styles.packetBlock} key={item.value}>
@@ -1009,6 +1015,12 @@ export function PacketCapturePage() {
             <pre>{triggerDetail.packets[item.value as keyof typeof triggerDetail.packets] || '-'}</pre>
           </div>
         ))}
+        {triggerPacketDetail && (
+          <div className={styles.packetBlock}>
+            <h3>{packetOptions.find((item) => item.value === triggerPacketDetail.packet_name)?.label || triggerPacketDetail.packet_name || '触发数据包'}</h3>
+            <pre>{triggerPacketDetail.packet || '-'}</pre>
+          </div>
+        )}
       </Modal>
 
       <Modal

@@ -98,6 +98,8 @@ export interface PacketTrigger {
   action: string;
   target?: string;
   account?: string;
+  packet?: string;
+  packet_name?: string;
   detail?: string;
   cooldown_seconds?: number;
 }

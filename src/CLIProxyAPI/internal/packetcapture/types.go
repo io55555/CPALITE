@@ -127,6 +127,8 @@ type TriggerRecord struct {
 	Action          string    `json:"action"`
 	Target          string    `json:"target,omitempty"`
 	Account         string    `json:"account,omitempty"`
+	Packet          string    `json:"packet,omitempty"`
+	PacketName      string    `json:"packet_name,omitempty"`
 	Detail          string    `json:"detail,omitempty"`
 	CooldownSeconds int       `json:"cooldown_seconds,omitempty"`
 }

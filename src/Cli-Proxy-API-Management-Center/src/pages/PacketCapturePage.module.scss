@@ -218,6 +218,25 @@
   min-width: max-content;
 }
 
+.triggerActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1 1 420px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.triggerActions > * {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.triggerActions button {
+  white-space: nowrap;
+}
+
 .ruleName {
   font-weight: 400;
   color: var(--text-primary);
