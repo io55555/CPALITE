@@ -132,6 +132,7 @@ export interface UsageStatsSnapshot {
 export interface UsageQueryRange {
   start?: string;
   end?: string;
+  include_raw?: boolean;
 }
 
 export interface UsageDeleteResponse {

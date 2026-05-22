@@ -202,6 +202,20 @@ func TestLoggerPluginBackfillsFailurePacketsFromGinContext(t *testing.T) {
 
 	ginCtx := &gin.Context{}
 	ginCtx.Set("USAGE_RAW_REQUEST", "POST /v1/chat/completions HTTP/2\nHost: ip.99.tf\n\n{\"model\":\"llama\"}")
+	ginCtx.Set("API_REQUEST", strings.Join([]string{
+		"=== API REQUEST 1 ===",
+		"Timestamp: 2026-05-10T09:42:16Z",
+		"Upstream URL: https://generativelanguage.googleapis.com/v1beta/models/llama:generateContent",
+		"HTTP Method: POST",
+		"",
+		"Headers:",
+		"Content-Type: application/json",
+		"User-Agent: cli-proxy-gemini",
+		"",
+		"Body:",
+		`{"model":"llama","contents":[{"role":"user","parts":[{"text":"hi"}]}]}`,
+		"",
+	}, "\n"))
 	ginCtx.Set("API_RESPONSE", []byte("HTTP/1.1 503 Service Unavailable\nContent-Type: application/json\n\n{\"error\":{\"message\":\"no auth available\"}}"))
 
 	ctx := context.WithValue(context.Background(), "gin", ginCtx)
@@ -230,6 +244,12 @@ func TestLoggerPluginBackfillsFailurePacketsFromGinContext(t *testing.T) {
 	got := details[0]
 	if !strings.Contains(got.RawRequest, "POST /v1/chat/completions HTTP/2") {
 		t.Fatalf("raw request = %q", got.RawRequest)
+	}
+	if !strings.Contains(got.RawRequest, "=== CPA发给供应商的完整数据包 ===") {
+		t.Fatalf("raw request missing upstream section: %q", got.RawRequest)
+	}
+	if !strings.Contains(got.RawRequest, "POST /v1beta/models/llama:generateContent HTTP/1.1") {
+		t.Fatalf("raw request missing upstream packet: %q", got.RawRequest)
 	}
 	if !strings.Contains(got.RawResponse, "no auth available") {
 		t.Fatalf("raw response = %q", got.RawResponse)

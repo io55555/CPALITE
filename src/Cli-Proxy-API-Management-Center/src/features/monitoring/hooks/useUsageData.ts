@@ -150,7 +150,7 @@ export function useUsageData(): UseUsageDataReturn {
       const payload =
         usageServiceEnabled && usageServiceBase
           ? await usageServiceApi.getUsage(usageServiceBase, managementKey)
-          : await apiClient.get<UsagePayload>('/usage');
+          : await apiClient.get<UsagePayload>('/usage', { params: { include_raw: true } });
       if (requestIdRef.current !== requestId) return;
       setUsage((normalizeUsageData(payload) as UsagePayload | null) ?? null);
       setLastRefreshedAt(new Date());

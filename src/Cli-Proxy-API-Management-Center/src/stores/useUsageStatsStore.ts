@@ -187,11 +187,12 @@ const resolveRequestRanges = (
 
 const usageRangeToParams = (range: UsageLoadedRange) => {
   if (range.startMs === null) {
-    return undefined;
+    return { include_raw: true };
   }
   return {
     start: toIsoString(range.startMs),
     end: toIsoString(range.endMs),
+    include_raw: true,
   };
 };
 

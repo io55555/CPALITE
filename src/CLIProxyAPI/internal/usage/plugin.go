@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -187,6 +188,7 @@ func normalizeRecord(ctx context.Context, record coreusage.Record) Record {
 	rawRequest := firstNonEmpty(record.RawRequest, contextString(ctx, "USAGE_RAW_REQUEST"), contextString(ctx, "API_REQUEST"))
 	rawResponse := firstNonEmpty(record.RawResponse, contextString(ctx, "USAGE_RAW_RESPONSE"), contextString(ctx, "API_RESPONSE"))
 	rawResponse = mergeClientResponsePacket(rawResponse, contextString(ctx, "USAGE_CLIENT_RESPONSE"))
+	rawRequest, rawResponse = enrichUsageRawPackets(ctx, rawRequest, rawResponse)
 	clientUA := firstNonEmpty(record.ClientUA, clientUserAgent(ctx), clientUserAgentFromRawRequest(rawRequest), clientUserAgentFromRawRequest(record.RawRequest), clientUserAgentFromRawRequest(contextString(ctx, "USAGE_RAW_REQUEST")))
 	upstreamUA := firstNonEmpty(record.UpstreamUA, recordUpstreamUserAgent(rawRequest), recordUpstreamUserAgent(record.RawRequest), recordUpstreamUserAgent(contextString(ctx, "USAGE_RAW_REQUEST")), apiLogHeaderValue(rawRequest, "User-Agent"))
 	thinkingEffort := firstNonEmpty(
@@ -410,6 +412,176 @@ func headerValue(packet, name string) string {
 		}
 	}
 	return ""
+}
+
+func enrichUsageRawPackets(ctx context.Context, rawRequest, rawResponse string) (string, string) {
+	apiRequest := contextString(ctx, "API_REQUEST")
+	apiResponse := contextString(ctx, "API_RESPONSE")
+	clientResponse := contextString(ctx, "USAGE_CLIENT_RESPONSE")
+
+	if strings.TrimSpace(rawRequest) != "" && extractNamedSection(rawRequest, "CPA发给供应商的完整数据包") == "" {
+		if upstream := packetFromAPIRequestLog(apiRequest); upstream != "" {
+			client := extractNamedSection(rawRequest, "客户端发给CPA的完整数据包")
+			if client == "" && !looksLikeAPIRequestLog(rawRequest) {
+				client = rawRequest
+			}
+			rawRequest = joinNamedUsageSections([]namedUsageSection{
+				{title: "客户端发给CPA的完整数据包", body: client},
+				{title: "CPA发给供应商的完整数据包", body: upstream},
+			})
+		}
+	}
+
+	upstreamResponse := extractNamedSection(rawResponse, "供应商返回CPA的完整数据包")
+	if upstreamResponse == "" {
+		upstreamResponse = packetFromAPIResponseLog(apiResponse)
+		if upstreamResponse == "" && strings.TrimSpace(rawResponse) != "" && !strings.Contains(rawResponse, "=== ") {
+			upstreamResponse = rawResponse
+		}
+	}
+	statusRulers := extractNamedSection(rawResponse, "触发status-rulers")
+	client := extractNamedSection(rawResponse, "CPA发送给客户端的完整数据包")
+	if client == "" {
+		client = strings.TrimSpace(clientResponse)
+	}
+	if upstreamResponse != "" || statusRulers != "" || client != "" {
+		rawResponse = joinNamedUsageSections([]namedUsageSection{
+			{title: "供应商返回CPA的完整数据包", body: upstreamResponse},
+			{title: "触发status-rulers", body: statusRulers},
+			{title: "CPA发送给客户端的完整数据包", body: client},
+		})
+	}
+
+	return rawRequest, rawResponse
+}
+
+type namedUsageSection struct {
+	title string
+	body  string
+}
+
+func joinNamedUsageSections(sections []namedUsageSection) string {
+	var kept []string
+	for _, section := range sections {
+		body := strings.TrimSpace(section.body)
+		if body == "" {
+			continue
+		}
+		kept = append(kept, "=== "+section.title+" ===\n"+body)
+	}
+	return strings.Join(kept, "\n\n")
+}
+
+func looksLikeAPIRequestLog(text string) bool {
+	return strings.Contains(text, "=== API REQUEST") || strings.Contains(text, "\nUpstream URL:") || strings.Contains(text, "\nHTTP Method:")
+}
+
+func packetFromAPIRequestLog(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	text = latestAPILogSection(text, "=== API REQUEST")
+	if strings.HasPrefix(text, "POST ") || strings.HasPrefix(text, "GET ") || strings.HasPrefix(text, "PUT ") || strings.HasPrefix(text, "PATCH ") || strings.HasPrefix(text, "DELETE ") {
+		return text
+	}
+	method := extractLineValue(text, "HTTP Method:")
+	if method == "" {
+		method = "POST"
+	}
+	rawURL := extractLineValue(text, "Upstream URL:")
+	path := pathFromRawURL(rawURL)
+	headers := strings.TrimSpace(sectionBetween(text, "Headers:", "Body:"))
+	body := strings.TrimSpace(afterMarker(text, "Body:"))
+	if body == "<empty>" {
+		body = ""
+	}
+	return strings.TrimSpace(method + " " + path + " HTTP/1.1\n" + headers + "\n\n" + body)
+}
+
+func packetFromAPIResponseLog(text string) string {
+	text = strings.TrimSpace(text)
+	text = latestAPILogSection(text, "=== API RESPONSE")
+	if text == "" || strings.HasPrefix(text, "HTTP/") {
+		return text
+	}
+	status := extractLineValue(text, "Status:")
+	if _, err := strconv.Atoi(status); err != nil {
+		status = "0"
+	}
+	headers := strings.TrimSpace(sectionBetween(text, "Headers:", "Body:"))
+	body := strings.TrimSpace(afterMarker(text, "Body:"))
+	if body == "<empty>" {
+		body = ""
+	}
+	if status == "0" {
+		if errText := extractLineValue(text, "Error:"); errText != "" {
+			body = firstNonEmpty(body, errText)
+		}
+		return strings.TrimSpace("HTTP/1.1 502 Bad Gateway\n" + headers + "\n\n" + body)
+	}
+	return strings.TrimSpace("HTTP/1.1 " + status + " " + http.StatusText(atoi(status)) + "\n" + headers + "\n\n" + body)
+}
+
+func latestAPILogSection(text, marker string) string {
+	idx := strings.LastIndex(text, marker)
+	if idx < 0 {
+		return text
+	}
+	section := text[idx:]
+	if next := strings.Index(section[len(marker):], "\n=== API "); next >= 0 {
+		section = section[:len(marker)+next]
+	}
+	return strings.TrimSpace(section)
+}
+
+func pathFromRawURL(rawURL string) string {
+	path := "/"
+	if idx := strings.Index(rawURL, "://"); idx >= 0 {
+		rest := rawURL[idx+3:]
+		if slash := strings.Index(rest, "/"); slash >= 0 {
+			path = rest[slash:]
+		}
+	} else if strings.HasPrefix(rawURL, "/") {
+		path = rawURL
+	}
+	return path
+}
+
+func extractLineValue(text, prefix string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
+}
+
+func sectionBetween(text, start, end string) string {
+	from := strings.Index(text, start)
+	if from < 0 {
+		return ""
+	}
+	from += len(start)
+	to := strings.Index(text[from:], end)
+	if to < 0 {
+		return text[from:]
+	}
+	return text[from : from+to]
+}
+
+func afterMarker(text, marker string) string {
+	idx := strings.Index(text, marker)
+	if idx < 0 {
+		return ""
+	}
+	return text[idx+len(marker):]
+}
+
+func atoi(value string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(value))
+	return n
 }
 
 func mergeClientResponsePacket(rawResponse, clientResponse string) string {
