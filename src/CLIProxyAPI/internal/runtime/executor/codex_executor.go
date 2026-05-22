@@ -14,7 +14,9 @@ import (
 
 	codexauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -34,6 +36,12 @@ const (
 	codexUserAgent             = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9"
 	codexOriginator            = "codex_cli_rs"
 	codexDefaultImageToolModel = "gpt-image-2"
+
+	codexPacketFilterActionContextKey          = "cliproxy.packet_filter_action"
+	codexPacketFilterTargetContextKey          = "cliproxy.packet_filter_target"
+	codexPacketFilterCooldownSecondsContextKey = "cliproxy.packet_filter_cooldown_seconds"
+	codexPacketFilterRuleContextKey            = "cliproxy.packet_filter_rule"
+	codexPacketFilterAuthIDContextKey          = "cliproxy.packet_filter_auth_id"
 )
 
 var dataTag = []byte("data:")
@@ -325,6 +333,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+		e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, httpResp.StatusCode, httpResp.Header, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		err = newCodexStatusErr(httpResp.StatusCode, b)
 		return resp, err
@@ -481,6 +490,7 @@ func (e *CodexExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.A
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+		e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, httpResp.StatusCode, httpResp.Header, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
 		err = newCodexStatusErr(httpResp.StatusCode, b)
 		return resp, err
@@ -585,6 +595,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 			return nil, readErr
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, data)
+		e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, httpResp.StatusCode, httpResp.Header, data)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
 		err = newCodexStatusErr(httpResp.StatusCode, data)
 		return nil, err
@@ -1146,6 +1157,80 @@ func parseCodexRetryAfter(statusCode int, errorBody []byte, now time.Time) *time
 		return &retryAfter
 	}
 	return nil
+}
+
+func (e *CodexExecutor) applyUpstreamResponsePacketFilters(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string, status int, headers http.Header, body []byte) {
+	rawResponse := formatCodexUpstreamResponse(status, headers, body)
+	meta := packetcapture.Record{
+		ID:            logging.GetRequestID(ctx),
+		RequestID:     logging.GetRequestID(ctx),
+		Provider:      e.Identifier(),
+		ProviderGroup: "codex",
+		Source:        e.Identifier(),
+		Model:         strings.TrimSpace(model),
+		APIKey:        util.HideAPIKey(apiKey),
+	}
+	if auth != nil {
+		meta.AuthType, meta.AuthLabel = auth.AccountInfo()
+		meta.AuthIndex = auth.EnsureIndex()
+	}
+	filtered, _, triggers := packetcapture.ApplyRules(ctx, meta, "upstream_response", rawResponse)
+	e.publishPacketFilterActions(ctx, auth, apiKey, model, filtered, triggers)
+}
+
+func (e *CodexExecutor) publishPacketFilterActions(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, filteredResponse string, triggers []packetcapture.TriggerRecord) {
+	if len(triggers) == 0 {
+		return
+	}
+	ginCtx, _ := ctx.Value("gin").(interface {
+		Set(string, any)
+	})
+	if ginCtx == nil {
+		return
+	}
+	for _, trigger := range triggers {
+		action := strings.TrimSpace(trigger.Action)
+		target := strings.TrimSpace(trigger.Target)
+		if target != "api_key" && target != "auth" {
+			continue
+		}
+		switch action {
+		case "disable", "cooldown":
+			ginCtx.Set(codexPacketFilterActionContextKey, action)
+			ginCtx.Set(codexPacketFilterTargetContextKey, target)
+			ginCtx.Set(codexPacketFilterCooldownSecondsContextKey, trigger.CooldownSeconds)
+			ginCtx.Set(codexPacketFilterRuleContextKey, strings.TrimSpace(trigger.RuleName))
+			ginCtx.Set(codexPacketFilterAuthIDContextKey, codexAuthIDForPacketFilter(auth))
+			log.Infof("codex auth packet filter action: action=%s target=%s model=%s auth=%s api_key=%s rule=%s raw_response_bytes=%d detail=%s", action, target, model, codexAuthIDForPacketFilter(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(filteredResponse), trigger.Detail)
+			return
+		}
+	}
+}
+
+func formatCodexUpstreamResponse(status int, headers http.Header, body []byte) string {
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "HTTP/2 %d %s\n", status, http.StatusText(status))
+	for key, values := range headers {
+		for _, value := range values {
+			b.WriteString(key)
+			b.WriteString(": ")
+			b.WriteString(value)
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteByte('\n')
+	b.Write(body)
+	return b.String()
+}
+
+func codexAuthIDForPacketFilter(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	return strings.TrimSpace(auth.ID)
 }
 
 func codexCreds(a *cliproxyauth.Auth) (apiKey, baseURL string) {

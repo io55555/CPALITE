@@ -213,6 +213,29 @@ const ruleTemplates: RuleTemplate[] = [
     },
   },
   {
+    value: 'codex-401-token-invalidated-disable-auth',
+    label: '[运营商到CPA]Codex 401 token invalidated禁用认证文件',
+    rule: {
+      name: '[运营商到CPA]Codex 401 token invalidated禁用认证文件',
+      provider: 'codex',
+      packet: 'upstream_response',
+      part: 'status',
+      operator: 'num_eq',
+      value_number: 401,
+      action: 'disable',
+      target: 'auth',
+      match_logic: 'all',
+      conditions: [
+        { packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 401 },
+        { packet: 'upstream_response', part: 'body_json', json_path: 'error.message', operator: 'contains', value: 'Your authentication token has been invalidated' },
+      ],
+      actions: [
+        { type: 'disable', packet: 'upstream_response', target: 'auth' },
+      ],
+      notes: 'Codex服务端返回401且error.message包含Your authentication token has been invalidated时，禁用本次使用的认证文件。',
+    },
+  },
+  {
     value: 'upstream-status-500-clean',
     label: '上游响应码500返回纯净500',
     rule: { name: '[运营商到CPA]响应码500直接返回纯净500', packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 500, action: 'return_clean_500', target: 'response' },
@@ -952,6 +975,7 @@ export function PacketCapturePage() {
               ]}
               onChange={setTriggerPageSize}
               ariaLabel="每页条数"
+              className={styles.triggerPageSizeSelect}
             />
             <Button variant="secondary" size="sm" onClick={toggleTriggerPageSelection} disabled={triggerPageItems.length === 0}>全选反选</Button>
             <Button variant="secondary" size="sm" onClick={() => void deleteTriggerIds(selectedTriggerList)} disabled={selectedTriggerList.length === 0}>删除勾选</Button>
