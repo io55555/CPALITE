@@ -1,15 +1,14 @@
-import { Fragment, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import iconClaude from '@/assets/icons/claude.svg';
 import type { ProviderKeyConfig } from '@/types';
-import { maskApiKey } from '@/utils/format';
 import { statusBarDataFromRecentRequests } from '@/utils/recentRequests';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
-import { ProviderStatusBar } from '../ProviderStatusBar';
+import { ProviderConfigSummary } from '../ProviderConfigSummary';
 import {
   getProviderConfigKey,
   getProviderRecentBuckets,
@@ -86,6 +85,10 @@ export function ClaudeSection({
           onEdit={(_, index) => onEdit(index)}
           onDelete={(_, index) => onDelete(index)}
           actionsDisabled={actionsDisabled}
+          listClassName={styles.compactProviderList}
+          rowClassName={styles.compactProviderRow}
+          metaClassName={styles.compactProviderMeta}
+          actionsClassName={styles.compactProviderActions}
           getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
           renderExtraActions={(item, index) => (
             <ToggleSwitch
@@ -109,116 +112,55 @@ export function ClaudeSection({
               statusBarCache.get(getProviderConfigKey(item, index)) ||
               statusBarDataFromRecentRequests([]);
 
+            const cloakMode = (() => {
+              const raw = (item.cloak?.mode ?? '').trim().toLowerCase();
+              const key = raw === 'always' || raw === 'never' ? raw : 'auto';
+              return t(`ai_providers.claude_cloak_mode_${key}`);
+            })();
+
             return (
-              <Fragment>
-                <div className="item-title">{t('ai_providers.claude_item_title')}</div>
-                <div className={styles.fieldRow}>
-                  <span className={styles.fieldLabel}>{t('common.api_key')}:</span>
-                  <span className={styles.fieldValue}>{maskApiKey(item.apiKey)}</span>
-                </div>
-                {item.priority !== undefined && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.priority')}:</span>
-                    <span className={styles.fieldValue}>{item.priority}</span>
-                  </div>
-                )}
-                {item.prefix && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.prefix')}:</span>
-                    <span className={styles.fieldValue}>{item.prefix}</span>
-                  </div>
-                )}
-                {item.baseUrl && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.base_url')}:</span>
-                    <span className={styles.fieldValue}>{item.baseUrl}</span>
-                  </div>
-                )}
-                {item.proxyUrl && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.proxy_url')}:</span>
-                    <span className={styles.fieldValue}>{item.proxyUrl}</span>
-                  </div>
-                )}
-                {item.cloak && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('ai_providers.claude_cloak_mode_label')}:</span>
-                    <span className={styles.fieldValue}>
-                      {(() => {
-                        const raw = (item.cloak?.mode ?? '').trim().toLowerCase();
-                        const key = raw === 'always' || raw === 'never' ? raw : 'auto';
-                        return t(`ai_providers.claude_cloak_mode_${key}`);
-                      })()}
-                    </span>
-                  </div>
-                )}
-                {item.cloak?.strictMode ? (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('ai_providers.claude_cloak_strict_label')}:</span>
-                    <span className={styles.fieldValue}>{t('common.yes')}</span>
-                  </div>
-                ) : null}
-                {item.cloak?.sensitiveWords?.length ? (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>
-                      {t('ai_providers.claude_cloak_sensitive_words_count')}:
-                    </span>
-                    <span className={styles.fieldValue}>{item.cloak.sensitiveWords.length}</span>
-                  </div>
-                ) : null}
-                {headerEntries.length > 0 && (
-                  <div className={styles.headerBadgeList}>
-                    {headerEntries.map(([key, value]) => (
-                      <span key={key} className={styles.headerBadge}>
-                        <strong>{key}:</strong> {value}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {configDisabled && (
-                  <div className="status-badge warning" style={{ marginTop: 8, marginBottom: 0 }}>
-                    {t('ai_providers.config_disabled_badge')}
-                  </div>
-                )}
-                {item.models?.length ? (
-                  <div className={styles.modelTagList}>
-                    <span className={styles.modelCountLabel}>
-                      {t('ai_providers.claude_models_count')}: {item.models.length}
-                    </span>
-                    {item.models.map((model) => (
-                      <span key={model.name} className={styles.modelTag}>
-                        <span className={styles.modelName}>{model.name}</span>
-                        {model.alias && model.alias !== model.name && (
-                          <span className={styles.modelAlias}>{model.alias}</span>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                {excludedModels.length ? (
-                  <div className={styles.excludedModelsSection}>
-                    <div className={styles.excludedModelsLabel}>
-                      {t('ai_providers.excluded_models_count', { count: excludedModels.length })}
-                    </div>
-                    <div className={styles.modelTagList}>
-                      {excludedModels.map((model) => (
-                        <span key={model} className={`${styles.modelTag} ${styles.excludedModelTag}`}>
-                          <span className={styles.modelName}>{model}</span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-                <div className={styles.cardStats}>
-                  <span className={`${styles.statPill} ${styles.statSuccess}`}>
-                    {t('stats.success')}: {stats.success}
-                  </span>
-                  <span className={`${styles.statPill} ${styles.statFailure}`}>
-                    {t('stats.failure')}: {stats.failure}
-                  </span>
-                </div>
-                <ProviderStatusBar statusData={statusData} />
-              </Fragment>
+              <ProviderConfigSummary
+                title={t('ai_providers.claude_item_title')}
+                apiKey={item.apiKey}
+                stats={stats}
+                statusData={statusData}
+                headers={headerEntries}
+                models={item.models}
+                modelsLabel={t('ai_providers.claude_models_count')}
+                excludedModels={excludedModels}
+                excludedModelsLabel={t('ai_providers.excluded_models_count', {
+                  count: excludedModels.length,
+                })}
+                disabledLabel={configDisabled ? t('ai_providers.config_disabled_badge') : undefined}
+                fields={[
+                  ...(item.priority !== undefined
+                    ? [{ label: t('common.priority'), value: item.priority }]
+                    : []),
+                  ...(item.prefix ? [{ label: t('common.prefix'), value: item.prefix }] : []),
+                  ...(item.baseUrl ? [{ label: t('common.base_url'), value: item.baseUrl }] : []),
+                  ...(item.proxyUrl ? [{ label: t('common.proxy_url'), value: item.proxyUrl }] : []),
+                  ...(item.cloak
+                    ? [{ label: t('ai_providers.claude_cloak_mode_label'), value: cloakMode }]
+                    : []),
+                  ...(item.cloak?.strictMode
+                    ? [
+                        {
+                          label: t('ai_providers.claude_cloak_strict_label'),
+                          value: t('common.yes'),
+                          tone: 'boolean' as const,
+                        },
+                      ]
+                    : []),
+                  ...(item.cloak?.sensitiveWords?.length
+                    ? [
+                        {
+                          label: t('ai_providers.claude_cloak_sensitive_words_count'),
+                          value: item.cloak.sensitiveWords.length,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             );
           }}
         />
