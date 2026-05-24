@@ -58,7 +58,9 @@
   border-radius: 999px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  transition: background-color 0.16s ease, border-color 0.16s ease;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease;
 }
 
 .switchTrack::after {
@@ -70,7 +72,9 @@
   height: 14px;
   border-radius: 50%;
   background: var(--text-secondary);
-  transition: transform 0.16s ease, background-color 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    background-color 0.16s ease;
 }
 
 .switch input:checked + .switchTrack {
@@ -252,18 +256,26 @@
 
 .triggerItem {
   align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(90px, max-content) minmax(90px, max-content) minmax(
+      100px,
+      max-content
+    ) minmax(0, 1fr) auto auto;
+  justify-content: stretch;
 }
 
 .triggerItem > span {
   min-width: 82px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .triggerItem > span:last-of-type {
   flex: 1;
-  min-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .pagination {
@@ -431,5 +443,30 @@
 
   .ruleFieldWide {
     grid-column: auto;
+  }
+
+  .triggerHeader,
+  .pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .triggerHeader .actions {
+    margin-left: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .triggerItem {
+    grid-template-columns: auto 1fr auto auto;
+    align-items: start;
+  }
+
+  .triggerItem > span {
+    min-width: 0;
+  }
+
+  .triggerItem > span:last-of-type {
+    grid-column: 2 / -1;
   }
 }

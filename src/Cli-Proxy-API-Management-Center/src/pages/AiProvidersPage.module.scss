@@ -602,11 +602,75 @@ $openai-toolbar-control-height: 36px;
   max-width: 100%;
 }
 
+.apiKeyEntriesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .apiKeyEntriesLabel {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  min-width: 0;
+}
+
+.apiKeyListModeControl {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.apiKeyListModeButton {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
+.apiKeyListModeButtonActive {
+  background: var(--bg-primary);
+  color: var(--primary-color);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 10%);
+}
+
+.apiKeyEntryHint {
+  padding: 8px 10px;
+  border: 1px dashed var(--border-color);
+  border-radius: $radius-sm;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .apiKeyEntriesHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .apiKeyListModeControl {
+    width: 100%;
+  }
+
+  .apiKeyListModeButton {
+    flex: 1;
+  }
 }
 
 .apiKeyEntryList {
@@ -1329,7 +1393,8 @@ $openai-toolbar-control-height: 36px;
 }
 
 @keyframes key-row-trace-flash {
-  0%, 100% {
+  0%,
+  100% {
     background: transparent;
   }
   50% {

@@ -34,6 +34,7 @@ import {
 
 type SortOption = 'name' | 'priority' | 'recent-success';
 type SortDirection = 'asc' | 'desc';
+type ApiKeyListMode = 'collapsed' | 'abnormal' | 'all';
 
 interface FloatingToolbarStyle {
   left: number;
@@ -43,8 +44,26 @@ interface FloatingToolbarStyle {
 }
 
 const EMPTY_STATUS_BAR = statusBarDataFromRecentRequests([]);
+const API_KEY_LIST_MODE_STORAGE_KEY = 'cliproxyapi.openai.apiKeyListModes';
 const openAIKeyStateKey = (providerName: string, apiKey: string) =>
   `${providerName.trim().toLowerCase()}::${apiKey.trim()}`;
+
+const readApiKeyListModes = (): Record<string, ApiKeyListMode> => {
+  if (typeof window === 'undefined') return {};
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(API_KEY_LIST_MODE_STORAGE_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([, value]) => value === 'collapsed' || value === 'abnormal' || value === 'all'
+      )
+    ) as Record<string, ApiKeyListMode>;
+  } catch {
+    return {};
+  }
+};
 
 interface OpenAISectionProps {
   configs: OpenAIProviderConfig[];
@@ -94,6 +113,8 @@ export function OpenAISection({
   const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set());
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [keyStates, setKeyStates] = useState<Record<string, OpenAIKeyState>>({});
+  const [apiKeyListModes, setApiKeyListModes] =
+    useState<Record<string, ApiKeyListMode>>(readApiKeyListModes);
   const [now, setNow] = useState(() => Date.now());
   const [dropdownLayout, setDropdownLayout] = useState({ openAbove: false, maxHeight: 300 });
   const [floatingToolbarStyle, setFloatingToolbarStyle] = useState<FloatingToolbarStyle>({
@@ -108,6 +129,14 @@ export function OpenAISection({
   const floatingDropdownRef = useRef<HTMLDivElement>(null);
 
   const shouldRenderFloatingToolbar = !isTransitionAnimating && floatingToolbarStyle.visible;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(API_KEY_LIST_MODE_STORAGE_KEY, JSON.stringify(apiKeyListModes));
+    } catch {
+      // 浏览器隐私模式或存储配额异常时，退回本次会话内状态。
+    }
+  }, [apiKeyListModes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -562,7 +591,10 @@ export function OpenAISection({
     if (!state) return '正常';
     if (!state.enabled || state.status === 'disabled') return '禁用';
     if (state.status === 'frozen' && state.frozen_until) {
-      const remaining = Math.max(0, Math.ceil((new Date(state.frozen_until).getTime() - now) / 1000));
+      const remaining = Math.max(
+        0,
+        Math.ceil((new Date(state.frozen_until).getTime() - now) / 1000)
+      );
       return remaining > 0 ? `冷却剩余 ${remaining}s` : '正常';
     }
     if (state.status === 'error') return '异常';
@@ -578,12 +610,46 @@ export function OpenAISection({
     return styles.apiKeyEntryStateActive;
   };
 
+  const isAbnormalKeyState = (providerName: string, apiKey: string) => {
+    const state = keyStates[openAIKeyStateKey(providerName, apiKey)];
+    if (!state) return false;
+    return (
+      !state.enabled ||
+      state.status === 'disabled' ||
+      state.status === 'frozen' ||
+      state.status === 'error'
+    );
+  };
+
+  const setApiKeyListMode = (providerKey: string, mode: ApiKeyListMode) => {
+    setApiKeyListModes((prev) => {
+      if (prev[providerKey] === mode || (!prev[providerKey] && mode === 'collapsed')) {
+        return prev;
+      }
+
+      const next = { ...prev };
+      if (mode === 'collapsed') {
+        delete next[providerKey];
+      } else {
+        next[providerKey] = mode;
+      }
+      return next;
+    });
+  };
+
   const renderProviderCard = ({ config: provider, originalIndex }: IndexedOpenAIProvider) => {
     const stats = getOpenAIProviderTotalStats(provider, usageByProvider);
     const headerEntries = Object.entries(provider.headers || {});
     const apiKeyEntries = provider.apiKeyEntries || [];
-    const statusData =
-      statusBarCache.get(getOpenAIProviderKey(provider, originalIndex)) || EMPTY_STATUS_BAR;
+    const providerKey = getOpenAIProviderKey(provider, originalIndex);
+    const apiKeyListMode = apiKeyListModes[providerKey] || 'collapsed';
+    const visibleApiKeyEntries =
+      apiKeyListMode === 'all'
+        ? apiKeyEntries
+        : apiKeyListMode === 'abnormal'
+          ? apiKeyEntries.filter((entry) => isAbnormalKeyState(provider.name, entry.apiKey))
+          : [];
+    const statusData = statusBarCache.get(providerKey) || EMPTY_STATUS_BAR;
     const providerDisabled = provider.disabled === true;
 
     return (
@@ -626,46 +692,78 @@ export function OpenAISection({
           )}
           {apiKeyEntries.length > 0 && (
             <div className={styles.apiKeyEntriesSection}>
-              <div className={styles.apiKeyEntriesLabel}>
-                {t('ai_providers.openai_keys_count')}: {apiKeyEntries.length}
-              </div>
-              <div className={styles.apiKeyEntryList}>
-                {apiKeyEntries.map((entry, entryIndex) => {
-                  const entryStats = getProviderTotalStats(
-                    usageByProvider,
-                    provider.name,
-                    entry.apiKey,
-                    provider.baseUrl
-                  );
-                  return (
-                    <div
-                      key={getApiKeyEntryRenderKey(entry, entryIndex)}
-                      className={styles.apiKeyEntryCard}
+              <div className={styles.apiKeyEntriesHeader}>
+                <div className={styles.apiKeyEntriesLabel}>
+                  {t('ai_providers.openai_keys_count')}: {apiKeyEntries.length}
+                </div>
+                <div
+                  className={styles.apiKeyListModeControl}
+                  role="group"
+                  aria-label="API Key显示范围"
+                >
+                  {[
+                    ['collapsed', '折叠'],
+                    ['abnormal', '异常'],
+                    ['all', '全部'],
+                  ].map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`${styles.apiKeyListModeButton} ${
+                        apiKeyListMode === mode ? styles.apiKeyListModeButtonActive : ''
+                      }`}
+                      onClick={() => setApiKeyListMode(providerKey, mode as ApiKeyListMode)}
                     >
-                      <span className={styles.apiKeyEntryIndex}>{entryIndex + 1}</span>
-                      <span className={styles.apiKeyEntryKey}>{maskApiKey(entry.apiKey)}</span>
-                      <span className={`${styles.apiKeyEntryState} ${getKeyStateClass(provider.name, entry.apiKey)}`}>
-                        {getKeyStateText(provider.name, entry.apiKey)}
-                      </span>
-                      {entry.proxyUrl && (
-                        <span className={styles.apiKeyEntryProxy}>{entry.proxyUrl}</span>
-                      )}
-                      <div className={styles.apiKeyEntryStats}>
-                        <span
-                          className={`${styles.apiKeyEntryStat} ${styles.apiKeyEntryStatSuccess}`}
-                        >
-                          <IconCheck size={12} /> {entryStats.success}
-                        </span>
-                        <span
-                          className={`${styles.apiKeyEntryStat} ${styles.apiKeyEntryStatFailure}`}
-                        >
-                          <IconX size={12} /> {entryStats.failure}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
+              {apiKeyListMode === 'abnormal' && visibleApiKeyEntries.length === 0 ? (
+                <div className={styles.apiKeyEntryHint}>当前没有非正常密钥</div>
+              ) : null}
+              {visibleApiKeyEntries.length > 0 && (
+                <div className={styles.apiKeyEntryList}>
+                  {visibleApiKeyEntries.map((entry) => {
+                    const entryIndex = apiKeyEntries.indexOf(entry);
+                    const entryStats = getProviderTotalStats(
+                      usageByProvider,
+                      provider.name,
+                      entry.apiKey,
+                      provider.baseUrl
+                    );
+                    return (
+                      <div
+                        key={getApiKeyEntryRenderKey(entry, entryIndex)}
+                        className={styles.apiKeyEntryCard}
+                      >
+                        <span className={styles.apiKeyEntryIndex}>{entryIndex + 1}</span>
+                        <span className={styles.apiKeyEntryKey}>{maskApiKey(entry.apiKey)}</span>
+                        <span
+                          className={`${styles.apiKeyEntryState} ${getKeyStateClass(provider.name, entry.apiKey)}`}
+                        >
+                          {getKeyStateText(provider.name, entry.apiKey)}
+                        </span>
+                        {entry.proxyUrl && (
+                          <span className={styles.apiKeyEntryProxy}>{entry.proxyUrl}</span>
+                        )}
+                        <div className={styles.apiKeyEntryStats}>
+                          <span
+                            className={`${styles.apiKeyEntryStat} ${styles.apiKeyEntryStatSuccess}`}
+                          >
+                            <IconCheck size={12} /> {entryStats.success}
+                          </span>
+                          <span
+                            className={`${styles.apiKeyEntryStat} ${styles.apiKeyEntryStatFailure}`}
+                          >
+                            <IconX size={12} /> {entryStats.failure}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
           <div className={styles.fieldRow} style={{ marginTop: '8px' }}>
