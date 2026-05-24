@@ -20,16 +20,20 @@ const API_KEY_MASK_REGEX =
  * 隐藏 API Key 中间部分，仅保留前后两位
  */
 export function maskApiKey(key: string): string {
+  return maskApiKeyWithVisibleChars(key, 2);
+}
+
+export function maskApiKeyWithVisibleChars(key: string, visibleChars = 3): string {
   const trimmed = String(key || '').trim();
   if (!trimmed) {
     return '';
   }
 
   const MASKED_LENGTH = 10;
-  const visibleChars = trimmed.length < 4 ? 1 : 2;
-  const start = trimmed.slice(0, visibleChars);
-  const end = trimmed.slice(-visibleChars);
-  const maskedLength = Math.max(MASKED_LENGTH - visibleChars * 2, 1);
+  const normalizedVisibleChars = Math.max(1, Math.min(visibleChars, Math.floor(trimmed.length / 2)));
+  const start = trimmed.slice(0, normalizedVisibleChars);
+  const end = trimmed.slice(-normalizedVisibleChars);
+  const maskedLength = Math.max(MASKED_LENGTH - normalizedVisibleChars * 2, 1);
   const masked = '*'.repeat(maskedLength);
 
   return `${start}${masked}${end}`;

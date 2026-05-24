@@ -9,6 +9,7 @@ import { statusBarDataFromRecentRequests } from '@/utils/recentRequests';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
 import { ProviderConfigSummary } from '../ProviderConfigSummary';
+import { ProviderDisplayModeControl, useProviderDisplayMode } from '../ProviderDisplayMode';
 import {
   getProviderConfigKey,
   getProviderRecentBuckets,
@@ -41,6 +42,7 @@ export function VertexSection({
   onToggle,
 }: VertexSectionProps) {
   const { t } = useTranslation();
+  const { mode, setMode } = useProviderDisplayMode('vertex');
   const actionsDisabled = disableControls || loading || isSwitching;
   const toggleDisabled = disableControls || loading || isSwitching;
 
@@ -68,6 +70,7 @@ export function VertexSection({
           <span className={styles.cardTitle}>
             <img src={iconVertex} alt="" className={styles.cardTitleIcon} />
             {t('ai_providers.vertex_title')}
+            <ProviderDisplayModeControl value={mode} onChange={setMode} />
           </span>
         }
         extra={
@@ -85,10 +88,22 @@ export function VertexSection({
           onEdit={(_, index) => onEdit(index)}
           onDelete={(_, index) => onDelete(index)}
           actionsDisabled={actionsDisabled}
-          listClassName={styles.compactProviderList}
-          rowClassName={styles.compactProviderRow}
-          metaClassName={styles.compactProviderMeta}
-          actionsClassName={styles.compactProviderActions}
+          listClassName={
+            mode === 'original'
+              ? undefined
+              : mode === 'badge'
+                ? styles.badgeProviderList
+                : styles.compactProviderList
+          }
+          rowClassName={
+            mode === 'original'
+              ? undefined
+              : mode === 'badge'
+                ? styles.badgeProviderRow
+                : styles.compactProviderRow
+          }
+          metaClassName={mode === 'original' ? undefined : styles.compactProviderMeta}
+          actionsClassName={mode === 'original' ? undefined : styles.compactProviderActions}
           getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
           renderExtraActions={(item, index) => (
             <ToggleSwitch
@@ -116,6 +131,7 @@ export function VertexSection({
               <ProviderConfigSummary
                 title={`${t('ai_providers.vertex_item_title')} #${index + 1}`}
                 apiKey={item.apiKey}
+                mode={mode}
                 stats={stats}
                 statusData={statusData}
                 headers={headerEntries}

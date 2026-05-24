@@ -11,11 +11,52 @@ $openai-toolbar-control-height: 36px;
   display: flex;
   align-items: center;
   gap: $spacing-sm;
+  flex-wrap: wrap;
 }
 
 .cardTitleIcon {
   width: 24px;
   height: 24px;
+}
+
+.providerModeControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding: 2px;
+  border: 1px solid var(--border-primary);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.providerModeButton {
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+  }
+}
+
+.providerModeButtonActive {
+  color: var(--bg-primary);
+  background: var(--text-primary);
+
+  &:hover {
+    color: var(--bg-primary);
+    background: var(--text-primary);
+  }
 }
 
 .pageTitle {
@@ -422,17 +463,23 @@ $openai-toolbar-control-height: 36px;
 .compactProviderList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+}
+
+.badgeProviderList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 6px;
 }
 
 .compactProviderRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: $spacing-sm;
+  gap: 6px;
   align-items: start;
-  padding: 10px 12px;
+  padding: 6px 8px;
   border: 1px solid var(--border-color);
-  border-radius: $radius-md;
+  border-radius: 7px;
   background: var(--bg-primary);
   transition:
     background-color $transition-fast,
@@ -444,6 +491,27 @@ $openai-toolbar-control-height: 36px;
   }
 }
 
+.badgeProviderRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+  padding: 7px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-primary);
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
+    background: var(--bg-secondary);
+  }
+
+  .compactProviderActions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+}
+
 .compactProviderMeta {
   min-width: 0;
 }
@@ -452,13 +520,14 @@ $openai-toolbar-control-height: 36px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
   max-width: 320px;
 
   :global(.btn.btn-sm) {
-    height: 28px;
-    padding: 0 9px;
+    height: 24px;
+    padding: 0 7px;
+    font-size: 12px;
   }
 }
 
@@ -466,58 +535,110 @@ $openai-toolbar-control-height: 36px;
 .ampcodeCompactContent {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 4px;
   min-width: 0;
+}
+
+.providerBadgeContent {
+  gap: 5px;
+
+  .providerCompactTopline {
+    align-items: flex-start;
+  }
+}
+
+.providerCompactContent,
+.ampcodeCompactContent {
+  .headerBadgeList {
+    gap: 3px;
+    margin-top: 0;
+  }
+
+  .headerBadge {
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 10px;
+    line-height: 1.25;
+  }
 }
 
 .providerCompactTopline {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $spacing-sm;
+  gap: 8px;
   min-width: 0;
 }
 
 .providerCompactIdentity {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 14px;
   min-width: 0;
 }
 
 .providerCompactTitle {
   color: var(--text-primary);
   font-weight: 700;
+  font-size: 13px;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
 .providerCompactKey {
   min-width: 0;
-  color: var(--text-primary);
+  color: color-mix(in srgb, var(--text-secondary) 72%, var(--text-primary));
   font-family: 'Monaco', 'Menlo', 'Consolas', 'Ubuntu Mono', monospace;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.providerCompactStatusLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  .statusBar {
+    flex: 1 1 180px;
+    max-width: 260px;
+    margin-top: 0;
+    padding: 0;
+  }
+
+  .statusBlocks {
+    min-width: 120px;
+  }
+
+  .statusBlock {
+    height: 6px;
+  }
+
+  .statusRate {
+    padding: 2px 5px;
+    font-size: 10px;
+  }
 }
 
 .providerCompactStats {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .providerCompactStat {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 3px 8px;
+  min-height: 18px;
+  padding: 2px 6px;
   border-radius: 999px;
   border: 1px solid transparent;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1.15;
   white-space: nowrap;
@@ -526,7 +647,7 @@ $openai-toolbar-control-height: 36px;
 .providerCompactFields {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -536,13 +657,13 @@ $openai-toolbar-control-height: 36px;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
-  min-height: 24px;
-  padding: 3px 8px;
+  min-height: 20px;
+  padding: 2px 6px;
   border: 1px solid var(--border-secondary);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--bg-secondary);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.25;
 }
 
@@ -580,11 +701,19 @@ $openai-toolbar-control-height: 36px;
 
 .providerCompactTagList {
   margin-top: 0;
-  gap: 5px;
+  gap: 3px;
 
   .modelTag {
-    padding: 3px 8px;
-    border-radius: 7px;
+    gap: 3px;
+    padding: 1px 5px;
+    border-radius: 6px;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .modelCountLabel {
+    font-size: 10px;
+    line-height: 1.25;
   }
 }
 
@@ -592,12 +721,16 @@ $openai-toolbar-control-height: 36px;
   display: flex;
   align-items: flex-start;
   flex-wrap: wrap;
-  gap: 5px 8px;
+  gap: 3px 6px;
   min-width: 0;
 }
 
 @include mobile {
   .compactProviderRow {
+    grid-template-columns: 1fr;
+  }
+
+  .badgeProviderList {
     grid-template-columns: 1fr;
   }
 
@@ -613,6 +746,17 @@ $openai-toolbar-control-height: 36px;
 
   .providerCompactStats {
     justify-content: flex-start;
+  }
+
+  .providerCompactStatusLine {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+
+    .statusBar {
+      width: 100%;
+      max-width: none;
+    }
   }
 }
 
