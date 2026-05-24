@@ -35,6 +35,7 @@ import {
 type SortOption = 'name' | 'priority' | 'recent-success';
 type SortDirection = 'asc' | 'desc';
 type ApiKeyListMode = 'collapsed' | 'abnormal' | 'all';
+type ApiKeyStatusKind = 'normal' | 'abnormal' | 'cooling';
 
 interface FloatingToolbarStyle {
   left: number;
@@ -610,15 +611,17 @@ export function OpenAISection({
     return styles.apiKeyEntryStateActive;
   };
 
-  const isAbnormalKeyState = (providerName: string, apiKey: string) => {
+  const getKeyStatusKind = (providerName: string, apiKey: string): ApiKeyStatusKind => {
     const state = keyStates[openAIKeyStateKey(providerName, apiKey)];
-    if (!state) return false;
-    return (
-      !state.enabled ||
-      state.status === 'disabled' ||
-      state.status === 'frozen' ||
-      state.status === 'error'
-    );
+    if (!state || state.status === 'active') return 'normal';
+    if (state.status === 'frozen') return 'cooling';
+    if (!state.enabled || state.status === 'disabled' || state.status === 'error')
+      return 'abnormal';
+    return 'normal';
+  };
+
+  const isAbnormalKeyState = (providerName: string, apiKey: string) => {
+    return getKeyStatusKind(providerName, apiKey) !== 'normal';
   };
 
   const setApiKeyListMode = (providerKey: string, mode: ApiKeyListMode) => {
@@ -643,6 +646,14 @@ export function OpenAISection({
     const apiKeyEntries = provider.apiKeyEntries || [];
     const providerKey = getOpenAIProviderKey(provider, originalIndex);
     const apiKeyListMode = apiKeyListModes[providerKey] || 'collapsed';
+    const keyStatusCounts = apiKeyEntries.reduce(
+      (counts, entry) => {
+        const statusKind = getKeyStatusKind(provider.name, entry.apiKey);
+        counts[statusKind] += 1;
+        return counts;
+      },
+      { normal: 0, abnormal: 0, cooling: 0 }
+    );
     const visibleApiKeyEntries =
       apiKeyListMode === 'all'
         ? apiKeyEntries
@@ -694,7 +705,12 @@ export function OpenAISection({
             <div className={styles.apiKeyEntriesSection}>
               <div className={styles.apiKeyEntriesHeader}>
                 <div className={styles.apiKeyEntriesLabel}>
-                  {t('ai_providers.openai_keys_count')}: {apiKeyEntries.length}
+                  <span>{t('ai_providers.openai_keys_count')}:</span>
+                  <span className={styles.apiKeyCountTotal}>{apiKeyEntries.length}</span>
+                  <span>/</span>
+                  <span className={styles.apiKeyCountAbnormal}>异常{keyStatusCounts.abnormal}</span>
+                  <span>/</span>
+                  <span className={styles.apiKeyCountCooling}>冷却{keyStatusCounts.cooling}</span>
                 </div>
                 <div
                   className={styles.apiKeyListModeControl}

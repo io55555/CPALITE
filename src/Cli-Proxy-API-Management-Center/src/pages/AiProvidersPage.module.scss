@@ -611,20 +611,43 @@ $openai-toolbar-control-height: 36px;
 }
 
 .apiKeyEntriesLabel {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   min-width: 0;
 }
 
+.apiKeyCountTotal,
+.apiKeyCountAbnormal,
+.apiKeyCountCooling {
+  font-weight: 800;
+}
+
+.apiKeyCountTotal {
+  color: var(--success-text, #047857);
+}
+
+.apiKeyCountAbnormal {
+  color: var(--failure-text, #b91c1c);
+}
+
+.apiKeyCountCooling {
+  color: var(--info-text, #2563eb);
+}
+
 .apiKeyListModeControl {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  padding: 2px;
+  padding: 3px;
   border: 1px solid var(--border-primary);
   border-radius: 8px;
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--text-primary) 18%);
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 10%);
 }
 
 .apiKeyListModeButton {
@@ -633,7 +656,7 @@ $openai-toolbar-control-height: 36px;
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--text-secondary) 78%, var(--bg-primary) 22%);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -645,9 +668,11 @@ $openai-toolbar-control-height: 36px;
 }
 
 .apiKeyListModeButtonActive {
-  background: var(--bg-primary);
-  color: var(--primary-color);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 10%);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 18%),
+    0 0 0 1px rgb(255 255 255 / 14%) inset;
 }
 
 .apiKeyEntryHint {
