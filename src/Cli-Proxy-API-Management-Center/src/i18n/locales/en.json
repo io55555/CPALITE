@@ -2014,6 +2014,207 @@
     "page_size_label": "Per page",
     "page_size_option": "{{count}} / page"
   },
+  "providersPage": {
+    "header": {
+      "title": "AI Providers",
+      "activeResources": "{{active}} / {{total}} enabled",
+      "providerFamilies": "{{count}} provider families",
+      "updatedAt": "Updated {{time}}",
+      "issueCount": "{{count}} configuration issues"
+    },
+    "actions": {
+      "refresh": "Refresh",
+      "syncing": "Syncing",
+      "new": "New",
+      "edit": "Edit",
+      "view": "View",
+      "delete": "Delete",
+      "clear": "Clear",
+      "cancel": "Cancel",
+      "save": "Save",
+      "create": "Create",
+      "enable": "Enable",
+      "disable": "Disable"
+    },
+    "categories": {
+      "title": "Provider Families",
+      "activeCount": "{{active}} / {{total}} enabled",
+      "ampcodeActive": "Configured",
+      "ampcodeInactive": "Not configured"
+    },
+    "providerNames": {
+      "gemini": "Gemini",
+      "codex": "Codex",
+      "claude": "Claude",
+      "vertex": "Vertex",
+      "openaiCompatibility": "OpenAI Compatible",
+      "ampcode": "Ampcode"
+    },
+    "toolbar": {
+      "sortBy": "Sort by",
+      "sort": {
+        "name": "Name",
+        "priority": "Priority",
+        "recentSuccess": "Recent success",
+        "directionAsc": "Ascending",
+        "directionDesc": "Descending"
+      },
+      "filter": {
+        "allModels": "All models",
+        "selectedModels": "{{selected}} / {{total}} models selected",
+        "selectAll": "Select all",
+        "clear": "Clear",
+        "empty": "No models available"
+      }
+    },
+    "table": {
+      "description": "This view is backed by {{route}} and writes changes directly to the config file.",
+      "filterPlaceholder": "Search key, name, URL, prefix, or auth index",
+      "providerIssue": "This provider has configuration issues",
+      "empty": "No provider configuration is available.",
+      "key": "Key",
+      "baseUrl": "Base URL",
+      "prefix": "Prefix",
+      "models": "Models",
+      "status": "Status",
+      "actions": "Actions",
+      "noFallbackKey": "No fallback key configured",
+      "websocketsTag": "WebSocket",
+      "cloakTag": "Cloak",
+      "metrics": {
+        "models": "Models",
+        "keys": "Keys",
+        "headers": "Headers",
+        "mappings": "Mappings"
+      }
+    },
+    "status": {
+      "active": "Enabled",
+      "disabled": "Disabled",
+      "notConfigured": "Not configured",
+      "notSet": "Not set",
+      "none": "None",
+      "defaultSuffix": "(default)"
+    },
+    "form": {
+      "createEyebrow": "Create configuration",
+      "editEyebrow": "Edit configuration",
+      "name": "Name",
+      "apiKey": "API key",
+      "apiKeyCreatePlaceholder": "Enter API key",
+      "apiKeyEditPlaceholder": "Leave blank to keep the current key",
+      "baseUrl": "Base URL",
+      "baseUrlRequiredHint": "Required",
+      "proxyUrl": "Proxy URL",
+      "prefix": "Prefix",
+      "priority": "Priority",
+      "testModel": "Test model",
+      "testModelClaudeHint": "Used for connectivity tests",
+      "testModelAutoEmpty": "Auto select the first model",
+      "testModelAutoWith": "Auto: {{name}}",
+      "testModelCustom": "Custom: {{name}}",
+      "websockets": "Enable Responses WebSocket transport",
+      "disabled": "Disable this configuration",
+      "disabledHint": "Disabled entries are excluded from runtime routing.",
+      "apiKeyEntriesSection": "API key entries",
+      "apiKeyEntry": "Key entry {{index}}",
+      "addApiKeyEntry": "Add key entry",
+      "headers": "Headers",
+      "headersHint": "One Header: value per line",
+      "headersSection": "Custom headers",
+      "addHeader": "Add header",
+      "modelsSection": "Models",
+      "addModel": "Add model",
+      "excludedSection": "Excluded models",
+      "excludedHint": "One model per line. Use * to disable all models for this entry.",
+      "cloakSection": "Request cloaking",
+      "cloakMode": "Cloak mode",
+      "cloakStrict": "Strict mode",
+      "cloakSensitiveWords": "Sensitive words",
+      "validation": {
+        "nameRequired": "Enter a name",
+        "apiKeyRequired": "Enter an API key",
+        "baseUrlRequired": "Enter a Base URL"
+      }
+    },
+    "connectivity": {
+      "test": "Test",
+      "testAll": "Test all keys",
+      "success": "Connectivity test succeeded",
+      "baseUrlRequired": "Enter a Base URL first",
+      "endpointInvalid": "Unable to build a valid test endpoint",
+      "apiKeyRequired": "Enter an API key first",
+      "modelRequired": "Select or enter a test model first",
+      "timeout": "Test request timed out after {{seconds}} seconds",
+      "requestFailed": "Test request failed"
+    },
+    "discovery": {
+      "openButton": "Discover models",
+      "searchPlaceholder": "Search models",
+      "reload": "Reload",
+      "loading": "Fetching model list...",
+      "empty": "No models were returned.",
+      "notLoaded": "Model list has not been loaded.",
+      "selectAll": "Select all addable models",
+      "clearAll": "Clear selection",
+      "selectedCount": "{{selected}} / {{total}} selected",
+      "alreadyAdded": "Added",
+      "close": "Close",
+      "apply": "Add {{count}} models"
+    },
+    "detail": {
+      "title": "Configuration details",
+      "metadataTitle": "Metadata",
+      "fields": {
+        "identifier": "Identifier",
+        "baseUrl": "Base URL",
+        "proxyUrl": "Proxy URL",
+        "prefix": "Prefix",
+        "models": "Models",
+        "headers": "Headers",
+        "authIndex": "Auth index",
+        "excludedModels": "Excluded models",
+        "apiKeyEntries": "Key entries"
+      }
+    },
+    "ampcode": {
+      "upstreamUrl": "Upstream URL",
+      "upstreamApiKey": "Upstream API key",
+      "upstreamApiKeyHint": "Leave blank to skip the single upstream key",
+      "forceModelMappings": "Force model mappings",
+      "forceModelMappingsHint": "When enabled, only configured model mappings are allowed.",
+      "keyMappingsSection": "Upstream key mappings",
+      "modelMappingsSection": "Model mappings",
+      "mappingRow": "Mapping {{index}}",
+      "clientKeys": "Client keys",
+      "clientKeysHint": "One client key per line. Matched keys route to this upstream key.",
+      "addMapping": "Add key mapping",
+      "addModelMapping": "Add model mapping"
+    },
+    "delete": {
+      "title": "Delete provider configuration",
+      "confirm": "Delete “{{name}}”?",
+      "ampcodeTitle": "Clear Ampcode configuration",
+      "ampcodeConfirm": "Clear the Ampcode configuration?"
+    },
+    "toast": {
+      "created": "Provider configuration created",
+      "updated": "Provider configuration updated",
+      "deleted": "Provider configuration deleted",
+      "enabled": "Provider configuration enabled",
+      "disabled": "Provider configuration disabled",
+      "toggleFailed": "Failed to toggle provider state"
+    },
+    "unsavedChanges": {
+      "title": "Unsaved changes",
+      "message": "This configuration has unsaved changes. Leaving now will discard them.",
+      "discard": "Discard changes",
+      "keepEditing": "Keep editing"
+    },
+    "modelCatalog": {
+      "notLoaded": "Not loaded"
+    }
+  },
   "usage_service": {
     "title": "External Usage Service",
     "description": "When the panel is loaded by CPA, configure a separately deployed Usage Service to read persisted SQLite usage data. Docker embedded mode usually does not need this.",
