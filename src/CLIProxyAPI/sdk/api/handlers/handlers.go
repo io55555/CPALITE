@@ -26,6 +26,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 	"golang.org/x/net/context"
 )
 
@@ -244,6 +245,21 @@ func setReasoningEffortMetadata(meta map[string]any, handlerType, model string, 
 		return
 	}
 	meta[coreexecutor.ReasoningEffortMetadataKey] = effort
+}
+
+func setServiceTierMetadata(meta map[string]any, rawJSON []byte) {
+	if meta == nil {
+		return
+	}
+	serviceTier := coreusage.DefaultServiceTier
+	node := gjson.GetBytes(rawJSON, "service_tier")
+	if node.Exists() {
+		value := strings.TrimSpace(node.String())
+		if value != "" {
+			serviceTier = value
+		}
+	}
+	meta[coreexecutor.ServiceTierMetadataKey] = serviceTier
 }
 
 // headersFromContext extracts the original HTTP request headers from the gin context
@@ -573,6 +589,7 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	setServiceTierMetadata(reqMeta, rawJSON)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
@@ -641,6 +658,7 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	setServiceTierMetadata(reqMeta, rawJSON)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
@@ -966,6 +984,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	setServiceTierMetadata(reqMeta, rawJSON)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
