@@ -1461,8 +1461,13 @@
       "ampcode": "Amp CLI"
     },
     "table": {
+      "index": "#",
       "key": "Ключ",
       "baseUrl": "Base URL",
+      "proxy": "Прокси",
+      "proxyInherited": "Глобально/напрямую",
+      "proxyInheritedValue": "Глобально {{proxy}}",
+      "proxyDirect": "Напрямую",
       "prefix": "Префикс",
       "models": "Модели/Заголовки",
       "status": "Статус",

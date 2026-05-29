@@ -33,6 +33,7 @@ import statusBarStyles from './providerStatusBar.module.scss';
 interface ProviderResourceTableProps {
   resources: ProviderResource[];
   selectedId?: string | null;
+  globalProxyUrl?: string | null;
   disableMutations?: boolean;
   usageByProvider?: ProviderRecentUsageMap;
   onView: (resource: ProviderResource) => void;
@@ -41,7 +42,7 @@ interface ProviderResourceTableProps {
   onToggleDisabled?: (resource: ProviderResource, disabled: boolean) => void;
 }
 
-const columnWidths = ['18%', '18%', '6%', '14%', '24%', '20%'];
+const columnWidths = ['52px', '18%', '18%', '14%', '8%', '16%', '18%', '16%'];
 
 const resolveStatusBarData = (
   resource: ProviderResource,
@@ -82,6 +83,7 @@ const resolveTotalStats = (
 export function ProviderResourceTable({
   resources,
   selectedId,
+  globalProxyUrl,
   disableMutations,
   usageByProvider,
   onView,
@@ -207,16 +209,34 @@ export function ProviderResourceTable({
     );
   };
 
+  const renderProxy = (r: ProviderResource) => {
+    if (r.brand === 'ampcode') {
+      return <span className={styles.baseUrl}>—</span>;
+    }
+    const inheritedProxy = (globalProxyUrl ?? '').trim();
+    const inheritedLabel = inheritedProxy
+      ? t('providersPage.table.proxyInheritedValue', { proxy: inheritedProxy })
+      : t('providersPage.table.proxyDirect');
+    return (
+      <span className={r.proxyUrl ? styles.baseUrl : styles.proxyInherited}>
+        {r.proxyUrl ?? inheritedLabel}
+      </span>
+    );
+  };
+
   return (
     <Table
+      className={styles.denseTable}
       cols={columnWidths.map((w, i) => (
         <col key={i} style={{ width: w }} />
       ))}
     >
       <TableHeader>
         <TableRow>
+          <TableHead>{t('providersPage.table.index')}</TableHead>
           <TableHead>{t('providersPage.table.key')}</TableHead>
           <TableHead>{t('providersPage.table.baseUrl')}</TableHead>
+          <TableHead>{t('providersPage.table.proxy')}</TableHead>
           <TableHead>{t('providersPage.table.prefix')}</TableHead>
           <TableHead>{t('providersPage.table.models')}</TableHead>
           <TableHead>{t('providersPage.table.status')}</TableHead>
@@ -228,8 +248,12 @@ export function ProviderResourceTable({
           const isAmpcode = resource.brand === 'ampcode';
           return (
             <TableRow key={resource.id} selected={resource.id === selectedId}>
+              <TableCell>
+                <span className={styles.rowIndex}>{resource.originalIndex + 1}</span>
+              </TableCell>
               <TableCell>{renderPrimary(resource)}</TableCell>
               <TableCell>{renderBaseUrl(resource)}</TableCell>
+              <TableCell>{renderProxy(resource)}</TableCell>
               <TableCell>
                 {resource.brand === 'ampcode' ? (
                   <span className={styles.baseUrl}>—</span>

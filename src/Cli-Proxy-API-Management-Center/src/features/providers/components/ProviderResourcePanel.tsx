@@ -41,6 +41,7 @@ interface ProviderResourcePanelProps {
   onFilterChange: (value: string) => void;
   filteredResources: ProviderResource[];
   selectedId: string | null;
+  globalProxyUrl?: string | null;
   disableMutations?: boolean;
   usageByProvider?: ProviderRecentUsageMap;
   openaiControls?: OpenAIPanelControls;
@@ -57,6 +58,7 @@ export function ProviderResourcePanel({
   onFilterChange,
   filteredResources,
   selectedId,
+  globalProxyUrl,
   disableMutations,
   usageByProvider,
   openaiControls,
@@ -158,6 +160,7 @@ export function ProviderResourcePanel({
         <ProviderResourceTable
           resources={filteredResources}
           selectedId={selectedId}
+          globalProxyUrl={globalProxyUrl}
           disableMutations={disableMutations}
           usageByProvider={usageByProvider}
           onView={onView}

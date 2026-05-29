@@ -394,6 +394,7 @@ export function ProvidersWorkbenchPage() {
           onFilterChange={setFilter}
           filteredResources={visibleResources}
           selectedId={sheetState.open ? sheetState.resource?.id ?? null : null}
+          globalProxyUrl={workbench.globalProxyUrl}
           disableMutations={disableMutations}
           usageByProvider={usageByProvider}
           openaiControls={openaiControls}

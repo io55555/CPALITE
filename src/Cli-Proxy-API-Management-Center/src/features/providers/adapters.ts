@@ -34,7 +34,9 @@ function providerKeyToResource(
   index: number
 ): ProviderResource {
   const apiKey = config.apiKey ?? '';
-  const disabled = hasDisableAllModelsRule(config.excludedModels);
+  const disabled =
+    (config as GeminiKeyConfig).disabled === true ||
+    hasDisableAllModelsRule(config.excludedModels);
   const flags: ProviderResource['flags'] = {};
   if (brand === 'codex') {
     flags.websockets = (config as ProviderKeyConfig).websockets === true;
@@ -97,6 +99,19 @@ export function openaiToResource(
   const name = (config.name ?? '').trim();
   const firstEntry = config.apiKeyEntries?.[0];
   const previewApiKey = firstEntry?.apiKey ? maskApiKey(firstEntry.apiKey) : null;
+  const proxyUrls = Array.from(
+    new Set(
+      (config.apiKeyEntries ?? [])
+        .map((entry) => (entry.proxyUrl ?? '').trim())
+        .filter(Boolean)
+    )
+  );
+  const proxyUrl =
+    proxyUrls.length === 0
+      ? null
+      : proxyUrls.length === 1
+        ? proxyUrls[0]
+        : `${proxyUrls[0]} (+${proxyUrls.length - 1})`;
   return {
     id: buildId('openaiCompatibility', index, truncateForId(name) || `#${index}`),
     brand: 'openaiCompatibility',
@@ -107,7 +122,7 @@ export function openaiToResource(
     apiKey: null,
     authIndex: config.authIndex ?? null,
     baseUrl: config.baseUrl ?? null,
-    proxyUrl: null,
+    proxyUrl,
     prefix: config.prefix ?? null,
     modelCount: config.models?.length ?? 0,
     headerCount: countHeaders(config.headers),

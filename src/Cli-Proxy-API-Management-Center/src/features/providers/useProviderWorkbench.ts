@@ -60,6 +60,7 @@ export interface UseProviderWorkbenchResult {
   deleteProvider: (resource: ProviderResource) => Promise<void>;
   toggleDisabled: (resource: ProviderResource, disabled: boolean) => Promise<void>;
   saveAmpcode: (config: AmpcodeConfig) => Promise<void>;
+  globalProxyUrl: string | null;
   mutating: boolean;
   refreshSnapshot: () => void;
 }
@@ -146,6 +147,9 @@ const buildProviderKeyConfig = (
     excludedModels: excluded,
     authIndex: existing?.authIndex,
   };
+  if (brand === 'gemini') {
+    (next as GeminiKeyConfig).disabled = input.disabled;
+  }
   if (brand === 'codex' && input.websockets !== undefined) {
     next.websockets = input.websockets;
   }
@@ -507,7 +511,7 @@ export function useProviderWorkbench(): UseProviderWorkbenchResult {
           const excluded = disabled
             ? withDisableAllModelsRule(current.excludedModels)
             : withoutDisableAllModelsRule(current.excludedModels);
-          list[idx] = { ...current, excludedModels: excluded };
+          list[idx] = { ...current, disabled, excludedModels: excluded };
           await persistGeminiKeys(list);
         } else if (brand === 'codex' || brand === 'claude' || brand === 'vertex') {
           const key =
@@ -611,6 +615,7 @@ export function useProviderWorkbench(): UseProviderWorkbenchResult {
     deleteProvider,
     toggleDisabled,
     saveAmpcode,
+    globalProxyUrl: config?.proxyUrl ?? null,
     mutating,
     refreshSnapshot,
   };
