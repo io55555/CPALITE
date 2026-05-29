@@ -59,6 +59,7 @@ export function AiProvidersPage() {
 
   const disableControls = connectionStatus !== 'connected';
   const isSwitching = Boolean(configSwitchingKey);
+  const editorBasePath = '/ai-providers-class';
 
   const pageTransitionLayer = usePageTransitionLayer();
   const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.status === 'current' : true;
@@ -418,8 +419,8 @@ export function AiProvidersPage() {
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
-            onAdd={() => openEditor('/ai-providers/gemini/new')}
-            onEdit={(index) => openEditor(`/ai-providers/gemini/${index}`)}
+            onAdd={() => openEditor(`${editorBasePath}/gemini/new`)}
+            onEdit={(index) => openEditor(`${editorBasePath}/gemini/${index}`)}
             onDelete={deleteGemini}
             onToggle={(index, enabled) => void setConfigEnabled('gemini', index, enabled)}
           />
@@ -432,8 +433,8 @@ export function AiProvidersPage() {
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
-            onAdd={() => openEditor('/ai-providers/codex/new')}
-            onEdit={(index) => openEditor(`/ai-providers/codex/${index}`)}
+            onAdd={() => openEditor(`${editorBasePath}/codex/new`)}
+            onEdit={(index) => openEditor(`${editorBasePath}/codex/${index}`)}
             onDelete={(index) => void deleteProviderEntry('codex', index)}
             onToggle={(index, enabled) => void setConfigEnabled('codex', index, enabled)}
           />
@@ -446,8 +447,8 @@ export function AiProvidersPage() {
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
-            onAdd={() => openEditor('/ai-providers/claude/new')}
-            onEdit={(index) => openEditor(`/ai-providers/claude/${index}`)}
+            onAdd={() => openEditor(`${editorBasePath}/claude/new`)}
+            onEdit={(index) => openEditor(`${editorBasePath}/claude/${index}`)}
             onDelete={(index) => void deleteProviderEntry('claude', index)}
             onToggle={(index, enabled) => void setConfigEnabled('claude', index, enabled)}
           />
@@ -460,8 +461,8 @@ export function AiProvidersPage() {
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
-            onAdd={() => openEditor('/ai-providers/vertex/new')}
-            onEdit={(index) => openEditor(`/ai-providers/vertex/${index}`)}
+            onAdd={() => openEditor(`${editorBasePath}/vertex/new`)}
+            onEdit={(index) => openEditor(`${editorBasePath}/vertex/${index}`)}
             onDelete={deleteVertex}
             onToggle={(index, enabled) => void setConfigEnabled('vertex', index, enabled)}
           />
@@ -473,7 +474,7 @@ export function AiProvidersPage() {
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
-            onEdit={() => openEditor('/ai-providers/ampcode')}
+            onEdit={() => openEditor(`${editorBasePath}/ampcode`)}
           />
         </div>
 
@@ -485,8 +486,8 @@ export function AiProvidersPage() {
             disableControls={disableControls}
             isSwitching={isSwitching}
             resolvedTheme={resolvedTheme}
-            onAdd={() => openEditor('/ai-providers/openai/new')}
-            onEdit={(index) => openEditor(`/ai-providers/openai/${index}`)}
+            onAdd={() => openEditor(`${editorBasePath}/openai/new`)}
+            onEdit={(index) => openEditor(`${editorBasePath}/openai/${index}`)}
             onDelete={deleteOpenai}
             onToggle={(index, enabled) => void setOpenAIProviderEnabled(index, enabled)}
           />

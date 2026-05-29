@@ -121,7 +121,7 @@ export const PROVIDER_DESCRIPTORS: Record<ProviderBrand, ProviderDescriptor> = {
     supportsCloak: false,
     supportsApiKeyEntries: true,
     supportsAmpcodeMappings: false,
-    sheetSize: 'lg',
+    sheetSize: 'xl',
   },
   ampcode: {
     id: 'ampcode',

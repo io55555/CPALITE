@@ -50,7 +50,7 @@
 }
 
 .sizeXl {
-  width: min(960px, 100vw);
+  width: min(max(960px, 50vw), 100vw);
 }
 
 .header {

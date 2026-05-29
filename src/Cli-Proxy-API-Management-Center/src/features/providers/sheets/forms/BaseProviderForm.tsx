@@ -11,8 +11,10 @@ import {
 import { Collapsible } from '@/components/ui/Collapsible';
 import { Select } from '@/components/ui/Select';
 import { hasDisableAllModelsRule } from '@/components/providers/utils';
+import { providersApi } from '@/services/api';
 import type {
   GeminiKeyConfig,
+  OpenAIKeyState,
   OpenAIProviderConfig,
   ProviderKeyConfig,
 } from '@/types';
@@ -55,6 +57,17 @@ const emptyApiKeyEntry = (): ApiKeyEntryInput => ({
   proxyUrl: '',
   headersText: '',
 });
+
+type OpenAIKeyEntryDisplayMode = 'original' | 'table' | 'badge';
+
+const OPENAI_KEY_ENTRY_DISPLAY_STORAGE_KEY =
+  'cliproxyapi.providers.openaiKeyEntryDisplayMode';
+
+const openAIKeyStateKey = (providerName: string, apiKey: string) =>
+  `${providerName.trim().toLowerCase()}::${apiKey.trim()}`;
+
+const isOpenAIKeyEntryDisplayMode = (value: unknown): value is OpenAIKeyEntryDisplayMode =>
+  value === 'original' || value === 'table' || value === 'badge';
 
 const headersObjectToText = (headers?: Record<string, string>): string =>
   Object.entries(headers ?? {})
@@ -133,7 +146,7 @@ function buildInitialForm(
   const disabled = hasDisableAllModelsRule(cfg.excludedModels);
   const excludedList = stripDisableAllRule(cfg.excludedModels);
   return {
-    apiKey: '',
+    apiKey: cfg.apiKey ?? '',
     name: '',
     baseUrl: cfg.baseUrl ?? '',
     proxyUrl: cfg.proxyUrl ?? '',
@@ -211,6 +224,13 @@ export function BaseProviderForm({
     JSON.stringify(buildInitialForm(brand, resource, mode))
   );
   const [error, setError] = useState<string | null>(null);
+  const [openaiKeyStates, setOpenaiKeyStates] = useState<Record<string, OpenAIKeyState>>({});
+  const [openaiKeyEntryDisplayMode, setOpenaiKeyEntryDisplayMode] =
+    useState<OpenAIKeyEntryDisplayMode>(() => {
+      if (typeof window === 'undefined') return 'badge';
+      const stored = window.localStorage.getItem(OPENAI_KEY_ENTRY_DISPLAY_STORAGE_KEY);
+      return isOpenAIKeyEntryDisplayMode(stored) ? stored : 'badge';
+    });
 
   const isDirty = useMemo(
     () => JSON.stringify(form) !== initialFormSignature,
@@ -220,6 +240,35 @@ export function BaseProviderForm({
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      OPENAI_KEY_ENTRY_DISPLAY_STORAGE_KEY,
+      openaiKeyEntryDisplayMode
+    );
+  }, [openaiKeyEntryDisplayMode]);
+
+  useEffect(() => {
+    if (brand !== 'openaiCompatibility') return;
+    let cancelled = false;
+    providersApi
+      .getOpenAIKeyStates()
+      .then((states) => {
+        if (cancelled) return;
+        const next: Record<string, OpenAIKeyState> = {};
+        states.forEach((state) => {
+          next[openAIKeyStateKey(state.provider_name, state.api_key)] = state;
+        });
+        setOpenaiKeyStates(next);
+      })
+      .catch(() => {
+        if (!cancelled) setOpenaiKeyStates({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [brand, form.name]);
 
   const fallbackApiKey = useMemo(() => {
     if (mode !== 'edit' || !resource) return '';
@@ -430,6 +479,52 @@ export function BaseProviderForm({
     [form.apiKeyEntries]
   );
 
+  const openaiProviderName = form.name.trim();
+
+  const openaiStateFor = (apiKey: string) =>
+    openaiKeyStates[openAIKeyStateKey(openaiProviderName, apiKey)];
+
+  const isOpenAIKeyEnabled = (apiKey: string) => {
+    const state = openaiStateFor(apiKey);
+    return state?.enabled !== false && state?.status !== 'disabled';
+  };
+
+  const openaiStateText = (apiKey: string) => {
+    const state = openaiStateFor(apiKey);
+    if (!state) return '启用';
+    if (!state.enabled || state.status === 'disabled') return '停用';
+    if (state.status === 'frozen') return '冷却';
+    if (state.status === 'error') return '异常';
+    return '启用';
+  };
+
+  const toggleOpenAIKeyEnabled = async (entry: ApiKeyEntryInput, enabled: boolean) => {
+    const apiKey = entry.apiKey.trim();
+    if (!openaiProviderName || !apiKey) return;
+    const state = await providersApi.updateOpenAIKeyState(openaiProviderName, apiKey, enabled);
+    setOpenaiKeyStates((prev) => ({
+      ...prev,
+      [openAIKeyStateKey(state.provider_name, state.api_key)]: state,
+    }));
+  };
+
+  const updateOpenAIEntry = (
+    idx: number,
+    patch: Partial<ApiKeyEntryInput>
+  ) => {
+    updateField(
+      'apiKeyEntries',
+      apiKeyEntries.map((it, i) => (i === idx ? { ...it, ...patch } : it))
+    );
+  };
+
+  const removeOpenAIEntry = (idx: number) => {
+    updateField(
+      'apiKeyEntries',
+      apiKeyEntries.filter((_, i) => i !== idx)
+    );
+  };
+
   return (
     <form id={formId} className={styles.form} onSubmit={handleSubmit} noValidate>
       {/* 基础字段 */}
@@ -457,7 +552,7 @@ export function BaseProviderForm({
             <input
               id={`${fid}-apiKey`}
               className={styles.input}
-              type="password"
+              type="text"
               value={form.apiKey}
               onChange={(e) => updateField('apiKey', e.target.value)}
               placeholder={
@@ -649,8 +744,159 @@ export function BaseProviderForm({
                 ) : null}
                 <span>{t('providersPage.connectivity.testAll')}</span>
               </button>
+              <div className={styles.segmentedControl} role="tablist" aria-label="API Key显示样式">
+                {[
+                  ['original', '原始样式'],
+                  ['table', '紧凑表格'],
+                  ['badge', '铭牌样式'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={openaiKeyEntryDisplayMode === value}
+                    className={`${styles.segmentedButton} ${
+                      openaiKeyEntryDisplayMode === value ? styles.segmentedButtonActive : ''
+                    }`}
+                    onClick={() =>
+                      setOpenaiKeyEntryDisplayMode(value as OpenAIKeyEntryDisplayMode)
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-            {apiKeyEntries.map((entry, idx) => {
+            {openaiKeyEntryDisplayMode === 'table' ? (
+              <div className={styles.keyEntryTable}>
+                <div className={styles.keyEntryTableHeader}>
+                  <span>#</span>
+                  <span>启停</span>
+                  <span>状态</span>
+                  <span>API Key</span>
+                  <span>代理</span>
+                  <span>操作</span>
+                </div>
+                {apiKeyEntries.map((entry, idx) => {
+                  const status = connectivity.openaiStatuses[idx] ?? {
+                    state: 'idle' as ConnectivityState,
+                    message: '',
+                  };
+                  return (
+                    <div key={idx} className={styles.keyEntryTableRow}>
+                      <span className={styles.keyEntryIndex}>{idx + 1}</span>
+                      <label className={styles.keyEntrySwitch}>
+                        <input
+                          type="checkbox"
+                          checked={isOpenAIKeyEnabled(entry.apiKey)}
+                          disabled={mutating || !entry.apiKey.trim() || !openaiProviderName}
+                          onChange={(e) => void toggleOpenAIKeyEnabled(entry, e.target.checked)}
+                        />
+                      </label>
+                      <span className={styles.keyEntryState}>{openaiStateText(entry.apiKey)}</span>
+                      <input
+                        className={styles.input}
+                        type="text"
+                        value={entry.apiKey}
+                        onChange={(e) => updateOpenAIEntry(idx, { apiKey: e.target.value })}
+                        disabled={mutating}
+                        placeholder={t('providersPage.form.apiKeyCreatePlaceholder')}
+                      />
+                      <input
+                        className={styles.input}
+                        value={entry.proxyUrl}
+                        onChange={(e) => updateOpenAIEntry(idx, { proxyUrl: e.target.value })}
+                        disabled={mutating}
+                        placeholder="http://127.0.0.1:7890"
+                      />
+                      <div className={styles.keyEntryActions}>
+                        <ConnectivityStatusIcon state={status.state} />
+                        <button
+                          type="button"
+                          className={styles.connectivityBtnGhost}
+                          disabled={mutating || status.state === 'loading'}
+                          onClick={() => void connectivity.runOpenAIKey(idx)}
+                          title={status.message}
+                        >
+                          {t('providersPage.connectivity.test')}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.removeBtn}
+                          disabled={mutating || apiKeyEntries.length <= 1}
+                          onClick={() => removeOpenAIEntry(idx)}
+                        >
+                          <IconX size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : openaiKeyEntryDisplayMode === 'badge' ? (
+              <div className={styles.keyEntryBadgeGrid}>
+                {apiKeyEntries.map((entry, idx) => {
+                  const status = connectivity.openaiStatuses[idx] ?? {
+                    state: 'idle' as ConnectivityState,
+                    message: '',
+                  };
+                  return (
+                    <div key={idx} className={styles.keyEntryBadge}>
+                      <div className={styles.keyEntryBadgeTop}>
+                        <span className={styles.keyEntryIndex}>{idx + 1}</span>
+                        <span className={styles.keyEntryBadgeKey} title={entry.apiKey}>
+                          {entry.apiKey || t('providersPage.form.apiKeyCreatePlaceholder')}
+                        </span>
+                        <label className={styles.keyEntrySwitch}>
+                          <input
+                            type="checkbox"
+                            checked={isOpenAIKeyEnabled(entry.apiKey)}
+                            disabled={mutating || !entry.apiKey.trim() || !openaiProviderName}
+                            onChange={(e) => void toggleOpenAIKeyEnabled(entry, e.target.checked)}
+                          />
+                        </label>
+                      </div>
+                      <div className={styles.keyEntryBadgeMeta}>
+                        <span>{openaiStateText(entry.apiKey)}</span>
+                        {entry.proxyUrl ? <span title={entry.proxyUrl}>Proxy: {entry.proxyUrl}</span> : null}
+                      </div>
+                      <div className={styles.keyEntryBadgeActions}>
+                        <ConnectivityStatusIcon state={status.state} />
+                        <button
+                          type="button"
+                          className={styles.connectivityBtnGhost}
+                          disabled={mutating || status.state === 'loading'}
+                          onClick={() => void connectivity.runOpenAIKey(idx)}
+                          title={status.message}
+                        >
+                          {t('providersPage.connectivity.test')}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.connectivityBtnGhost}
+                          disabled={mutating}
+                          onClick={() => setOpenaiKeyEntryDisplayMode('table')}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.removeBtn}
+                          disabled={mutating || apiKeyEntries.length <= 1}
+                          onClick={() => removeOpenAIEntry(idx)}
+                        >
+                          <IconX size={12} />
+                        </button>
+                      </div>
+                      {status.state === 'error' ? (
+                        <div className={styles.connectivityError}>{status.message}</div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              apiKeyEntries.map((entry, idx) => {
               const status = connectivity.openaiStatuses[idx] ?? {
                 state: 'idle' as ConnectivityState,
                 message: '',
@@ -662,6 +908,15 @@ export function BaseProviderForm({
                       {t('providersPage.form.apiKeyEntry', { index: idx + 1 })}
                     </span>
                     <div className={styles.entryCardHeaderRight}>
+                      <label className={styles.keyEntrySwitch}>
+                        <input
+                          type="checkbox"
+                          checked={isOpenAIKeyEnabled(entry.apiKey)}
+                          disabled={mutating || !entry.apiKey.trim() || !openaiProviderName}
+                          onChange={(e) => void toggleOpenAIKeyEnabled(entry, e.target.checked)}
+                        />
+                        <span>{openaiStateText(entry.apiKey)}</span>
+                      </label>
                       <ConnectivityStatusIcon state={status.state} />
                       <button
                         type="button"
@@ -697,16 +952,9 @@ export function BaseProviderForm({
                     </label>
                     <input
                       className={styles.input}
-                      type="password"
+                      type="text"
                       value={entry.apiKey}
-                      onChange={(e) =>
-                        updateField(
-                          'apiKeyEntries',
-                          apiKeyEntries.map((it, i) =>
-                            i === idx ? { ...it, apiKey: e.target.value } : it
-                          )
-                        )
-                      }
+                      onChange={(e) => updateOpenAIEntry(idx, { apiKey: e.target.value })}
                       disabled={mutating}
                       placeholder={t('providersPage.form.apiKeyCreatePlaceholder')}
                     />
@@ -718,14 +966,7 @@ export function BaseProviderForm({
                     <input
                       className={styles.input}
                       value={entry.proxyUrl}
-                      onChange={(e) =>
-                        updateField(
-                          'apiKeyEntries',
-                          apiKeyEntries.map((it, i) =>
-                            i === idx ? { ...it, proxyUrl: e.target.value } : it
-                          )
-                        )
-                      }
+                      onChange={(e) => updateOpenAIEntry(idx, { proxyUrl: e.target.value })}
                       disabled={mutating}
                       placeholder="http://127.0.0.1:7890"
                     />
@@ -761,7 +1002,8 @@ export function BaseProviderForm({
                   ) : null}
                 </div>
               );
-            })}
+            })
+            )}
             <button
               type="button"
               className={styles.addBtn}

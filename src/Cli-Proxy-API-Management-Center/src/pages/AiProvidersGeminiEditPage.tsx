@@ -138,8 +138,8 @@ export function AiProvidersGeminiEditPage() {
       navigate(-1);
       return;
     }
-    navigate('/ai-providers', { replace: true });
-  }, [location.state, navigate]);
+    navigate(location.pathname.startsWith('/ai-providers-class') ? '/ai-providers-class' : '/ai-providers', { replace: true });
+  }, [location.pathname, location.state, navigate]);
 
   const swipeRef = useEdgeSwipeBack({ onBack: handleBack });
 

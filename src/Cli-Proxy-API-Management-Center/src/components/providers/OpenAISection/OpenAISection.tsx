@@ -18,7 +18,6 @@ import iconOpenaiLight from '@/assets/icons/openai-light.svg';
 import iconOpenaiDark from '@/assets/icons/openai-dark.svg';
 import { providersApi } from '@/services/api';
 import type { OpenAIKeyState, OpenAIProviderConfig } from '@/types';
-import { maskApiKey } from '@/utils/format';
 import { statusBarDataFromRecentRequests } from '@/utils/recentRequests';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderStatusBar } from '../ProviderStatusBar';
@@ -754,7 +753,7 @@ export function OpenAISection({
                         className={styles.apiKeyEntryCard}
                       >
                         <span className={styles.apiKeyEntryIndex}>{entryIndex + 1}</span>
-                        <span className={styles.apiKeyEntryKey}>{maskApiKey(entry.apiKey)}</span>
+                        <span className={styles.apiKeyEntryKey}>{entry.apiKey}</span>
                         <span
                           className={`${styles.apiKeyEntryState} ${getKeyStateClass(provider.name, entry.apiKey)}`}
                         >

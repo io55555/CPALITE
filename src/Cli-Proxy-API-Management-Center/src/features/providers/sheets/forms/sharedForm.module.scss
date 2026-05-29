@@ -216,9 +216,48 @@
 .entriesToolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 2px;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.segmentedButton {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+  }
+}
+
+.segmentedButtonActive {
+  color: var(--bg-primary);
+  background: var(--text-primary);
+
+  &:hover {
+    color: var(--bg-primary);
+    background: var(--text-primary);
+  }
 }
 
 .connectivityRow {
@@ -289,6 +328,139 @@
   font-size: 11px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.keyEntryTable {
+  display: grid;
+  gap: 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.keyEntryTableHeader,
+.keyEntryTableRow {
+  display: grid;
+  grid-template-columns: 44px 56px 64px minmax(260px, 1.2fr) minmax(180px, 0.8fr) 156px;
+  gap: 8px;
+  align-items: center;
+  min-width: 820px;
+  padding: 8px 10px;
+}
+
+.keyEntryTableHeader {
+  background: var(--bg-tertiary);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.keyEntryTableRow {
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+
+  &:hover {
+    background: var(--bg-tertiary);
+  }
+}
+
+.keyEntryIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--primary-color);
+  color: var(--primary-contrast);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.keyEntrySwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+
+  input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--primary-color);
+  }
+}
+
+.keyEntryState {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.keyEntryActions,
+.keyEntryBadgeActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.keyEntryBadgeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+}
+
+.keyEntryBadge {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.keyEntryBadgeTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.keyEntryBadgeKey {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-family: $font-mono;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.keyEntryBadgeMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+
+  span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+  }
 }
 
 .connectivityHintSuccess {

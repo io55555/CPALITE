@@ -65,7 +65,9 @@ export function ProviderNav() {
     location.pathname.length > 1 && location.pathname.endsWith('/')
       ? location.pathname.slice(0, -1)
       : location.pathname;
-  const shouldShow = isCurrentLayer && normalizedPathname === '/ai-providers';
+  const shouldShow =
+    isCurrentLayer &&
+    (normalizedPathname === '/ai-providers' || normalizedPathname === '/ai-providers-class');
 
   const getHeaderHeight = useCallback(() => {
     const header = document.querySelector('.main-header') as HTMLElement | null;

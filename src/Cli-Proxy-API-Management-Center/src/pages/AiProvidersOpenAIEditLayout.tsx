@@ -252,8 +252,8 @@ export function AiProvidersOpenAIEditLayout() {
       navigate(-1);
       return;
     }
-    navigate('/ai-providers', { replace: true });
-  }, [location.state, navigate]);
+    navigate(location.pathname.startsWith('/ai-providers-class') ? '/ai-providers-class' : '/ai-providers', { replace: true });
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -437,11 +437,14 @@ export function AiProvidersOpenAIEditLayout() {
       isApiKeyEntriesDirty ||
       isModelsDirty);
   const editorRootPath = useMemo(() => {
+    const basePath = location.pathname.startsWith('/ai-providers-class')
+      ? '/ai-providers-class'
+      : '/ai-providers';
     if (hasIndexParam) {
-      return `/ai-providers/openai/${params.index ?? ''}`;
+      return `${basePath}/openai/${params.index ?? ''}`;
     }
-    return '/ai-providers/openai/new';
-  }, [hasIndexParam, params.index]);
+    return `${basePath}/openai/new`;
+  }, [hasIndexParam, location.pathname, params.index]);
   const canGuard = !resolvedLoading && !saving && !invalidIndexParam && !invalidIndex;
 
   const { allowNextNavigation } = useUnsavedChangesGuard({
