@@ -18,6 +18,10 @@ export const MANAGEMENT_API_PREFIX = '/v0/management';
 export const REQUEST_TIMEOUT_MS = 30 * 1000;
 export const VERSION_HEADER_KEYS = ['x-cpa-version', 'x-server-version'];
 export const BUILD_DATE_HEADER_KEYS = ['x-cpa-build-date', 'x-server-build-date'];
+export const CPA_VERSION_HEADER_KEYS = ['x-cpa-version'];
+export const CPA_BUILD_DATE_HEADER_KEYS = ['x-cpa-build-date'];
+export const HOME_VERSION_HEADER_KEYS = ['x-server-version'];
+export const HOME_BUILD_DATE_HEADER_KEYS = ['x-server-build-date'];
 export const STATUS_UPDATE_INTERVAL_MS = 1000;
 export const LOG_REFRESH_DELAY_MS = 500;
 

@@ -26,6 +26,7 @@ CPA.exe
 build/
 cpa.back*
 up.cpa*
+.codegraph/
 
 # Python
 __pycache__/

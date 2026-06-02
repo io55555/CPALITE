@@ -69,12 +69,6 @@ const openAIKeyStateKey = (providerName: string, apiKey: string) =>
 const isOpenAIKeyEntryDisplayMode = (value: unknown): value is OpenAIKeyEntryDisplayMode =>
   value === 'original' || value === 'table' || value === 'badge';
 
-const headersObjectToText = (headers?: Record<string, string>): string =>
-  Object.entries(headers ?? {})
-    .filter(([k]) => k.trim())
-    .map(([k, v]) => `${k}: ${v}`)
-    .join('\n');
-
 const stripDisableAllRule = (list?: string[]): string[] =>
   (list ?? []).filter((s) => s.trim() !== '*');
 
@@ -97,13 +91,9 @@ function buildInitialForm(
       excludedModelsText: '',
       websockets: brand === 'codex' ? false : undefined,
       cloak:
-        brand === 'claude'
-          ? { mode: '', strictMode: false, sensitiveWordsText: '' }
-          : undefined,
-      testModel:
-        brand === 'openaiCompatibility' || brand === 'claude' ? '' : undefined,
-      apiKeyEntries:
-        brand === 'openaiCompatibility' ? [emptyApiKeyEntry()] : undefined,
+        brand === 'claude' ? { mode: '', strictMode: false, sensitiveWordsText: '' } : undefined,
+      testModel: brand === 'openaiCompatibility' || brand === 'claude' ? '' : undefined,
+      apiKeyEntries: brand === 'openaiCompatibility' ? [emptyApiKeyEntry()] : undefined,
     };
   }
 
@@ -133,9 +123,9 @@ function buildInitialForm(
       testModel: cfg.testModel ?? '',
       apiKeyEntries: cfg.apiKeyEntries?.length
         ? cfg.apiKeyEntries.map((entry) => ({
-            apiKey: entry.apiKey,
+            apiKey: '',
+            existingApiKey: entry.apiKey,
             proxyUrl: entry.proxyUrl ?? '',
-            headersText: headersObjectToText(entry.headers),
             authIndex: entry.authIndex,
           }))
         : [emptyApiKeyEntry()],
@@ -165,15 +155,13 @@ function buildInitialForm(
       ? Object.entries(cfg.headers).map(([k, v]) => ({ key: k, value: String(v) }))
       : [emptyHeader()],
     excludedModelsText: excludedList.join('\n'),
-    websockets:
-      brand === 'codex' ? (cfg as ProviderKeyConfig).websockets === true : undefined,
+    websockets: brand === 'codex' ? (cfg as ProviderKeyConfig).websockets === true : undefined,
     cloak:
       brand === 'claude'
         ? {
             mode: (cfg as ProviderKeyConfig).cloak?.mode ?? '',
             strictMode: (cfg as ProviderKeyConfig).cloak?.strictMode === true,
-            sensitiveWordsText:
-              (cfg as ProviderKeyConfig).cloak?.sensitiveWords?.join('\n') ?? '',
+            sensitiveWordsText: (cfg as ProviderKeyConfig).cloak?.sensitiveWords?.join('\n') ?? '',
           }
         : undefined,
     testModel: brand === 'claude' ? '' : undefined,
@@ -278,9 +266,7 @@ export function BaseProviderForm({
 
   const fallbackAuthIndex = useMemo(() => {
     if (mode !== 'edit' || !resource) return '';
-    return (
-      (resource.raw as { authIndex?: string } | undefined)?.authIndex ?? ''
-    );
+    return (resource.raw as { authIndex?: string } | undefined)?.authIndex ?? '';
   }, [mode, resource]);
 
   const connectivityMessages = useMemo<ConnectivityErrorMessages>(
@@ -289,8 +275,7 @@ export function BaseProviderForm({
       endpointInvalid: t('providersPage.connectivity.endpointInvalid'),
       apiKeyRequired: t('providersPage.connectivity.apiKeyRequired'),
       modelRequired: t('providersPage.connectivity.modelRequired'),
-      timeout: (seconds: number) =>
-        t('providersPage.connectivity.timeout', { seconds }),
+      timeout: (seconds: number) => t('providersPage.connectivity.timeout', { seconds }),
       requestFailed: t('providersPage.connectivity.requestFailed'),
     }),
     [t]
@@ -344,9 +329,7 @@ export function BaseProviderForm({
     const autoLabel = firstName
       ? t('providersPage.form.testModelAutoWith', { name: firstName })
       : t('providersPage.form.testModelAutoEmpty');
-    const opts: Array<{ value: string; label: string }> = [
-      { value: '', label: autoLabel },
-    ];
+    const opts: Array<{ value: string; label: string }> = [{ value: '', label: autoLabel }];
     names.forEach((n) => opts.push({ value: n, label: n }));
     const tm = (form.testModel ?? '').trim();
     if (tm && !seen.has(tm)) {
@@ -426,11 +409,7 @@ export function BaseProviderForm({
     if (descriptor.supportsName && !form.name.trim()) {
       return t('providersPage.form.validation.nameRequired');
     }
-    if (
-      descriptor.supportsApiKey &&
-      mode === 'create' &&
-      !form.apiKey.trim()
-    ) {
+    if (descriptor.supportsApiKey && mode === 'create' && !form.apiKey.trim()) {
       return t('providersPage.form.validation.apiKeyRequired');
     }
     if (descriptor.baseUrlRequired && !form.baseUrl.trim()) {
@@ -683,9 +662,7 @@ export function BaseProviderForm({
               </div>
             ) : null}
             {brand === 'claude' && connectivity.claudeStatus.state === 'error' ? (
-              <div className={styles.connectivityError}>
-                {connectivity.claudeStatus.message}
-              </div>
+              <div className={styles.connectivityError}>{connectivity.claudeStatus.message}</div>
             ) : null}
           </div>
         ) : null}
@@ -726,11 +703,24 @@ export function BaseProviderForm({
       {descriptor.supportsApiKeyEntries && form.apiKeyEntries ? (
         <Collapsible
           label={t('providersPage.form.apiKeyEntriesSection')}
-          hint={`${apiKeyEntries.filter((e) => e.apiKey.trim()).length}`}
+          hint={`${
+            apiKeyEntries.filter((e) => e.apiKey.trim() || e.existingApiKey?.trim()).length
+          }`}
           defaultOpen
         >
           <div className={styles.entriesList}>
-            <div className={styles.entriesToolbar}>
+            <div className={`${styles.entriesToolbar} ${styles.entriesToolbarSplit}`}>
+              {/* Add entry button on the left */}
+              <button
+                type="button"
+                className={styles.addBtn}
+                disabled={mutating}
+                onClick={() => updateField('apiKeyEntries', [...apiKeyEntries, emptyApiKeyEntry()])}
+              >
+                <IconPlus size={12} />
+                <span>{t('providersPage.form.addApiKeyEntry')}</span>
+              </button>
+              {/* Test all button on the right */}
               <button
                 type="button"
                 className={styles.connectivityBtn}
@@ -1034,9 +1024,7 @@ export function BaseProviderForm({
                   onChange={(e) =>
                     updateField(
                       'headers',
-                      headersList.map((it, i) =>
-                        i === idx ? { ...it, key: e.target.value } : it
-                      )
+                      headersList.map((it, i) => (i === idx ? { ...it, key: e.target.value } : it))
                     )
                   }
                   disabled={mutating}
@@ -1126,9 +1114,7 @@ export function BaseProviderForm({
                   onChange={(e) =>
                     updateField(
                       'models',
-                      modelsList.map((it, i) =>
-                        i === idx ? { ...it, name: e.target.value } : it
-                      )
+                      modelsList.map((it, i) => (i === idx ? { ...it, name: e.target.value } : it))
                     )
                   }
                   disabled={mutating}
@@ -1140,9 +1126,7 @@ export function BaseProviderForm({
                   onChange={(e) =>
                     updateField(
                       'models',
-                      modelsList.map((it, i) =>
-                        i === idx ? { ...it, alias: e.target.value } : it
-                      )
+                      modelsList.map((it, i) => (i === idx ? { ...it, alias: e.target.value } : it))
                     )
                   }
                   disabled={mutating}
@@ -1178,9 +1162,7 @@ export function BaseProviderForm({
       {descriptor.supportsExcludedModels ? (
         <Collapsible label={t('providersPage.form.excludedSection')}>
           <div className={styles.field}>
-            <span className={styles.labelHint}>
-              {t('providersPage.form.excludedHint')}
-            </span>
+            <span className={styles.labelHint}>{t('providersPage.form.excludedHint')}</span>
             <textarea
               className={styles.textarea}
               rows={4}
@@ -1197,9 +1179,7 @@ export function BaseProviderForm({
         <Collapsible label={t('providersPage.form.cloakSection')}>
           <div className={styles.section}>
             <div className={styles.field}>
-              <label className={styles.label}>
-                {t('providersPage.form.cloakMode')}
-              </label>
+              <label className={styles.label}>{t('providersPage.form.cloakMode')}</label>
               <input
                 className={styles.input}
                 value={form.cloak.mode}
@@ -1221,16 +1201,12 @@ export function BaseProviderForm({
               </span>
             </label>
             <div className={styles.field}>
-              <label className={styles.label}>
-                {t('providersPage.form.cloakSensitiveWords')}
-              </label>
+              <label className={styles.label}>{t('providersPage.form.cloakSensitiveWords')}</label>
               <textarea
                 className={styles.textarea}
                 rows={3}
                 value={form.cloak.sensitiveWordsText}
-                onChange={(e) =>
-                  updateCloak('sensitiveWordsText', e.target.value)
-                }
+                onChange={(e) => updateCloak('sensitiveWordsText', e.target.value)}
                 disabled={mutating}
               />
             </div>

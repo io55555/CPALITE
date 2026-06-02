@@ -18,7 +18,10 @@ export interface AuthState {
   rememberPassword: boolean;
   serverVersion: string | null;
   serverBuildDate: string | null;
+  serverRuntimeKind: ServerRuntimeKind;
 }
+
+export type ServerRuntimeKind = 'unknown' | 'cpa' | 'home';
 
 // 连接状态
 export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'error';

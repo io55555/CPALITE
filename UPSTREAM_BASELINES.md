@@ -2,13 +2,13 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: 7d9980e8fa2c0ffe58c60550774d8b61c0a224dd
-- tag: v7.1.29
+- commit: 02d0d92a8e4623fe0e355b23f539dc184452d6ff
+- tag: v7.1.40
 
 ## Cli-Proxy-API-Management-Center
 - branch: main
-- commit: 87702bb5a0625072f03cbc49f4da9d918a7910c0
-- tag: v1.14.0
+- commit: 6a567bbbbbdf766785e7650b82d23d7f3d689835
+- tag: v1.15.0
 
 ## CLIProxyAPI-Pro
 - repository: https://github.com/ssfun/CLIProxyAPI-Pro
