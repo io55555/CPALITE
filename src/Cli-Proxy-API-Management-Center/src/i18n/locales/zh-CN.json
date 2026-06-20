@@ -628,6 +628,8 @@
     "prefix_proxy_saved_success": "已更新认证文件 \"{{name}}\"",
     "quota_refresh_success": "已刷新 \"{{name}}\" 的额度",
     "quota_refresh_failed": "刷新 \"{{name}}\" 的额度失败：{{message}}",
+    "quota_refresh_single": "刷新此凭证",
+    "quota_refresh_hint": "仅刷新此凭证的额度",
     "sort_name_asc": "名称 A-Z",
     "sort_plan_desc": "套餐高到低",
     "sort_plan_asc": "套餐低到高"
@@ -1083,7 +1085,33 @@
     "visual": {
       "notice": "可视化模式覆盖常用字段，未覆盖的配置仍需在源文件模式中查看或编辑。",
       "quick_jump": "快速跳转",
+      "mode": {
+        "label": "可视化模式",
+        "simple": "简洁",
+        "full": "完整",
+        "more_settings": "更多设置",
+        "validation_banner": "部分配置项存在校验问题，需切换到完整模式查看。",
+        "switch_to_full": "切换到完整模式"
+      },
+      "search": {
+        "placeholder": "搜索配置项",
+        "no_results": "没有匹配的配置项"
+      },
       "sections": {
+        "connectivity": {
+          "title": "连接与认证",
+          "description": "服务器监听、认证目录、API 密钥、TLS 与远程管理设置"
+        },
+        "logging": {
+          "title": "日志与统计",
+          "description": "调试日志、文件日志、用量统计与队列保留设置"
+        },
+        "advanced": {
+          "title": "高级设置",
+          "description": "插件、签名校验与低频高级选项",
+          "plugins_title": "插件系统",
+          "signature_title": "Antigravity 签名"
+        },
         "server": {
           "title": "服务器配置",
           "description": "基础服务器设置",
@@ -1132,6 +1160,13 @@
           "usage_statistics_enabled_desc": "允许 CPA 发布请求用量事件，供 Usage Service 持续消费",
           "redis_usage_retention": "Redis 用量队列保留秒数",
           "redis_usage_retention_hint": "RESP 接口 LPOP/RPOP 用量队列的内存保留时间，最大 3600 秒",
+          "plugins_enabled": "启用插件",
+          "plugins_enabled_desc": "启用内置插件运行时与插件加载流程",
+          "plugin_store_sources": "插件商店源",
+          "plugin_store_sources_desc": "配置可用的插件商店索引地址",
+          "plugin_store_sources_label": "商店源地址",
+          "plugin_store_sources_placeholder": "https://example.com/plugins.json",
+          "plugin_store_sources_hint": "每行一个插件商店源；留空时使用默认来源。",
           "antigravity_signature_cache": "启用 Antigravity 签名缓存",
           "antigravity_signature_cache_desc": "优先使用并校验缓存的 thinking block 签名",
           "antigravity_signature_strict": "严格校验旁路签名",
@@ -1144,6 +1179,8 @@
           "description": "Claude 与 Codex OAuth 请求在客户端缺少 Header 时使用的默认值",
           "claude_title": "Claude Header Defaults",
           "codex_title": "Codex Header Defaults",
+          "codex_identity_confuse": "混淆 Codex 身份",
+          "codex_identity_confuse_desc": "按凭证稳定变换 Codex 默认身份 Header，降低多账号指纹一致性",
           "user_agent": "User-Agent",
           "package_version": "Package Version",
           "runtime_version": "Runtime Version",
@@ -1169,6 +1206,8 @@
           "disable_image_generation_false": "false（启用）",
           "disable_image_generation_true": "true（全部禁用）",
           "disable_image_generation_chat": "chat（仅禁用聊天注入）",
+          "gpt_image_2_base_model": "GPT Image 2 基础模型",
+          "gpt_image_2_base_model_hint": "用于 GPT Image 2 请求转换的基础模型名，留空则使用默认值",
           "routing_strategy": "路由策略",
           "routing_strategy_hint": "选择凭据选择策略",
           "strategy_round_robin": "轮询 (Round Robin)",

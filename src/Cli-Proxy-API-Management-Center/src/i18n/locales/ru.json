@@ -1064,7 +1064,33 @@
     "visual": {
       "notice": "Визуальный режим охватывает основные поля. Остальные параметры config.yaml по-прежнему нужно проверять или редактировать в режиме исходника.",
       "quick_jump": "Быстрый переход",
+      "mode": {
+        "label": "Визуальный режим",
+        "simple": "Простой",
+        "full": "Полный",
+        "more_settings": "Больше настроек",
+        "validation_banner": "У некоторых настроек есть ошибки проверки. Переключитесь в полный режим, чтобы просмотреть их.",
+        "switch_to_full": "Перейти в полный режим"
+      },
+      "search": {
+        "placeholder": "Поиск настроек",
+        "no_results": "Подходящие настройки не найдены"
+      },
       "sections": {
+        "connectivity": {
+          "title": "Подключение и авторизация",
+          "description": "Порт сервера, каталог auth, API-ключи, TLS и удалённое управление"
+        },
+        "logging": {
+          "title": "Журналы и статистика",
+          "description": "Отладочные журналы, файлы журналов, статистика использования и хранение очередей"
+        },
+        "advanced": {
+          "title": "Расширенные настройки",
+          "description": "Плагины, проверка подписей и редко используемые расширенные параметры",
+          "plugins_title": "Система плагинов",
+          "signature_title": "Подписи Antigravity"
+        },
         "server": {
           "title": "Настройки сервера",
           "description": "Базовые параметры сервера",
@@ -1113,6 +1139,13 @@
           "usage_statistics_enabled_desc": "Агрегировать статистику использования запросов в памяти",
           "redis_usage_retention": "Хранение очереди Redis usage (сек)",
           "redis_usage_retention_hint": "Время хранения вывода RESP LPOP/RPOP в памяти, максимум 3600 секунд",
+          "plugins_enabled": "Включить плагины",
+          "plugins_enabled_desc": "Включить встроенный runtime плагинов и загрузку плагинов",
+          "plugin_store_sources": "Источники магазина плагинов",
+          "plugin_store_sources_desc": "Настройте URL индексов доступных магазинов плагинов",
+          "plugin_store_sources_label": "URL источника магазина",
+          "plugin_store_sources_placeholder": "https://example.com/plugins.json",
+          "plugin_store_sources_hint": "Один источник магазина плагинов в строке. Оставьте пустым для источников по умолчанию.",
           "antigravity_signature_cache": "Включить кэш подписей Antigravity",
           "antigravity_signature_cache_desc": "Предпочитать и проверять кэшированные подписи thinking-блоков",
           "antigravity_signature_strict": "Строгая проверка bypass-подписи",
@@ -1123,6 +1156,8 @@
           "description": "Заголовки по умолчанию для OAuth-запросов Claude и Codex, когда клиент их не отправил",
           "claude_title": "Claude Header Defaults",
           "codex_title": "Codex Header Defaults",
+          "codex_identity_confuse": "Смешивать identity Codex",
+          "codex_identity_confuse_desc": "Стабильно изменять стандартные identity-заголовки Codex для каждой учётной записи, чтобы снизить совпадение отпечатков",
           "user_agent": "User-Agent",
           "package_version": "Package Version",
           "runtime_version": "Runtime Version",
@@ -1148,6 +1183,8 @@
           "disable_image_generation_false": "false (включено)",
           "disable_image_generation_true": "true (отключено везде)",
           "disable_image_generation_chat": "chat (только отключить chat-инъекцию)",
+          "gpt_image_2_base_model": "Базовая модель GPT Image 2",
+          "gpt_image_2_base_model_hint": "Базовая модель для преобразования запросов GPT Image 2. Оставьте пустым, чтобы использовать значение по умолчанию.",
           "routing_strategy": "Стратегия маршрутизации",
           "routing_strategy_hint": "Выберите стратегию подбора учётных данных",
           "strategy_round_robin": "По кругу",

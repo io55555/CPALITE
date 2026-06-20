@@ -104,40 +104,46 @@ export function parseIdTokenPayload(value: unknown): Record<string, unknown> | n
 }
 
 export function parseAntigravityPayload(payload: unknown): Record<string, unknown> | null {
-  const toRecord = (value: unknown): Record<string, unknown> | null => {
-    if (value === undefined || value === null) return null;
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed as Record<string, unknown>;
-        }
-      } catch {
-        return null;
-      }
-      return null;
-    }
-    if (typeof value === 'object' && !Array.isArray(value)) {
-      return value as Record<string, unknown>;
-    }
-    return null;
-  };
-
-  const parsed = toRecord(payload);
+  const parsed = parseApiPayloadRecord(payload);
   if (!parsed) return null;
 
-  if ('models' in parsed) {
+  if ('models' in parsed || 'groups' in parsed) {
     return parsed;
   }
 
-  const nested = toRecord(parsed.body);
+  const nested = parseApiPayloadRecord(parsed.body ?? parsed.bodyText);
   if (nested) {
     return nested;
   }
 
   return parsed;
+}
+
+export function parseApiPayloadRecord(payload: unknown): Record<string, unknown> | null {
+  if (payload === undefined || payload === null) return null;
+  if (typeof payload === 'string') {
+    const trimmed = payload.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  if (typeof payload === 'object' && !Array.isArray(payload)) {
+    const record = payload as Record<string, unknown>;
+    const nested = record.body ?? record.bodyText;
+    if (nested !== undefined && nested !== null) {
+      const parsedNested = parseApiPayloadRecord(nested);
+      if (parsedNested) return parsedNested;
+    }
+    return record;
+  }
+  return null;
 }
 
 export function parseClaudeUsagePayload(payload: unknown): ClaudeUsagePayload | null {
@@ -175,37 +181,11 @@ export function parseCodexUsagePayload(payload: unknown): CodexUsagePayload | nu
 }
 
 export function parseGeminiCliQuotaPayload(payload: unknown): GeminiCliQuotaPayload | null {
-  if (payload === undefined || payload === null) return null;
-  if (typeof payload === 'string') {
-    const trimmed = payload.trim();
-    if (!trimmed) return null;
-    try {
-      return JSON.parse(trimmed) as GeminiCliQuotaPayload;
-    } catch {
-      return null;
-    }
-  }
-  if (typeof payload === 'object') {
-    return payload as GeminiCliQuotaPayload;
-  }
-  return null;
+  return parseApiPayloadRecord(payload) as GeminiCliQuotaPayload | null;
 }
 
 export function parseGeminiCliCodeAssistPayload(payload: unknown): GeminiCliCodeAssistPayload | null {
-  if (payload === undefined || payload === null) return null;
-  if (typeof payload === 'string') {
-    const trimmed = payload.trim();
-    if (!trimmed) return null;
-    try {
-      return JSON.parse(trimmed) as GeminiCliCodeAssistPayload;
-    } catch {
-      return null;
-    }
-  }
-  if (typeof payload === 'object') {
-    return payload as GeminiCliCodeAssistPayload;
-  }
-  return null;
+  return parseApiPayloadRecord(payload) as GeminiCliCodeAssistPayload | null;
 }
 
 export function parseKimiUsagePayload(payload: unknown): KimiUsagePayload | null {

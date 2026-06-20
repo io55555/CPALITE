@@ -197,6 +197,16 @@ const fetchAntigravityQuota = async (
 
       hadSuccess = true;
       const payload = parseAntigravityPayload(result.body ?? result.bodyText);
+      if (Array.isArray(payload?.groups)) {
+        const groups = buildAntigravityQuotaGroups(payload);
+        if (groups.length === 0) {
+          lastError = t('antigravity_quota.empty_models');
+          continue;
+        }
+
+        return groups;
+      }
+
       const models = payload?.models;
       if (!models || typeof models !== 'object' || Array.isArray(models)) {
         lastError = t('antigravity_quota.empty_models');

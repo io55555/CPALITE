@@ -628,6 +628,8 @@
     "prefix_proxy_saved_success": "Updated auth file \"{{name}}\" successfully",
     "quota_refresh_success": "Quota refreshed for \"{{name}}\"",
     "quota_refresh_failed": "Failed to refresh quota for \"{{name}}\": {{message}}",
+    "quota_refresh_single": "Refresh this credential",
+    "quota_refresh_hint": "Refresh quota for this credential only",
     "sort_name_asc": "Name A-Z",
     "sort_plan_desc": "Plan high to low",
     "sort_plan_asc": "Plan low to high"
@@ -1094,7 +1096,33 @@
     "visual": {
       "notice": "Visual mode covers common fields. Review or edit unsupported config.yaml entries in source mode.",
       "quick_jump": "Quick Jump",
+      "mode": {
+        "label": "Visual mode",
+        "simple": "Simple",
+        "full": "Full",
+        "more_settings": "More settings",
+        "validation_banner": "Some settings have validation issues. Switch to full mode to review them.",
+        "switch_to_full": "Switch to full mode"
+      },
+      "search": {
+        "placeholder": "Search settings",
+        "no_results": "No matching settings"
+      },
       "sections": {
+        "connectivity": {
+          "title": "Connectivity & Auth",
+          "description": "Server listener, auth directory, API keys, TLS, and remote management settings"
+        },
+        "logging": {
+          "title": "Logging & Usage",
+          "description": "Debug logs, file logs, usage statistics, and queue retention settings"
+        },
+        "advanced": {
+          "title": "Advanced Settings",
+          "description": "Plugins, signature validation, and less frequently used advanced options",
+          "plugins_title": "Plugin System",
+          "signature_title": "Antigravity Signatures"
+        },
         "server": {
           "title": "Server Configuration",
           "description": "Basic server settings",
@@ -1143,6 +1171,13 @@
           "usage_statistics_enabled_desc": "Allow CPA to publish request usage events for Usage Service to consume continuously",
           "redis_usage_retention": "Redis Usage Queue Retention (seconds)",
           "redis_usage_retention_hint": "In-memory retention for RESP LPOP/RPOP usage output, max 3600 seconds",
+          "plugins_enabled": "Enable Plugins",
+          "plugins_enabled_desc": "Enable the built-in plugin runtime and plugin loading flow",
+          "plugin_store_sources": "Plugin Store Sources",
+          "plugin_store_sources_desc": "Configure available plugin store index URLs",
+          "plugin_store_sources_label": "Store source URL",
+          "plugin_store_sources_placeholder": "https://example.com/plugins.json",
+          "plugin_store_sources_hint": "One plugin store source per line. Leave empty to use the default sources.",
           "antigravity_signature_cache": "Enable Antigravity Signature Cache",
           "antigravity_signature_cache_desc": "Prefer and validate cached thinking-block signatures",
           "antigravity_signature_strict": "Strict Bypass Signature Validation",
@@ -1155,6 +1190,8 @@
           "description": "Default headers for Claude and Codex OAuth requests when the client omits them",
           "claude_title": "Claude Header Defaults",
           "codex_title": "Codex Header Defaults",
+          "codex_identity_confuse": "Confuse Codex Identity",
+          "codex_identity_confuse_desc": "Stabilize varied Codex default identity headers per credential to reduce identical multi-account fingerprints",
           "user_agent": "User-Agent",
           "package_version": "Package Version",
           "runtime_version": "Runtime Version",
@@ -1180,6 +1217,8 @@
           "disable_image_generation_false": "false (enabled)",
           "disable_image_generation_true": "true (disabled everywhere)",
           "disable_image_generation_chat": "chat (disable chat injection only)",
+          "gpt_image_2_base_model": "GPT Image 2 Base Model",
+          "gpt_image_2_base_model_hint": "Base model used when translating GPT Image 2 requests. Leave empty to use the default.",
           "routing_strategy": "Routing Strategy",
           "routing_strategy_hint": "Select credential selection strategy",
           "strategy_round_robin": "Round Robin",

@@ -622,6 +622,8 @@
     "prefix_proxy_saved_success": "已更新驗證檔案「{{name}}」",
     "quota_refresh_success": "已重新整理「{{name}}」的配額",
     "quota_refresh_failed": "重新整理「{{name}}」的配額失敗：{{message}}",
+    "quota_refresh_single": "重新整理此憑證",
+    "quota_refresh_hint": "僅重新整理此憑證的配額",
     "sort_name_asc": "名稱 A-Z",
     "sort_plan_desc": "方案高到低",
     "sort_plan_asc": "方案低到高"
@@ -1103,7 +1105,33 @@
     "visual": {
       "notice": "視覺化模式涵蓋常用欄位，未涵蓋的設定仍需在原始檔模式中查看或編輯。",
       "quick_jump": "快速跳轉",
+      "mode": {
+        "label": "視覺化模式",
+        "simple": "簡潔",
+        "full": "完整",
+        "more_settings": "更多設定",
+        "validation_banner": "部分設定項存在校驗問題，需切換到完整模式查看。",
+        "switch_to_full": "切換到完整模式"
+      },
+      "search": {
+        "placeholder": "搜尋設定項",
+        "no_results": "沒有符合的設定項"
+      },
       "sections": {
+        "connectivity": {
+          "title": "連線與驗證",
+          "description": "伺服器監聽、驗證目錄、API 金鑰、TLS 與遠端管理設定"
+        },
+        "logging": {
+          "title": "記錄與統計",
+          "description": "除錯記錄、檔案記錄、用量統計與佇列保留設定"
+        },
+        "advanced": {
+          "title": "進階設定",
+          "description": "外掛、簽名校驗與較少使用的進階選項",
+          "plugins_title": "外掛系統",
+          "signature_title": "Antigravity 簽名"
+        },
         "server": {
           "title": "伺服器設定",
           "description": "基本伺服器設定",
@@ -1152,6 +1180,13 @@
           "usage_statistics_enabled_desc": "允許 CPA 發布請求用量事件，供 Usage Service 持續消費",
           "redis_usage_retention": "Redis 用量佇列保留秒數",
           "redis_usage_retention_hint": "RESP 介面 LPOP/RPOP 用量佇列的記憶體保留時間，最大 3600 秒",
+          "plugins_enabled": "啟用外掛",
+          "plugins_enabled_desc": "啟用內建外掛執行時與外掛載入流程",
+          "plugin_store_sources": "外掛商店來源",
+          "plugin_store_sources_desc": "設定可用的外掛商店索引位址",
+          "plugin_store_sources_label": "商店來源位址",
+          "plugin_store_sources_placeholder": "https://example.com/plugins.json",
+          "plugin_store_sources_hint": "每行一個外掛商店來源；留空時使用預設來源。",
           "antigravity_signature_cache": "啟用 Antigravity 簽名快取",
           "antigravity_signature_cache_desc": "優先使用並校驗快取的 thinking block 簽名",
           "antigravity_signature_strict": "嚴格校驗旁路簽名",
@@ -1164,6 +1199,8 @@
           "description": "Claude 與 Codex OAuth 請求在客戶端缺少 Header 時使用的預設值",
           "claude_title": "Claude Header Defaults",
           "codex_title": "Codex Header Defaults",
+          "codex_identity_confuse": "混淆 Codex 身分",
+          "codex_identity_confuse_desc": "按憑證穩定變換 Codex 預設身分 Header，降低多帳號指紋一致性",
           "user_agent": "User-Agent",
           "package_version": "Package Version",
           "runtime_version": "Runtime Version",
@@ -1189,6 +1226,8 @@
           "disable_image_generation_false": "false（啟用）",
           "disable_image_generation_true": "true（全部停用）",
           "disable_image_generation_chat": "chat（僅停用聊天注入）",
+          "gpt_image_2_base_model": "GPT Image 2 基礎模型",
+          "gpt_image_2_base_model_hint": "用於 GPT Image 2 請求轉換的基礎模型名稱，留空則使用預設值",
           "routing_strategy": "路由策略",
           "routing_strategy_hint": "選擇憑證選擇策略",
           "strategy_round_robin": "輪詢（Round Robin）",
