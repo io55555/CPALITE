@@ -131,14 +131,30 @@ export function resolveGeminiCliProjectId(file: AuthFileItem): string | null {
       ? (file.attributes as Record<string, unknown>)
       : null;
 
-  const candidates = [
+  const directCandidates = [
+    file.project_id,
+    file.projectId,
+    file['project_id'],
+    file['projectId'],
+    metadata?.project_id,
+    metadata?.projectId,
+    attributes?.project_id,
+    attributes?.projectId,
+  ];
+
+  for (const candidate of directCandidates) {
+    const projectId = normalizeStringValue(candidate);
+    if (projectId) return projectId;
+  }
+
+  const accountCandidates = [
     file.account,
     file['account'],
     metadata?.account,
     attributes?.account
   ];
 
-  for (const candidate of candidates) {
+  for (const candidate of accountCandidates) {
     const projectId = extractGeminiCliProjectId(candidate);
     if (projectId) return projectId;
   }

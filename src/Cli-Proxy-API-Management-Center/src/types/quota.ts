@@ -11,25 +11,43 @@ export type ResolvedTheme = 'light' | 'dark';
 export interface AntigravityQuotaSummaryBucketPayload {
   bucketId?: string;
   bucket_id?: string;
+  id?: string;
+  name?: string;
   displayName?: string;
   display_name?: string;
+  display_name_key?: string;
   window?: string;
+  timeWindow?: string;
+  time_window?: string;
   resetTime?: string;
   reset_time?: string;
+  resetAt?: string;
+  reset_at?: string;
   remainingFraction?: number | string;
   remaining_fraction?: number | string;
+  remaining?: number | string;
+  remainingPercentage?: number | string;
+  remaining_percentage?: number | string;
+  remainingUsagePercentage?: number | string;
+  remaining_usage_percentage?: number | string;
   description?: string;
 }
 
 export interface AntigravityQuotaSummaryGroupPayload {
+  id?: string;
+  name?: string;
   displayName?: string;
   display_name?: string;
   description?: string;
   buckets?: AntigravityQuotaSummaryBucketPayload[];
+  quotaBuckets?: AntigravityQuotaSummaryBucketPayload[];
+  quota_buckets?: AntigravityQuotaSummaryBucketPayload[];
 }
 
 export interface AntigravityQuotaSummaryPayload {
   groups?: AntigravityQuotaSummaryGroupPayload[];
+  quotaGroups?: AntigravityQuotaSummaryGroupPayload[];
+  quota_groups?: AntigravityQuotaSummaryGroupPayload[];
 }
 
 export interface GeminiCliQuotaBucket {

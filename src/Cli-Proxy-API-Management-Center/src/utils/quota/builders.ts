@@ -7,6 +7,7 @@ import type {
   AntigravityQuotaGroup,
   AntigravityModelsPayload,
   AntigravityQuotaInfo,
+  AntigravityQuotaSummaryBucketPayload,
   AntigravityQuotaSummaryPayload,
   GeminiCliParsedBucket,
   GeminiCliQuotaBucketState,
@@ -17,7 +18,7 @@ import type {
   KimiQuotaRow,
 } from '@/types';
 import { GEMINI_CLI_GROUP_LOOKUP, GEMINI_CLI_GROUP_ORDER } from './constants';
-import { normalizeQuotaFraction, normalizeStringValue } from './parsers';
+import { normalizeNumberValue, normalizeQuotaFraction, normalizeStringValue } from './parsers';
 import { isIgnoredGeminiCliModel } from './validators';
 
 const ANTIGRAVITY_BUCKET_WINDOW_ORDER = new Map<string, number>([
@@ -151,38 +152,70 @@ function getAntigravityWindowOrder(bucket: AntigravityQuotaBucket): number {
   return ANTIGRAVITY_BUCKET_WINDOW_ORDER.get(window) ?? Number.MAX_SAFE_INTEGER;
 }
 
+function pickAntigravityRemainingFraction(bucket: AntigravityQuotaSummaryBucketPayload): number | null {
+  const fraction = normalizeQuotaFraction(
+    bucket.remainingFraction ??
+      bucket.remaining_fraction ??
+      bucket.remaining
+  );
+  if (fraction !== null) return fraction;
+
+  const percentage = normalizeNumberValue(
+    bucket.remainingPercentage ??
+      bucket.remaining_percentage ??
+      bucket.remainingUsagePercentage ??
+      bucket.remaining_usage_percentage
+  );
+  if (percentage === null) return null;
+  return percentage > 1 ? percentage / 100 : percentage;
+}
+
 export function buildAntigravityQuotaGroups(
   payload: AntigravityQuotaSummaryPayload | AntigravityModelsPayload
 ): AntigravityQuotaGroup[] {
-  const rawGroups = (payload as AntigravityQuotaSummaryPayload).groups;
+  const summaryPayload = payload as AntigravityQuotaSummaryPayload;
+  const rawGroups =
+    summaryPayload.groups ?? summaryPayload.quotaGroups ?? summaryPayload.quota_groups;
   const groups = Array.isArray(rawGroups) ? rawGroups : [];
 
   if (groups.length > 0) {
     return groups.map((group, groupIndex): AntigravityQuotaGroup | null => {
       const label =
-        normalizeStringValue(group.displayName ?? group.display_name) ??
+        normalizeStringValue(group.displayName ?? group.display_name ?? group.name ?? group.id) ??
         `Quota Group ${groupIndex + 1}`;
       const groupId = toStableId(label, `quota-group-${groupIndex + 1}`);
-      const buckets = Array.isArray(group.buckets) ? group.buckets : [];
+      const buckets = Array.isArray(group.buckets)
+        ? group.buckets
+        : Array.isArray(group.quotaBuckets)
+          ? group.quotaBuckets
+          : Array.isArray(group.quota_buckets)
+            ? group.quota_buckets
+            : [];
       const parsedBuckets = buckets
         .map((bucket, bucketIndex): AntigravityQuotaBucket | null => {
-          const remainingFraction = normalizeQuotaFraction(
-            bucket.remainingFraction ?? bucket.remaining_fraction
-          );
+          const remainingFraction = pickAntigravityRemainingFraction(bucket);
           if (remainingFraction === null) return null;
 
-          const window = normalizeStringValue(bucket.window) ?? undefined;
+          const window =
+            normalizeStringValue(bucket.window ?? bucket.timeWindow ?? bucket.time_window) ??
+            undefined;
           const rawId =
-            normalizeStringValue(bucket.bucketId ?? bucket.bucket_id) ??
+            normalizeStringValue(bucket.bucketId ?? bucket.bucket_id ?? bucket.id ?? bucket.name) ??
             `${groupId}-${window ?? `bucket-${bucketIndex + 1}`}`;
-          const label = normalizeStringValue(bucket.displayName ?? bucket.display_name) ?? rawId;
+          const label =
+            normalizeStringValue(
+              bucket.displayName ?? bucket.display_name ?? bucket.display_name_key ?? bucket.name
+            ) ?? rawId;
 
           return {
             id: rawId,
             label,
             window,
             remainingFraction,
-            resetTime: normalizeStringValue(bucket.resetTime ?? bucket.reset_time) ?? undefined,
+            resetTime:
+              normalizeStringValue(
+                bucket.resetTime ?? bucket.reset_time ?? bucket.resetAt ?? bucket.reset_at
+              ) ?? undefined,
             description: normalizeStringValue(bucket.description) ?? undefined,
           };
         })

@@ -107,7 +107,7 @@ export function parseAntigravityPayload(payload: unknown): Record<string, unknow
   const parsed = parseApiPayloadRecord(payload);
   if (!parsed) return null;
 
-  if ('models' in parsed || 'groups' in parsed) {
+  if ('models' in parsed || 'groups' in parsed || 'quotaGroups' in parsed || 'quota_groups' in parsed) {
     return parsed;
   }
 

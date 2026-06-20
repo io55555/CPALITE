@@ -8,6 +8,7 @@ import type { TFunction } from 'i18next';
 import type {
   AntigravityQuotaGroup,
   AntigravityModelsPayload,
+  AntigravityQuotaSubscription,
   AntigravityQuotaState,
   AuthFileItem,
   ClaudeExtraUsage,
@@ -29,7 +30,12 @@ import type {
   KimiQuotaRow,
   KimiQuotaState,
 } from '@/types';
-import { apiCallApi, authFilesApi, getApiCallErrorMessage } from '@/services/api';
+import {
+  apiCallApi,
+  authFilesApi,
+  antigravitySubscriptionApi,
+  getApiCallErrorMessage,
+} from '@/services/api';
 import { useQuotaStore } from '@/stores';
 import {
   ANTIGRAVITY_QUOTA_URLS,
@@ -161,13 +167,28 @@ const resolveAntigravityProjectId = async (file: AuthFileItem): Promise<string> 
 const fetchAntigravityQuota = async (
   file: AuthFileItem,
   t: TFunction
-): Promise<AntigravityQuotaGroup[]> => {
+): Promise<{
+  groups: AntigravityQuotaGroup[];
+  subscription: AntigravityQuotaSubscription | null;
+}> => {
   const rawAuthIndex = file['auth_index'] ?? file.authIndex;
   const authIndex = normalizeAuthIndex(rawAuthIndex);
   if (!authIndex) {
     throw new Error(t('antigravity_quota.missing_auth_index'));
   }
 
+  const subscriptionPromise = antigravitySubscriptionApi
+    .get(authIndex)
+    .then((subscription): AntigravityQuotaSubscription | null =>
+      subscription
+        ? {
+            plan: subscription.plan,
+            tierName: subscription.tierName,
+            tierId: subscription.tierId,
+          }
+        : null
+    )
+    .catch(() => null);
   const projectId = await resolveAntigravityProjectId(file);
   const requestBody = JSON.stringify({ project: projectId });
 
@@ -197,14 +218,18 @@ const fetchAntigravityQuota = async (
 
       hadSuccess = true;
       const payload = parseAntigravityPayload(result.body ?? result.bodyText);
-      if (Array.isArray(payload?.groups)) {
+      if (
+        Array.isArray(payload?.groups) ||
+        Array.isArray(payload?.quotaGroups) ||
+        Array.isArray(payload?.quota_groups)
+      ) {
         const groups = buildAntigravityQuotaGroups(payload);
         if (groups.length === 0) {
           lastError = t('antigravity_quota.empty_models');
           continue;
         }
 
-        return groups;
+        return { groups, subscription: await subscriptionPromise };
       }
 
       const models = payload?.models;
@@ -219,7 +244,7 @@ const fetchAntigravityQuota = async (
         continue;
       }
 
-      return groups;
+      return { groups, subscription: await subscriptionPromise };
     } catch (err: unknown) {
       lastError = err instanceof Error ? err.message : t('common.unknown_error');
       const status = getStatusFromError(err);
@@ -233,7 +258,7 @@ const fetchAntigravityQuota = async (
   }
 
   if (hadSuccess) {
-    return [];
+    return { groups: [], subscription: await subscriptionPromise };
   }
 
   throw createStatusError(lastError || t('common.unknown_error'), priorityStatus ?? lastStatus);
@@ -710,9 +735,29 @@ const renderAntigravityItems = (
   const { styles: styleMap, QuotaProgressBar } = helpers;
   const { createElement: h, Fragment } = React;
   const groups = quota.groups ?? [];
+  const subscription = quota.subscription ?? null;
+  const nodes: ReactNode[] = [];
+
+  if (subscription?.tierName || subscription?.plan || subscription?.tierId) {
+    nodes.push(
+      h(
+        'div',
+        { key: 'subscription', className: styleMap.codexPlan },
+        h('span', { className: styleMap.codexPlanLabel }, t('codex_quota.plan_label')),
+        h(
+          'span',
+          { className: styleMap.codexPlanValue },
+          subscription.tierName ?? subscription.plan ?? subscription.tierId
+        )
+      )
+    );
+  }
 
   if (groups.length === 0) {
-    return h('div', { className: styleMap.quotaMessage }, t('antigravity_quota.empty_models'));
+    nodes.push(
+      h('div', { key: 'empty', className: styleMap.quotaMessage }, t('antigravity_quota.empty_models'))
+    );
+    return h(Fragment, null, ...nodes);
   }
 
   const renderRow = (key: string, label: string, remainingFraction: number, resetTime?: string, title?: string) => {
@@ -742,9 +787,7 @@ const renderAntigravityItems = (
     );
   };
 
-  return h(
-    Fragment,
-    null,
+  nodes.push(
     ...groups.flatMap((group) => {
       if (group.buckets?.length) {
         return group.buckets.map((bucket) =>
@@ -763,6 +806,8 @@ const renderAntigravityItems = (
       return [renderRow(group.id, group.label, remainingFraction, group.resetTime, modelTitle)];
     })
   );
+
+  return h(Fragment, null, ...nodes);
 };
 
 const PREMIUM_GEMINI_CLI_TIER_IDS = new Set(['g1-ultra-tier']);
@@ -1179,7 +1224,10 @@ export const CLAUDE_CONFIG: QuotaConfig<
   renderQuotaItems: renderClaudeItems,
 };
 
-export const ANTIGRAVITY_CONFIG: QuotaConfig<AntigravityQuotaState, AntigravityQuotaGroup[]> = {
+export const ANTIGRAVITY_CONFIG: QuotaConfig<
+  AntigravityQuotaState,
+  { groups: AntigravityQuotaGroup[]; subscription: AntigravityQuotaSubscription | null }
+> = {
   type: 'antigravity',
   i18nPrefix: 'antigravity_quota',
   cardIdleMessageKey: 'quota_management.card_idle_hint',
@@ -1188,7 +1236,11 @@ export const ANTIGRAVITY_CONFIG: QuotaConfig<AntigravityQuotaState, AntigravityQ
   storeSelector: (state) => state.antigravityQuota,
   storeSetter: 'setAntigravityQuota',
   buildLoadingState: () => ({ status: 'loading', groups: [] }),
-  buildSuccessState: (groups) => ({ status: 'success', groups }),
+  buildSuccessState: (data) => ({
+    status: 'success',
+    groups: data.groups,
+    subscription: data.subscription,
+  }),
   buildErrorState: (message, status) => ({
     status: 'error',
     groups: [],
