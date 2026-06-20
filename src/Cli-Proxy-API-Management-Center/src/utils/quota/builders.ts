@@ -5,6 +5,8 @@
 import type {
   AntigravityQuotaBucket,
   AntigravityQuotaGroup,
+  AntigravityModelsPayload,
+  AntigravityQuotaInfo,
   AntigravityQuotaSummaryPayload,
   GeminiCliParsedBucket,
   GeminiCliQuotaBucketState,
@@ -150,12 +152,13 @@ function getAntigravityWindowOrder(bucket: AntigravityQuotaBucket): number {
 }
 
 export function buildAntigravityQuotaGroups(
-  payload: AntigravityQuotaSummaryPayload
+  payload: AntigravityQuotaSummaryPayload | AntigravityModelsPayload
 ): AntigravityQuotaGroup[] {
-  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  const rawGroups = (payload as AntigravityQuotaSummaryPayload).groups;
+  const groups = Array.isArray(rawGroups) ? rawGroups : [];
 
-  return groups
-    .map((group, groupIndex): AntigravityQuotaGroup | null => {
+  if (groups.length > 0) {
+    return groups.map((group, groupIndex): AntigravityQuotaGroup | null => {
       const label =
         normalizeStringValue(group.displayName ?? group.display_name) ??
         `Quota Group ${groupIndex + 1}`;
@@ -200,6 +203,38 @@ export function buildAntigravityQuotaGroups(
       };
     })
     .filter((group): group is AntigravityQuotaGroup => group !== null);
+  }
+
+  return Object.entries(payload as AntigravityModelsPayload)
+    .map(([modelId, info], index): AntigravityQuotaGroup | null => {
+      const group = buildAntigravityLegacyModelGroup(modelId, info, index);
+      return group;
+    })
+    .filter((group): group is AntigravityQuotaGroup => group !== null);
+}
+
+function buildAntigravityLegacyModelGroup(
+  modelId: string,
+  info: AntigravityQuotaInfo,
+  index: number
+): AntigravityQuotaGroup | null {
+  const quotaInfo = info.quotaInfo ?? info.quota_info;
+  if (!quotaInfo) return null;
+
+  const remainingFraction = normalizeQuotaFraction(
+    quotaInfo.remainingFraction ?? quotaInfo.remaining_fraction ?? quotaInfo.remaining
+  );
+  if (remainingFraction === null) return null;
+
+  const label = normalizeStringValue(info.displayName) ?? modelId;
+  const resetTime = normalizeStringValue(quotaInfo.resetTime ?? quotaInfo.reset_time) ?? undefined;
+  return {
+    id: toStableId(modelId, `antigravity-model-${index + 1}`),
+    label,
+    models: [modelId],
+    remainingFraction,
+    resetTime,
+  };
 }
 
 function toInt(value: unknown): number | null {

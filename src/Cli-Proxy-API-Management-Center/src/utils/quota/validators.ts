@@ -86,7 +86,13 @@ export function isCodexFile(file: AuthFileItem): boolean {
 }
 
 export function isGeminiCliFile(file: AuthFileItem): boolean {
-  return resolveAuthProvider(file) === 'gemini-cli';
+  const provider = resolveAuthProvider(file);
+  if (provider === 'gemini-cli') return true;
+  if (provider !== 'gemini') return false;
+
+  const accountType = readStringValue(file.account_type ?? file.accountType).toLowerCase();
+  const projectId = readStringValue(file.project_id ?? file.projectId);
+  return accountType === 'oauth' && projectId.length > 0;
 }
 
 export function isKimiFile(file: AuthFileItem): boolean {

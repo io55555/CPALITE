@@ -708,31 +708,25 @@ const renderAntigravityItems = (
   helpers: QuotaRenderHelpers
 ): ReactNode => {
   const { styles: styleMap, QuotaProgressBar } = helpers;
-  const { createElement: h } = React;
+  const { createElement: h, Fragment } = React;
   const groups = quota.groups ?? [];
 
   if (groups.length === 0) {
     return h('div', { className: styleMap.quotaMessage }, t('antigravity_quota.empty_models'));
   }
 
-  return groups.map((group) => {
-    const remainingFraction =
-      group.remainingFraction ??
-      (group.buckets?.length
-        ? Math.min(...group.buckets.map((bucket) => bucket.remainingFraction))
-        : 0);
-    const modelTitle = group.models?.join(', ') ?? group.buckets?.map((bucket) => bucket.label).join(', ') ?? '';
+  const renderRow = (key: string, label: string, remainingFraction: number, resetTime?: string, title?: string) => {
     const clamped = Math.max(0, Math.min(1, remainingFraction));
     const percent = Math.round(clamped * 100);
-    const resetLabel = formatQuotaResetTime(group.resetTime);
+    const resetLabel = formatQuotaResetTime(resetTime);
 
     return h(
       'div',
-      { key: group.id, className: styleMap.quotaRow },
+      { key, className: styleMap.quotaRow },
       h(
         'div',
         { className: styleMap.quotaRowHeader },
-        h('span', { className: styleMap.quotaModel, title: modelTitle }, group.label),
+        h('span', { className: styleMap.quotaModel, title }, label),
         h(
           'div',
           { className: styleMap.quotaMeta },
@@ -746,7 +740,29 @@ const renderAntigravityItems = (
         mediumThreshold: QUOTA_PROGRESS_MEDIUM_THRESHOLD,
       })
     );
-  });
+  };
+
+  return h(
+    Fragment,
+    null,
+    ...groups.flatMap((group) => {
+      if (group.buckets?.length) {
+        return group.buckets.map((bucket) =>
+          renderRow(
+            `${group.id}-${bucket.id}`,
+            `${group.label} / ${bucket.label}`,
+            bucket.remainingFraction,
+            bucket.resetTime,
+            bucket.description ?? group.description
+          )
+        );
+      }
+
+      const remainingFraction = group.remainingFraction ?? 0;
+      const modelTitle = group.models?.join(', ') ?? group.description ?? '';
+      return [renderRow(group.id, group.label, remainingFraction, group.resetTime, modelTitle)];
+    })
+  );
 };
 
 const PREMIUM_GEMINI_CLI_TIER_IDS = new Set(['g1-ultra-tier']);
