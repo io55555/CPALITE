@@ -11,6 +11,7 @@ import (
 	configaccess "github.com/router-for-me/CLIProxyAPI/v7/internal/access/config_access"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -47,6 +48,8 @@ type Builder struct {
 
 	// coreManager handles core authentication and execution.
 	coreManager *coreauth.Manager
+
+	pluginHost *pluginhost.Host
 
 	// serverOptions contains additional server configuration options.
 	serverOptions []api.ServerOption
@@ -137,6 +140,11 @@ func (b *Builder) WithRequestAccessManager(mgr *sdkaccess.Manager) *Builder {
 // WithCoreAuthManager overrides the runtime auth manager responsible for request execution.
 func (b *Builder) WithCoreAuthManager(mgr *coreauth.Manager) *Builder {
 	b.coreManager = mgr
+	return b
+}
+
+func (b *Builder) WithPluginHost(host *pluginhost.Host) *Builder {
+	b.pluginHost = host
 	return b
 }
 
@@ -244,6 +252,9 @@ func (b *Builder) Build() (*Service, error) {
 	coreManager.SetRoundTripperProvider(newDefaultRoundTripperProvider())
 	coreManager.SetConfig(b.cfg)
 	coreManager.SetOAuthModelAlias(b.cfg.OAuthModelAlias)
+	if b.pluginHost != nil {
+		coreManager.SetPluginScheduler(b.pluginHost)
+	}
 	coreauth.ApplyExternalState = func(auth *coreauth.Auth, _ time.Time) {
 		if service := openai_compat_state.DefaultService(); service != nil {
 			service.ApplyToAuth(auth)
@@ -260,6 +271,7 @@ func (b *Builder) Build() (*Service, error) {
 		authManager:    authManager,
 		accessManager:  accessManager,
 		coreManager:    coreManager,
+		pluginHost:     b.pluginHost,
 		serverOptions:  append([]api.ServerOption(nil), b.serverOptions...),
 	}
 	return service, nil

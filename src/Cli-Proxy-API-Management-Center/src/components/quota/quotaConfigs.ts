@@ -112,6 +112,8 @@ export interface QuotaConfig<TState, TData> {
   cardIdleMessageKey?: string;
   filterFn: (file: AuthFileItem) => boolean;
   fetchQuota: (file: AuthFileItem, t: TFunction) => Promise<TData>;
+  resetQuota?: (file: AuthFileItem, t: TFunction) => Promise<TData>;
+  canResetQuota?: (quota: TState) => boolean;
   storeSelector: (state: QuotaStore) => Record<string, TState>;
   storeSetter: keyof QuotaStore;
   buildLoadingState: () => TState;
@@ -704,7 +706,13 @@ const renderAntigravityItems = (
   }
 
   return groups.map((group) => {
-    const clamped = Math.max(0, Math.min(1, group.remainingFraction));
+    const remainingFraction =
+      group.remainingFraction ??
+      (group.buckets?.length
+        ? Math.min(...group.buckets.map((bucket) => bucket.remainingFraction))
+        : 0);
+    const modelTitle = group.models?.join(', ') ?? group.buckets?.map((bucket) => bucket.label).join(', ') ?? '';
+    const clamped = Math.max(0, Math.min(1, remainingFraction));
     const percent = Math.round(clamped * 100);
     const resetLabel = formatQuotaResetTime(group.resetTime);
 
@@ -714,7 +722,7 @@ const renderAntigravityItems = (
       h(
         'div',
         { className: styleMap.quotaRowHeader },
-        h('span', { className: styleMap.quotaModel, title: group.models.join(', ') }, group.label),
+        h('span', { className: styleMap.quotaModel, title: modelTitle }, group.label),
         h(
           'div',
           { className: styleMap.quotaMeta },

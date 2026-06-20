@@ -44,11 +44,17 @@ type Config struct {
 	// RemoteManagement nests management-related options under 'remote-management'.
 	RemoteManagement RemoteManagement `yaml:"remote-management" json:"-"`
 
+	// Plugins configures dynamic plugin discovery and per-plugin settings.
+	Plugins PluginsConfig `yaml:"plugins" json:"plugins"`
+
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
+
+	// DisableClaudeCloakMode disables global Claude request cloaking compatibility mode.
+	DisableClaudeCloakMode bool `yaml:"disable-claude-cloak-mode" json:"disable-claude-cloak-mode"`
 
 	// Pprof config controls the optional pprof HTTP debug server.
 	Pprof PprofConfig `yaml:"pprof" json:"pprof"`
@@ -77,6 +83,13 @@ type Config struct {
 
 	// DisableCooling disables quota cooldown scheduling when true.
 	DisableCooling bool `yaml:"disable-cooling" json:"disable-cooling"`
+
+	// SaveCooldownStatus persists runtime cooldown status next to auth files when true.
+	SaveCooldownStatus bool `yaml:"save-cooldown-status" json:"save-cooldown-status"`
+
+	// TransientErrorCooldownSeconds controls cooldowns for transient upstream errors.
+	// 0 keeps the legacy default cooldown. Negative values disable these cooldowns.
+	TransientErrorCooldownSeconds int `yaml:"transient-error-cooldown-seconds" json:"transient-error-cooldown-seconds"`
 
 	// ProxyFailureCooldownSeconds controls how long an auth/model is cooled down after a per-key proxy connection failure.
 	// Default: 300 seconds.
@@ -169,6 +182,89 @@ type Config struct {
 	ConfigFilePath string `yaml:"-" json:"-"`
 
 	legacyMigrationPending bool `yaml:"-" json:"-"`
+}
+
+// PluginsConfig holds dynamic plugin system settings.
+type PluginsConfig struct {
+	// Enabled toggles dynamic plugin loading.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Dir is the plugin discovery directory.
+	Dir string `yaml:"dir" json:"dir"`
+	// StoreSources appends third-party plugin store registries to the built-in official source.
+	StoreSources []string `yaml:"store-sources,omitempty" json:"store-sources,omitempty"`
+	// Configs stores per-plugin instance configuration by plugin ID.
+	Configs map[string]PluginInstanceConfig `yaml:"configs" json:"configs"`
+}
+
+// PluginInstanceConfig stores host-owned plugin settings and the original plugin YAML subtree.
+type PluginInstanceConfig struct {
+	// Enabled toggles this plugin instance. Nil is normalized to false during YAML parsing.
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	// Priority controls plugin startup and routing order.
+	Priority int `yaml:"priority,omitempty" json:"priority,omitempty"`
+	// Raw preserves the full original plugin configuration YAML subtree.
+	Raw yaml.Node `yaml:"-" json:"-"`
+}
+
+// UnmarshalYAML extracts host-owned fields while preserving the full original YAML node.
+func (c *PluginInstanceConfig) UnmarshalYAML(value *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+
+	defaultEnabled := false
+	c.Enabled = &defaultEnabled
+	c.Priority = 0
+
+	if value == nil || value.Kind == 0 {
+		c.Raw = *defaultPluginInstanceConfigNode()
+		return nil
+	}
+
+	c.Raw = *deepCopyNode(value)
+	if value.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		key := value.Content[i]
+		node := value.Content[i+1]
+		if key == nil || node == nil {
+			continue
+		}
+		switch key.Value {
+		case "enabled":
+			var enabled bool
+			if errDecodeEnabled := node.Decode(&enabled); errDecodeEnabled != nil {
+				return fmt.Errorf("parse plugin enabled: %w", errDecodeEnabled)
+			}
+			c.Enabled = &enabled
+		case "priority":
+			var priority int
+			if errDecodePriority := node.Decode(&priority); errDecodePriority != nil {
+				return fmt.Errorf("parse plugin priority: %w", errDecodePriority)
+			}
+			c.Priority = priority
+		}
+	}
+
+	return nil
+}
+
+// MarshalYAML returns the preserved raw plugin YAML subtree for lossless config output.
+func (c PluginInstanceConfig) MarshalYAML() (any, error) {
+	if c.Raw.Kind == 0 {
+		return defaultPluginInstanceConfigNode(), nil
+	}
+	return deepCopyNode(&c.Raw), nil
+}
+
+func defaultPluginInstanceConfigNode() *yaml.Node {
+	return &yaml.Node{
+		Kind:    yaml.MappingNode,
+		Tag:     "!!map",
+		Content: []*yaml.Node{},
+	}
 }
 
 type PacketCaptureConfig struct {
@@ -512,6 +608,9 @@ type ClaudeKey struct {
 	// Claude /v1/messages requests. It is disabled by default so upstream seed
 	// changes do not alter the proxy's legacy behavior.
 	ExperimentalCCHSigning bool `yaml:"experimental-cch-signing,omitempty" json:"experimental-cch-signing,omitempty"`
+
+	// RebuildMidSystemMessage moves Claude messages with role "system" into the top-level system field.
+	RebuildMidSystemMessage bool `yaml:"rebuild-mid-system-message,omitempty" json:"rebuild-mid-system-message,omitempty"`
 }
 
 func (k ClaudeKey) GetAPIKey() string  { return k.APIKey }
@@ -759,6 +858,8 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.UsageStatisticsEnabled = true
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
+	cfg.SaveCooldownStatus = false
+	cfg.TransientErrorCooldownSeconds = 0
 	cfg.ProxyFailureCooldownSeconds = 300
 	cfg.ProxyFailureMaxCooldownSeconds = 600
 	cfg.DisableImageGeneration = DisableImageGenerationOff
@@ -845,6 +946,8 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 		cfg.ProxyFailureMaxCooldownSeconds = cfg.ProxyFailureCooldownSeconds
 	}
 
+	cfg.NormalizePluginsConfig()
+
 	// Sanitize Gemini API key configuration and migrate legacy entries.
 	cfg.SanitizeGeminiKeys()
 
@@ -892,6 +995,31 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Return the populated configuration struct.
 	return &cfg, nil
+}
+
+// NormalizePluginsConfig applies default plugin configuration values.
+func (cfg *Config) NormalizePluginsConfig() {
+	if cfg == nil {
+		return
+	}
+	cfg.Plugins.Dir = strings.TrimSpace(cfg.Plugins.Dir)
+	if cfg.Plugins.Dir == "" {
+		cfg.Plugins.Dir = "plugins"
+	}
+	if len(cfg.Plugins.StoreSources) > 0 {
+		sources := make([]string, 0, len(cfg.Plugins.StoreSources))
+		for _, source := range cfg.Plugins.StoreSources {
+			source = strings.TrimSpace(source)
+			if source == "" {
+				continue
+			}
+			sources = append(sources, source)
+		}
+		cfg.Plugins.StoreSources = sources
+	}
+	if cfg.Plugins.Configs == nil {
+		cfg.Plugins.Configs = map[string]PluginInstanceConfig{}
+	}
 }
 
 // SanitizePayloadRules validates raw JSON payload rule params and drops invalid rules.
@@ -1514,6 +1642,8 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 			return node.Value == DefaultPprofAddr
 		case "remote-management.panel-github-repository":
 			return node.Value == DefaultPanelGitHubRepository
+		case "plugins.dir":
+			return node.Value == "plugins"
 		case "routing.strategy":
 			return node.Value == "round-robin"
 		}
@@ -1624,6 +1754,9 @@ func deepCopyNode(n *yaml.Node) *yaml.Node {
 		for i := range n.Content {
 			cp.Content[i] = deepCopyNode(n.Content[i])
 		}
+	}
+	if n.Alias != nil {
+		cp.Alias = deepCopyNode(n.Alias)
 	}
 	return &cp
 }

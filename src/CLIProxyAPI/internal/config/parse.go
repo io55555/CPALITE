@@ -25,10 +25,11 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	cfg.UsageStatisticsEnabled = false
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
+	cfg.SaveCooldownStatus = false
+	cfg.TransientErrorCooldownSeconds = 0
 	cfg.DisableImageGeneration = DisableImageGenerationOff
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
-	cfg.AmpCode.RestrictManagementToLocalhost = false // Default to false: API key auth is sufficient
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -81,6 +82,8 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	if cfg.ProxyFailureMaxCooldownSeconds < cfg.ProxyFailureCooldownSeconds {
 		cfg.ProxyFailureMaxCooldownSeconds = cfg.ProxyFailureCooldownSeconds
 	}
+
+	cfg.NormalizePluginsConfig()
 
 	// Apply the same sanitization pipeline.
 	cfg.SanitizeGeminiKeys()

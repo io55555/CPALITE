@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor"
@@ -103,6 +104,21 @@ type Service struct {
 	homeClient       *home.Client
 	homeCancel       context.CancelFunc
 	homeLogForwarder *logging.HomeAppLogForwarder
+	pluginHost       *pluginhost.Host
+}
+
+type executorRegistrationOptions struct {
+	includeBaseline   bool
+	includePlugins    bool
+	auths             []*coreauth.Auth
+	forceReplaceAuths bool
+}
+
+var registerPluginExecutors = func(host *pluginhost.Host, manager *coreauth.Manager) {
+	if host == nil || manager == nil {
+		return
+	}
+	host.RegisterExecutors(manager, registry.GetGlobalRegistry())
 }
 
 // RegisterUsagePlugin registers a usage plugin on the global usage manager.
@@ -418,6 +434,9 @@ func (s *Service) ensureExecutorsForAuthWithMode(a *coreauth.Auth, forceReplace 
 		if compatProviderKey == "" {
 			compatProviderKey = "openai-compatibility"
 		}
+		if compatProviderKey != "openai-compatibility" && !strings.HasPrefix(compatProviderKey, "openai-compatible-") {
+			compatProviderKey = "openai-compatible-" + compatProviderKey
+		}
 		s.coreManager.RegisterExecutor(executor.NewOpenAICompatExecutor(compatProviderKey, s.cfg))
 		return
 	}
@@ -619,6 +638,76 @@ func (s *Service) registerHomeExecutors() {
 	s.coreManager.RegisterExecutor(executor.NewKimiExecutor(s.cfg))
 	s.coreManager.RegisterExecutor(executor.NewXAIExecutor(s.cfg))
 	s.coreManager.RegisterExecutor(executor.NewOpenAICompatExecutor("openai-compatibility", s.cfg))
+}
+
+func (s *Service) registerAvailableExecutors(ctx context.Context, opts executorRegistrationOptions) {
+	if s == nil || s.coreManager == nil {
+		return
+	}
+	if opts.includeBaseline {
+		s.registerHomeExecutors()
+	}
+	if len(opts.auths) > 0 {
+		s.registerExecutorsForAuths(opts.auths, opts.forceReplaceAuths)
+	}
+	if opts.includePlugins && s.pluginHost != nil {
+		registerPluginExecutors(s.pluginHost, s.coreManager)
+	}
+	_ = ctx
+}
+
+func (s *Service) registerExecutorsForAuths(auths []*coreauth.Auth, forceReplace bool) {
+	for _, auth := range auths {
+		s.ensureExecutorsForAuthWithMode(auth, forceReplace)
+	}
+}
+
+func (s *Service) hasNativeOpenAICompatExecutorConfig(a *coreauth.Auth, providerKey string) bool {
+	if s == nil || a == nil {
+		return false
+	}
+	providerKey = strings.ToLower(strings.TrimSpace(providerKey))
+	if providerKey == "" {
+		if a.Attributes != nil {
+			providerKey = strings.ToLower(strings.TrimSpace(a.Attributes["provider_key"]))
+		}
+		if providerKey == "" {
+			providerKey = strings.ToLower(strings.TrimSpace(a.Label))
+		}
+	}
+	if providerKey == "" {
+		return false
+	}
+	if s.coreManager != nil {
+		if _, ok := s.coreManager.Executor(providerKey); ok {
+			return true
+		}
+	}
+	if a.Attributes != nil {
+		if strings.TrimSpace(a.Attributes["base_url"]) != "" || strings.TrimSpace(a.Attributes["compat_name"]) != "" {
+			return true
+		}
+	}
+	if s.cfg != nil {
+		for _, item := range s.cfg.OpenAICompatibility {
+			if strings.EqualFold(strings.TrimSpace(item.Name), providerKey) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Service) syncPluginRuntimeConfig(ctx context.Context) bool {
+	if s == nil || s.coreManager == nil {
+		return false
+	}
+	if s.pluginHost == nil {
+		s.coreManager.SetPluginScheduler(nil)
+		return false
+	}
+	s.coreManager.SetPluginScheduler(s.pluginHost)
+	return true
 }
 
 func (s *Service) applyHomeOverlay(remoteCfg *config.Config) {
@@ -1273,7 +1362,7 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 			}
 		}
 	}
-	models = applyOAuthModelAlias(s.cfg, provider, authKind, models)
+	models = applyOAuthModelAliasForAuth(s.cfg, provider, authKind, a.Attributes, models)
 	if len(models) > 0 {
 		key := provider
 		if key == "" {
@@ -1736,18 +1825,58 @@ func rewriteModelInfoName(name, oldID, newID string) string {
 }
 
 func applyOAuthModelAlias(cfg *config.Config, provider, authKind string, models []*ModelInfo) []*ModelInfo {
-	if cfg == nil || len(models) == 0 {
+	return applyOAuthModelAliasForAuth(cfg, provider, authKind, nil, models)
+}
+
+func applyOAuthModelAliasForAuth(cfg *config.Config, provider, authKind string, attributes map[string]string, models []*ModelInfo) []*ModelInfo {
+	if len(models) == 0 {
 		return models
 	}
 	channel := coreauth.OAuthModelAliasChannel(provider, authKind)
-	if channel == "" || len(cfg.OAuthModelAlias) == 0 {
+	if channel == "" {
 		return models
 	}
-	aliases := cfg.OAuthModelAlias[channel]
+	aliases := oauthModelAliasesForAuth(cfg, channel, attributes)
 	if len(aliases) == 0 {
 		return models
 	}
+	return applyOAuthModelAliasEntries(aliases, models)
+}
 
+func oauthModelAliasesForAuth(cfg *config.Config, channel string, attributes map[string]string) []config.OAuthModelAlias {
+	perAuthAliases := coreauth.OAuthModelAliasesFromAttributes(attributes)
+	if cfg == nil || len(cfg.OAuthModelAlias) == 0 {
+		return perAuthAliases
+	}
+	globalAliases := cfg.OAuthModelAlias[channel]
+	if len(perAuthAliases) == 0 {
+		return globalAliases
+	}
+	if len(globalAliases) == 0 {
+		return perAuthAliases
+	}
+	out := make([]config.OAuthModelAlias, 0, len(perAuthAliases)+len(globalAliases))
+	seenAlias := make(map[string]struct{}, len(perAuthAliases)+len(globalAliases))
+	add := func(aliases []config.OAuthModelAlias) {
+		for _, entry := range aliases {
+			alias := strings.TrimSpace(entry.Alias)
+			if alias == "" {
+				continue
+			}
+			key := strings.ToLower(alias)
+			if _, exists := seenAlias[key]; exists {
+				continue
+			}
+			seenAlias[key] = struct{}{}
+			out = append(out, entry)
+		}
+	}
+	add(perAuthAliases)
+	add(globalAliases)
+	return out
+}
+
+func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*ModelInfo) []*ModelInfo {
 	type aliasEntry struct {
 		alias string
 		fork  bool

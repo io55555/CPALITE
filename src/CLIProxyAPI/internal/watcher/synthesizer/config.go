@@ -131,6 +131,9 @@ func (s *ConfigSynthesizer) synthesizeClaudeKeys(ctx *SynthesisContext) []*corea
 		if base != "" {
 			attrs["base_url"] = base
 		}
+		if ck.RebuildMidSystemMessage {
+			attrs["rebuild_mid_system_message"] = "true"
+		}
 		if hash := diff.ComputeClaudeModelsHash(ck.Models); hash != "" {
 			attrs["models_hash"] = hash
 		}
@@ -231,6 +234,8 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 		providerName := strings.ToLower(strings.TrimSpace(compat.Name))
 		if providerName == "" {
 			providerName = "openai-compatibility"
+		} else if !strings.HasPrefix(providerName, "openai-compatible-") {
+			providerName = "openai-compatible-" + providerName
 		}
 		base := strings.TrimSpace(compat.BaseURL)
 		disableCooling := compat.DisableCooling

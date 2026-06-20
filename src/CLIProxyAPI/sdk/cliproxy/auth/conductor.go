@@ -161,13 +161,14 @@ func (NoopHook) OnResult(context.Context, Result) {}
 
 // Manager orchestrates auth lifecycle, selection, execution, and persistence.
 type Manager struct {
-	store     Store
-	executors map[string]ProviderExecutor
-	selector  Selector
-	hook      Hook
-	mu        sync.RWMutex
-	auths     map[string]*Auth
-	scheduler *authScheduler
+	store          Store
+	executors      map[string]ProviderExecutor
+	selector       Selector
+	hook           Hook
+	mu             sync.RWMutex
+	auths          map[string]*Auth
+	scheduler      *authScheduler
+	removedAuthIDs map[string]struct{}
 	// homeRuntimeAuths caches Home auths so websocket sessions can reuse an upstream credential.
 	homeRuntimeAuths map[string]map[string]*Auth
 	// providerOffsets tracks per-model provider rotation state for multi-provider routing.
@@ -193,11 +194,13 @@ type Manager struct {
 	runtimeConfig atomic.Value
 
 	// Optional HTTP RoundTripper provider injected by host.
-	rtProvider RoundTripperProvider
+	rtProvider      RoundTripperProvider
+	pluginScheduler any
 
 	// Auto refresh state
 	refreshCancel context.CancelFunc
 	refreshLoop   *authAutoRefreshLoop
+	cooldownStore CooldownStateStore
 
 	persistMu           sync.Mutex
 	persistDirty        map[string]*Auth
@@ -223,6 +226,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		selector:         selector,
 		hook:             hook,
 		auths:            make(map[string]*Auth),
+		removedAuthIDs:   make(map[string]struct{}),
 		homeRuntimeAuths: make(map[string]map[string]*Auth),
 		providerOffsets:  make(map[string]int),
 		modelPoolOffsets: make(map[string]int),
@@ -266,6 +270,50 @@ func (m *Manager) snapshotAuths() []*Auth {
 		out = append(out, a.Clone())
 	}
 	return out
+}
+
+// AvailableProviders returns provider keys that currently have at least one auth.
+func (m *Manager) AvailableProviders() []string {
+	if m == nil {
+		return nil
+	}
+	providers := make(map[string]struct{})
+	m.mu.RLock()
+	for _, auth := range m.auths {
+		if auth == nil {
+			continue
+		}
+		provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+		if provider != "" {
+			providers[provider] = struct{}{}
+		}
+	}
+	m.mu.RUnlock()
+	out := make([]string, 0, len(providers))
+	for provider := range providers {
+		out = append(out, provider)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// HasProviderAuth reports whether an auth exists for provider.
+func (m *Manager) HasProviderAuth(provider string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if m == nil || provider == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, auth := range m.auths {
+		if auth == nil {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(auth.Provider)) == provider {
+			return true
+		}
+	}
+	return false
 }
 
 // RefreshSchedulerEntry re-upserts a single auth into the scheduler so that its
@@ -343,6 +391,106 @@ func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
 	m.queueRefreshReschedule(snapshot.ID)
 	m.hook.OnAuthUpdated(ctx, snapshot.Clone())
 	logAuthStateTransition(ctx, beforeSnapshot, snapshot)
+}
+
+// ResetQuota clears quota/cooldown state for an auth and resumes registry routing.
+func (m *Manager) ResetQuota(ctx context.Context, authID string) (*Auth, []string, error) {
+	if m == nil {
+		return nil, nil, nil
+	}
+	authID = strings.TrimSpace(authID)
+	if authID == "" {
+		return nil, nil, fmt.Errorf("auth id is required")
+	}
+
+	now := time.Now()
+	registeredModels := modelsForRegisteredAuth(authID)
+	models := make([]string, 0, len(registeredModels))
+	var snapshot *Auth
+	var beforeSnapshot *Auth
+
+	m.mu.Lock()
+	auth, ok := m.auths[authID]
+	if !ok || auth == nil {
+		m.mu.Unlock()
+		return nil, nil, nil
+	}
+	beforeSnapshot = auth.Clone()
+	auth.Unavailable = false
+	auth.NextRetryAfter = time.Time{}
+	auth.Quota = QuotaState{}
+	for modelKey, state := range auth.ModelStates {
+		if strings.TrimSpace(modelKey) == "" {
+			continue
+		}
+		models = append(models, modelKey)
+		if state != nil {
+			resetModelState(state, now)
+		}
+	}
+	if len(models) == 0 {
+		models = append(models, registeredModels...)
+	}
+	models = dedupeStrings(models)
+	if !auth.Disabled && auth.Status != StatusDisabled && !hasModelError(auth, now) {
+		auth.LastError = nil
+		auth.StatusMessage = ""
+		auth.Status = StatusActive
+	}
+	auth.UpdatedAt = now
+	if errPersist := m.persist(ctx, auth); errPersist != nil {
+		m.mu.Unlock()
+		return nil, nil, errPersist
+	}
+	snapshot = auth.Clone()
+	m.mu.Unlock()
+
+	for _, modelKey := range models {
+		registry.GetGlobalRegistry().ClearModelQuotaExceeded(authID, modelKey)
+		registry.GetGlobalRegistry().ResumeClientModel(authID, modelKey)
+	}
+	if m.scheduler != nil && snapshot != nil {
+		m.scheduler.upsertAuth(snapshot)
+	}
+	m.queueRefreshReschedule(authID)
+	if snapshot != nil {
+		m.hook.OnAuthUpdated(ctx, snapshot.Clone())
+		logAuthStateTransition(ctx, beforeSnapshot, snapshot)
+	}
+	return snapshot, models, nil
+}
+
+func modelsForRegisteredAuth(authID string) []string {
+	supportedModels := registry.GetGlobalRegistry().GetModelsForClient(authID)
+	models := make([]string, 0, len(supportedModels))
+	for _, supportedModel := range supportedModels {
+		if supportedModel == nil || strings.TrimSpace(supportedModel.ID) == "" {
+			continue
+		}
+		models = append(models, supportedModel.ID)
+	}
+	return models
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // ReconcileRegistryModelStates aligns per-model runtime state with the current
@@ -451,10 +599,29 @@ func (m *Manager) SetStore(store Store) {
 	m.store = store
 }
 
+// SetCooldownStateStore swaps the independent runtime cooldown state store.
+func (m *Manager) SetCooldownStateStore(store CooldownStateStore) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.cooldownStore = store
+	m.mu.Unlock()
+}
+
 // SetRoundTripperProvider register a provider that returns a per-auth RoundTripper.
 func (m *Manager) SetRoundTripperProvider(p RoundTripperProvider) {
 	m.mu.Lock()
 	m.rtProvider = p
+	m.mu.Unlock()
+}
+
+func (m *Manager) SetPluginScheduler(scheduler any) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.pluginScheduler = scheduler
 	m.mu.Unlock()
 }
 
@@ -1284,6 +1451,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	authClone := auth.Clone()
 	applyOpenAICompatPersistedState(authClone, time.Now())
 	m.mu.Lock()
+	delete(m.removedAuthIDs, auth.ID)
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
@@ -1317,6 +1485,9 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 				auth.ModelStates = existing.ModelStates
 			}
 		}
+	} else if _, removed := m.removedAuthIDs[auth.ID]; removed {
+		m.mu.Unlock()
+		return nil, nil
 	}
 	auth.EnsureIndex()
 	authClone := auth.Clone()
@@ -1332,6 +1503,100 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
 	logAuthStateTransition(ctx, beforeSnapshot, authClone)
 	return auth.Clone(), nil
+}
+
+// Remove deletes an auth entry from runtime selection and background refresh state.
+func (m *Manager) Remove(ctx context.Context, id string) {
+	if m == nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	var removed *Auth
+	m.mu.Lock()
+	if auth, ok := m.auths[id]; ok && auth != nil {
+		removed = auth.Clone()
+		delete(m.auths, id)
+		if m.removedAuthIDs == nil {
+			m.removedAuthIDs = make(map[string]struct{})
+		}
+		m.removedAuthIDs[id] = struct{}{}
+	}
+	m.mu.Unlock()
+	if removed == nil {
+		return
+	}
+	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
+	if m.scheduler != nil {
+		m.scheduler.removeAuth(id)
+	}
+	if m.refreshLoop != nil {
+		m.refreshLoop.remove(id)
+	}
+	m.requestPrepareLocks.Delete(id)
+	if m.cooldownStore != nil {
+		m.saveCooldownStates(ctx)
+	}
+}
+
+// RestoreCooldownStates reloads independently persisted model cooldowns after auth load.
+func (m *Manager) RestoreCooldownStates(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	store := m.cooldownStore
+	m.mu.RUnlock()
+	if store == nil {
+		return nil
+	}
+	records, err := store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	var snapshots []*Auth
+	m.mu.Lock()
+	for _, record := range records {
+		authID := strings.TrimSpace(record.AuthID)
+		model := strings.TrimSpace(record.Model)
+		if authID == "" || model == "" {
+			continue
+		}
+		if !record.NextRetryAfter.IsZero() && !record.NextRetryAfter.After(now) {
+			continue
+		}
+		auth := m.auths[authID]
+		if auth == nil {
+			continue
+		}
+		state := ensureModelState(auth, model)
+		state.Unavailable = true
+		state.Status = StatusError
+		state.StatusMessage = strings.TrimSpace(record.Reason)
+		if state.StatusMessage == "" && record.LastError != nil {
+			state.StatusMessage = record.LastError.Message
+		}
+		state.NextRetryAfter = record.NextRetryAfter
+		state.Quota = record.Quota
+		state.LastError = cloneError(record.LastError)
+		state.UpdatedAt = record.UpdatedAt
+		if state.UpdatedAt.IsZero() {
+			state.UpdatedAt = now
+		}
+		updateAggregatedAvailability(auth, now)
+		auth.UpdatedAt = now
+		snapshots = append(snapshots, auth.Clone())
+	}
+	m.mu.Unlock()
+	for _, snapshot := range snapshots {
+		if m.scheduler != nil {
+			m.scheduler.upsertAuth(snapshot)
+		}
+	}
+	return m.saveCooldownStates(ctx)
 }
 
 // Load resets manager state from the backing store.
@@ -2449,6 +2714,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	var authSnapshot *Auth
 	var beforeSnapshot *Auth
 	var persistSnapshot *Auth
+	saveCooldownState := false
 
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
@@ -2584,9 +2850,13 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		applyOpenAICompatPersistedState(auth, now)
 		authSnapshot = auth.Clone()
 		persistSnapshot = authSnapshot.Clone()
+		saveCooldownState = cooldownStateChanged(beforeSnapshot, authSnapshot, now)
 	}
 	m.mu.Unlock()
 	m.queuePersist(ctx, persistSnapshot)
+	if saveCooldownState {
+		m.saveCooldownStates(ctx)
+	}
 	if m.scheduler != nil && authSnapshot != nil {
 		m.scheduler.upsertAuth(authSnapshot)
 	}
@@ -2604,6 +2874,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	}
 
 	m.hook.OnResult(ctx, result)
+	m.publishErrorEvent(result, authSnapshot)
 	logAuthStateTransition(ctx, beforeSnapshot, authSnapshot)
 }
 
@@ -3212,6 +3483,110 @@ func nextQuotaCooldown(prevLevel int, disableCooling bool) (time.Duration, int) 
 		return quotaBackoffMax, prevLevel
 	}
 	return cooldown, prevLevel + 1
+}
+
+func (m *Manager) saveCooldownStates(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	store := m.cooldownStore
+	if store == nil {
+		m.mu.RUnlock()
+		return nil
+	}
+	records := make([]CooldownStateRecord, 0)
+	now := time.Now()
+	for _, auth := range m.auths {
+		records = append(records, cooldownRecordsForAuth(auth, now)...)
+	}
+	m.mu.RUnlock()
+	return store.Save(ctx, records)
+}
+
+func cooldownStateChanged(before, after *Auth, now time.Time) bool {
+	beforeRecords := cooldownRecordsForAuth(before, now)
+	afterRecords := cooldownRecordsForAuth(after, now)
+	if len(beforeRecords) != len(afterRecords) {
+		return true
+	}
+	beforeMap := make(map[string]CooldownStateRecord, len(beforeRecords))
+	for _, record := range beforeRecords {
+		beforeMap[cooldownRecordKey(record)] = record
+	}
+	for _, record := range afterRecords {
+		prev, ok := beforeMap[cooldownRecordKey(record)]
+		if !ok || !cooldownRecordsEqual(prev, record) {
+			return true
+		}
+	}
+	return false
+}
+
+func cooldownRecordsForAuth(auth *Auth, now time.Time) []CooldownStateRecord {
+	if auth == nil || auth.ID == "" {
+		return nil
+	}
+	records := make([]CooldownStateRecord, 0)
+	for model, state := range auth.ModelStates {
+		model = strings.TrimSpace(model)
+		if model == "" || state == nil {
+			continue
+		}
+		if !stateUnavailableForPersistence(state, now) {
+			continue
+		}
+		records = append(records, CooldownStateRecord{
+			Provider:       auth.Provider,
+			AuthID:         auth.ID,
+			AuthFile:       auth.FileName,
+			Model:          model,
+			Status:         string(state.Status),
+			NextRetryAfter: state.NextRetryAfter,
+			Reason:         state.StatusMessage,
+			Quota:          state.Quota,
+			LastError:      cloneError(state.LastError),
+			UpdatedAt:      state.UpdatedAt,
+		})
+	}
+	return records
+}
+
+func stateUnavailableForPersistence(state *ModelState, now time.Time) bool {
+	if state == nil {
+		return false
+	}
+	if !state.NextRetryAfter.IsZero() && state.NextRetryAfter.After(now) {
+		return true
+	}
+	if state.Quota.Exceeded || !state.Quota.NextRecoverAt.IsZero() || state.Quota.Reason != "" {
+		return true
+	}
+	return state.Unavailable && (state.Status == StatusError || state.LastError != nil)
+}
+
+func cooldownRecordKey(record CooldownStateRecord) string {
+	return strings.ToLower(strings.TrimSpace(record.AuthID)) + "\x00" + strings.ToLower(strings.TrimSpace(record.Model))
+}
+
+func cooldownRecordsEqual(a, b CooldownStateRecord) bool {
+	if a.Status != b.Status || a.Reason != b.Reason {
+		return false
+	}
+	if !a.NextRetryAfter.Equal(b.NextRetryAfter) || !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return false
+	}
+	if a.Quota != b.Quota {
+		return false
+	}
+	return errorsEqual(a.LastError, b.LastError)
+}
+
+func errorsEqual(a, b *Error) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Code == b.Code && a.Message == b.Message && a.Retryable == b.Retryable && a.HTTPStatus == b.HTTPStatus
 }
 
 // List returns all auth entries currently known by the manager.

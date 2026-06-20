@@ -1,5 +1,6 @@
 export * from './client';
 export * from './apiCall';
+export * from './antigravitySubscription';
 export * from './apiKeyUsage';
 export * from './config';
 export * from './configFile';
@@ -12,6 +13,7 @@ export * from './logs';
 export * from './usageService';
 export * from './version';
 export * from './models';
+export * from './plugins';
 export * from './usage';
 export * from './authRefreshQueue';
 export * from './accountInspection';

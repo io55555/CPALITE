@@ -91,7 +91,9 @@ function buildInitialForm(
       excludedModelsText: '',
       websockets: brand === 'codex' ? false : undefined,
       cloak:
-        brand === 'claude' ? { mode: '', strictMode: false, sensitiveWordsText: '' } : undefined,
+        brand === 'claude'
+          ? { mode: '', strictMode: false, sensitiveWordsText: '', cacheUserId: false }
+          : undefined,
       testModel: brand === 'openaiCompatibility' || brand === 'claude' ? '' : undefined,
       apiKeyEntries: brand === 'openaiCompatibility' ? [emptyApiKeyEntry()] : undefined,
     };
@@ -162,6 +164,7 @@ function buildInitialForm(
             mode: (cfg as ProviderKeyConfig).cloak?.mode ?? '',
             strictMode: (cfg as ProviderKeyConfig).cloak?.strictMode === true,
             sensitiveWordsText: (cfg as ProviderKeyConfig).cloak?.sensitiveWords?.join('\n') ?? '',
+            cacheUserId: (cfg as ProviderKeyConfig).cloak?.cacheUserId === true,
           }
         : undefined,
     testModel: brand === 'claude' ? '' : undefined,
@@ -399,7 +402,12 @@ export function BaseProviderForm({
     setForm((prev) => ({
       ...prev,
       cloak: {
-        ...(prev.cloak ?? { mode: '', strictMode: false, sensitiveWordsText: '' }),
+        ...(prev.cloak ?? {
+          mode: '',
+          strictMode: false,
+          sensitiveWordsText: '',
+          cacheUserId: false,
+        }),
         [key]: value,
       },
     }));

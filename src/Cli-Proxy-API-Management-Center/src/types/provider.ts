@@ -49,6 +49,7 @@ export interface CloakConfig {
   mode?: string;
   strictMode?: boolean;
   sensitiveWords?: string[];
+  cacheUserId?: boolean;
 }
 
 export interface GeminiKeyConfig {

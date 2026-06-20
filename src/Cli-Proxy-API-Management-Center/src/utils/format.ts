@@ -130,3 +130,19 @@ export function truncateText(text: string, maxLength: number): string {
   }
   return text.slice(0, maxLength) + '...';
 }
+
+export function formatDateTimeValue(value: unknown, locale?: string): string {
+  const parsed = parseTimestamp(value) ?? new Date(String(value ?? ''));
+  return Number.isNaN(parsed.getTime()) ? '' : formatDateTime(parsed, locale);
+}
+
+export function formatDateValue(value: unknown, locale?: string): string {
+  const parsed = parseTimestamp(value) ?? new Date(String(value ?? ''));
+  if (Number.isNaN(parsed.getTime())) return '';
+  const resolvedLocale = locale?.trim() || resolveDefaultLocale();
+  return parsed.toLocaleDateString(resolvedLocale, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}

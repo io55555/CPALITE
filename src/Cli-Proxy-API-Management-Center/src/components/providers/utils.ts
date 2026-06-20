@@ -88,6 +88,35 @@ export const buildOpenAIChatCompletionsEndpoint = (baseUrl: string): string => {
   return `${trimmed}/chat/completions`;
 };
 
+export const buildCodexResponsesEndpoint = (baseUrl: string): string => {
+  const trimmed = normalizeOpenAIBaseUrl(baseUrl);
+  if (!trimmed) return '';
+  if (trimmed.endsWith('/responses')) {
+    return trimmed;
+  }
+  if (trimmed.endsWith('/v1')) {
+    return `${trimmed}/responses`;
+  }
+  return `${trimmed}/v1/responses`;
+};
+
+export const buildGeminiGenerateContentEndpoint = (baseUrl: string, model: string): string => {
+  let trimmed = String(baseUrl || '').trim();
+  if (!trimmed) return '';
+  trimmed = trimmed.replace(/\/+$/g, '');
+  if (!/^https?:\/\//i.test(trimmed)) {
+    trimmed = `http://${trimmed}`;
+  }
+  const encodedModel = encodeURIComponent(model.trim() || 'gemini-2.5-flash');
+  if (trimmed.includes(':generateContent')) {
+    return trimmed;
+  }
+  if (trimmed.endsWith('/v1beta') || trimmed.endsWith('/v1')) {
+    return `${trimmed}/models/${encodedModel}:generateContent`;
+  }
+  return `${trimmed}/v1beta/models/${encodedModel}:generateContent`;
+};
+
 export const buildClaudeMessagesEndpoint = (baseUrl: string): string => {
   const trimmed = normalizeClaudeBaseUrl(baseUrl);
   if (!trimmed) return '';

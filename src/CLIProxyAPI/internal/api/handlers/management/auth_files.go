@@ -28,6 +28,7 @@ import (
 	geminiAuth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/gemini"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kimi"
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
@@ -41,6 +42,16 @@ import (
 )
 
 var lastRefreshKeys = []string{"last_refresh", "lastRefresh", "last_refreshed_at", "lastRefreshedAt"}
+
+type codexOAuthService interface {
+	GenerateAuthURL(state string, pkceCodes *codex.PKCECodes) (string, error)
+	ExchangeCodeForTokens(ctx context.Context, code string, pkceCodes *codex.PKCECodes) (*codex.CodexAuthBundle, error)
+	CreateTokenStorage(bundle *codex.CodexAuthBundle) *codex.CodexTokenStorage
+}
+
+var newCodexOAuthService = func(cfg *config.Config) codexOAuthService {
+	return codex.NewCodexAuth(cfg)
+}
 
 const (
 	anthropicCallbackPort = 54545
@@ -1114,6 +1125,9 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 		}
 	}
 	coreauth.ApplyCustomHeadersFromMetadata(auth)
+	syncAuthFilePriorityAttribute(auth)
+	syncAuthFileNoteAttribute(auth)
+	syncAuthFileWebsocketsAttribute(auth)
 	return auth, nil
 }
 
@@ -2058,7 +2072,7 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 	}
 
 	// Initialize Codex auth service
-	openaiAuth := codex.NewCodexAuth(h.cfg)
+	openaiAuth := newCodexOAuthService(h.cfg)
 
 	// Generate authorization URL
 	authURL, err := openaiAuth.GenerateAuthURL(state, pkceCodes)
@@ -2175,7 +2189,6 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 		}
 		fmt.Println("You can now use Codex services through this CLI")
 		CompleteOAuthSession(state)
-		CompleteOAuthSessionsByProvider("codex")
 	}()
 
 	c.JSON(200, gin.H{"status": "ok", "url": authURL, "state": state})

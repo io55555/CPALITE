@@ -255,9 +255,8 @@ func getAvailableAuths(auths []*Auth, provider, model string, now time.Time) ([]
 }
 
 // Pick selects the next available auth for the provider in a round-robin manner.
-// For gemini-cli virtual auths (identified by the gemini_virtual_parent attribute),
-// a two-level round-robin is used: first cycling across credential groups (parent
-// accounts), then cycling within each group's project auths.
+// Gemini CLI virtual auths use a two-level rotation: parent credential first,
+// then project under that credential.
 func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
 	_ = opts
 	now := time.Now()
@@ -276,15 +275,11 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 		limit = 4096
 	}
 
-	// Check if any available auth has gemini_virtual_parent attribute,
-	// indicating gemini-cli virtual auths that should use credential-level polling.
 	groups, parentOrder := groupByVirtualParent(available)
 	if len(parentOrder) > 1 {
-		// Two-level round-robin: first select a credential group, then pick within it.
 		groupKey := key + "::group"
 		s.ensureCursorKey(groupKey, limit)
 		if _, exists := s.cursors[groupKey]; !exists {
-			// Seed with a random initial offset so the starting credential is randomized.
 			s.cursors[groupKey] = rand.IntN(len(parentOrder))
 		}
 		groupIndex := s.cursors[groupKey]
@@ -296,7 +291,6 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 		selectedParent := parentOrder[groupIndex%len(parentOrder)]
 		group := groups[selectedParent]
 
-		// Second level: round-robin within the selected credential group.
 		innerKey := key + "::cred:" + selectedParent
 		s.ensureCursorKey(innerKey, limit)
 		innerIndex := s.cursors[innerKey]
@@ -308,7 +302,6 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 		return group[innerIndex%len(group)], nil
 	}
 
-	// Flat round-robin for non-grouped auths (original behavior).
 	s.ensureCursorKey(key, limit)
 	index := s.cursors[key]
 	if index >= 2_147_483_640 {
@@ -327,30 +320,24 @@ func (s *RoundRobinSelector) ensureCursorKey(key string, limit int) {
 	}
 }
 
-// groupByVirtualParent groups auths by their gemini_virtual_parent attribute.
-// Returns a map of parentID -> auths and a sorted slice of parent IDs for stable iteration.
-// Only auths with a non-empty gemini_virtual_parent are grouped; if any auth lacks
-// this attribute, nil/nil is returned so the caller falls back to flat round-robin.
 func groupByVirtualParent(auths []*Auth) (map[string][]*Auth, []string) {
 	if len(auths) == 0 {
 		return nil, nil
 	}
 	groups := make(map[string][]*Auth)
-	for _, a := range auths {
+	for _, auth := range auths {
 		parent := ""
-		if a.Attributes != nil {
-			parent = strings.TrimSpace(a.Attributes["gemini_virtual_parent"])
+		if auth != nil && auth.Attributes != nil {
+			parent = strings.TrimSpace(auth.Attributes["gemini_virtual_parent"])
 		}
 		if parent == "" {
-			// Non-virtual auth present; fall back to flat round-robin.
 			return nil, nil
 		}
-		groups[parent] = append(groups[parent], a)
+		groups[parent] = append(groups[parent], auth)
 	}
-	// Collect parent IDs in sorted order for stable cursor indexing.
 	parentOrder := make([]string, 0, len(groups))
-	for p := range groups {
-		parentOrder = append(parentOrder, p)
+	for parent := range groups {
+		parentOrder = append(parentOrder, parent)
 	}
 	sort.Strings(parentOrder)
 	return groups, parentOrder
@@ -590,11 +577,10 @@ func (s *SessionAffinitySelector) InvalidateAuth(authID string) {
 //  1. metadata.user_id (Claude Code format with _session_{uuid}) - highest priority for Claude Code clients
 //  2. X-Session-ID header
 //  3. Session_id header (Codex)
-//  4. X-Amp-Thread-Id header (Amp CLI thread ID)
-//  5. X-Client-Request-Id header (PI)
-//  6. metadata.user_id (non-Claude Code format)
-//  7. conversation_id field in request body
-//  8. Stable hash from first few messages content (fallback)
+//  4. X-Client-Request-Id header (PI)
+//  5. metadata.user_id (non-Claude Code format)
+//  6. conversation_id field in request body
+//  7. Stable hash from first few messages content (fallback)
 func ExtractSessionID(headers http.Header, payload []byte, metadata map[string]any) string {
 	primary, _ := extractSessionIDs(headers, payload, metadata)
 	return primary

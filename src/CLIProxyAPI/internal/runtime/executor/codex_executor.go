@@ -803,6 +803,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 		body = ensureImageGenerationTool(body, baseModel, auth)
 	}
 	body = sanitizeOpenAIResponsesReasoningEncryptedContent(ctx, "codex executor", body)
+	body = normalizeCodexParallelToolCallsForTools(body)
 	body, replayScope := applyCodexReasoningReplayCache(ctx, from, req, opts, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
@@ -970,6 +971,7 @@ func (e *CodexExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.A
 		body = ensureImageGenerationTool(body, baseModel, auth)
 	}
 	body = sanitizeOpenAIResponsesReasoningEncryptedContent(ctx, "codex executor", body)
+	body = normalizeCodexParallelToolCallsForTools(body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses/compact"
 	var identityState codexIdentityConfuseState
@@ -1079,6 +1081,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 		body = ensureImageGenerationTool(body, baseModel, auth)
 	}
 	body = sanitizeOpenAIResponsesReasoningEncryptedContent(ctx, "codex executor", body)
+	body = normalizeCodexParallelToolCallsForTools(body)
 	body, replayScope := applyCodexReasoningReplayCache(ctx, from, req, opts, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
@@ -1756,6 +1759,21 @@ func ensureImageGenerationTool(body []byte, baseModel string, auth *cliproxyauth
 	return body
 }
 
+func normalizeCodexParallelToolCallsForTools(body []byte) []byte {
+	if !gjson.GetBytes(body, "parallel_tool_calls").Exists() {
+		return body
+	}
+
+	tools := gjson.GetBytes(body, "tools")
+	hasTools := tools.Exists() && tools.IsArray() && len(tools.Array()) > 0
+	if hasTools {
+		return body
+	}
+
+	body, _ = sjson.DeleteBytes(body, "parallel_tool_calls")
+	return body
+}
+
 func publishCodexImageToolUsage(ctx context.Context, reporter *helps.UsageReporter, body []byte, completedData []byte) {
 	detail, ok := helps.ParseCodexImageToolUsage(completedData)
 	if !ok {
@@ -1803,11 +1821,23 @@ func isCodexModelCapacityError(errorBody []byte) bool {
 	return false
 }
 
+func isCodexUsageLimitError(errorBody []byte) bool {
+	if len(errorBody) == 0 {
+		return false
+	}
+	for _, path := range []string{"error.type", "type"} {
+		if strings.TrimSpace(gjson.GetBytes(errorBody, path).String()) == "usage_limit_reached" {
+			return true
+		}
+	}
+	return false
+}
+
 func parseCodexRetryAfter(statusCode int, errorBody []byte, now time.Time) *time.Duration {
 	if statusCode != http.StatusTooManyRequests || len(errorBody) == 0 {
 		return nil
 	}
-	if strings.TrimSpace(gjson.GetBytes(errorBody, "error.type").String()) != "usage_limit_reached" {
+	if !isCodexUsageLimitError(errorBody) {
 		return nil
 	}
 	if resetsAt := gjson.GetBytes(errorBody, "error.resets_at").Int(); resetsAt > 0 {

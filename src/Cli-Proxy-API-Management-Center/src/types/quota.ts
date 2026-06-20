@@ -8,6 +8,30 @@ export type TypeColorSet = { light: ThemeColors; dark?: ThemeColors };
 export type ResolvedTheme = 'light' | 'dark';
 
 // API payload types
+export interface AntigravityQuotaSummaryBucketPayload {
+  bucketId?: string;
+  bucket_id?: string;
+  displayName?: string;
+  display_name?: string;
+  window?: string;
+  resetTime?: string;
+  reset_time?: string;
+  remainingFraction?: number | string;
+  remaining_fraction?: number | string;
+  description?: string;
+}
+
+export interface AntigravityQuotaSummaryGroupPayload {
+  displayName?: string;
+  display_name?: string;
+  description?: string;
+  buckets?: AntigravityQuotaSummaryBucketPayload[];
+}
+
+export interface AntigravityQuotaSummaryPayload {
+  groups?: AntigravityQuotaSummaryGroupPayload[];
+}
+
 export interface GeminiCliQuotaBucket {
   modelId?: string;
   model_id?: string;
@@ -197,14 +221,33 @@ export interface ClaudeQuotaState {
 export interface AntigravityQuotaGroup {
   id: string;
   label: string;
-  models: string[];
+  description?: string;
+  models?: string[];
+  buckets?: AntigravityQuotaBucket[];
+  remainingFraction?: number;
+  resetTime?: string;
+}
+
+export interface AntigravityQuotaSubscription {
+  plan: string | null;
+  tierName: string | null;
+  tierId: string | null;
+}
+
+export interface AntigravityQuotaBucket {
+  id: string;
+  label: string;
+  window?: string;
   remainingFraction: number;
   resetTime?: string;
+  description?: string;
 }
 
 export interface AntigravityQuotaState {
   status: 'idle' | 'loading' | 'success' | 'error';
   groups: AntigravityQuotaGroup[];
+  subscription?: AntigravityQuotaSubscription | null;
+  serverTimeOffsetMs?: number | null;
   error?: string;
   errorStatus?: number;
 }

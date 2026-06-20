@@ -54,6 +54,7 @@ export const useAuthStore = create<AuthStoreState>()(
       serverVersion: null,
       serverBuildDate: null,
       serverRuntimeKind: 'unknown',
+      supportsPlugin: false,
       connectionStatus: 'disconnected',
       connectionError: null,
 

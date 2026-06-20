@@ -223,6 +223,20 @@ export const parseDisableCoolingValue = (value: unknown): boolean | undefined =>
 export const readCodexAuthFileWebsockets = (value: Record<string, unknown>): boolean =>
   parseDisableCoolingValue(value.websockets ?? value.websocket) ?? false;
 
+export const buildOAuthProviderOptions = (values: Iterable<unknown>): string[] => {
+  const presets = ['anthropic', 'codex', 'gemini', 'antigravity', 'xai'];
+  const baseSet = new Set(presets.map((value) => normalizeProviderKey(value)));
+  const extras = new Set<string>();
+
+  Array.from(values).forEach((value) => {
+    const key = normalizeProviderKey(String(value ?? ''));
+    if (!key || baseSet.has(key)) return;
+    extras.add(key);
+  });
+
+  return [...presets, ...Array.from(extras).sort((a, b) => a.localeCompare(b))];
+};
+
 export const applyCodexAuthFileWebsockets = (
   value: Record<string, unknown>,
   websockets: boolean
