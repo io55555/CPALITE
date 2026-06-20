@@ -254,7 +254,7 @@ func (h *Handler) resolveTokenForAuth(ctx context.Context, auth *coreauth.Auth) 
 	}
 
 	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
-	if provider == "gemini-cli" {
+	if isGeminiCLIOAuthAPICallAuth(auth) {
 		token, errToken := h.refreshGeminiOAuthAccessToken(ctx, auth)
 		return token, errToken
 	}
@@ -264,6 +264,27 @@ func (h *Handler) resolveTokenForAuth(ctx context.Context, auth *coreauth.Auth) 
 	}
 
 	return tokenValueForAuth(auth), nil
+}
+
+func isGeminiCLIOAuthAPICallAuth(auth *coreauth.Auth) bool {
+	if auth == nil {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	if provider == "gemini-cli" {
+		return true
+	}
+	if provider != "gemini" {
+		return false
+	}
+	accountType, _ := auth.AccountInfo()
+	if !strings.EqualFold(strings.TrimSpace(accountType), "oauth") {
+		return false
+	}
+	if authProjectID(auth) != "" {
+		return true
+	}
+	return geminicli.ResolveSharedCredential(auth.Runtime) != nil
 }
 
 func (h *Handler) refreshGeminiOAuthAccessToken(ctx context.Context, auth *coreauth.Auth) (string, error) {

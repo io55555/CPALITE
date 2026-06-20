@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/geminicli"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
@@ -208,5 +209,76 @@ func TestAuthByIndexDistinguishesSharedAPIKeysAcrossProviders(t *testing.T) {
 	}
 	if gotCompat.ID != compatAuth.ID {
 		t.Fatalf("authByIndex(compat) returned %q, want %q", gotCompat.ID, compatAuth.ID)
+	}
+}
+
+func TestIsGeminiCLIOAuthAPICallAuth(t *testing.T) {
+	t.Parallel()
+
+	shared := geminicli.NewSharedCredential(
+		"primary",
+		"user@example.com",
+		map[string]any{"email": "user@example.com"},
+		[]string{"project-a"},
+	)
+
+	cases := []struct {
+		name string
+		auth *coreauth.Auth
+		want bool
+	}{
+		{
+			name: "explicit gemini cli provider",
+			auth: &coreauth.Auth{Provider: "gemini-cli"},
+			want: true,
+		},
+		{
+			name: "gemini oauth project account",
+			auth: &coreauth.Auth{
+				Provider: "gemini",
+				Metadata: map[string]any{
+					"email":      "user@example.com",
+					"project_id": "project-a",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "gemini oauth shared credential account",
+			auth: &coreauth.Auth{
+				Provider: "gemini",
+				Metadata: map[string]any{
+					"email": "user@example.com",
+				},
+				Runtime: geminicli.NewVirtualCredential("project-a", shared),
+			},
+			want: true,
+		},
+		{
+			name: "gemini api key account",
+			auth: &coreauth.Auth{
+				Provider:   "gemini",
+				Attributes: map[string]string{"api_key": "gemini-key"},
+			},
+			want: false,
+		},
+		{
+			name: "gemini oauth without project",
+			auth: &coreauth.Auth{
+				Provider: "gemini",
+				Metadata: map[string]any{"email": "user@example.com"},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isGeminiCLIOAuthAPICallAuth(tc.auth); got != tc.want {
+				t.Fatalf("isGeminiCLIOAuthAPICallAuth() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
