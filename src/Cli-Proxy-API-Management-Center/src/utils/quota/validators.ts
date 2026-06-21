@@ -5,6 +5,7 @@
 import type { AuthFileItem } from '@/types';
 import { GEMINI_CLI_IGNORED_MODEL_PREFIXES } from './constants';
 import { normalizeNumberValue } from './parsers';
+import { resolveGeminiCliProjectId } from './resolvers';
 
 export type QuotaProviderType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi';
 
@@ -55,9 +56,31 @@ export function readBooleanValue(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
+function readRecordValue(value: unknown): Record<string, unknown> | null {
+  return isRecordValue(value) ? value : null;
+}
+
 export function resolveAuthProvider(file: AuthFileItem): string {
-  const raw = file.provider ?? file.type ?? file.typo ?? '';
-  return String(raw).trim().toLowerCase();
+  const metadata = readRecordValue(file.metadata);
+  const attributes = readRecordValue(file.attributes);
+  const candidates = [
+    file.provider,
+    file.type,
+    file.typo,
+    metadata?.provider,
+    metadata?.type,
+    metadata?.typo,
+    attributes?.provider,
+    attributes?.type,
+    attributes?.typo,
+  ];
+
+  for (const candidate of candidates) {
+    const provider = readStringValue(candidate).toLowerCase();
+    if (provider) return provider;
+  }
+
+  return '';
 }
 
 export function isAntigravityFile(file: AuthFileItem): boolean {
@@ -90,9 +113,26 @@ export function isGeminiCliFile(file: AuthFileItem): boolean {
   if (provider === 'gemini-cli') return true;
   if (provider !== 'gemini') return false;
 
-  const accountType = readStringValue(file.account_type ?? file.accountType).toLowerCase();
-  const projectId = readStringValue(file.project_id ?? file.projectId);
-  return accountType === 'oauth' && projectId.length > 0;
+  const metadata = readRecordValue(file.metadata);
+  const attributes = readRecordValue(file.attributes);
+  const accountTypeCandidates = [
+    file.account_type,
+    file.accountType,
+    metadata?.account_type,
+    metadata?.accountType,
+    metadata?.auth_kind,
+    metadata?.authKind,
+    attributes?.account_type,
+    attributes?.accountType,
+    attributes?.auth_kind,
+    attributes?.authKind,
+  ];
+  const hasOAuthSignal = accountTypeCandidates.some((candidate) => {
+    const normalized = readStringValue(candidate).toLowerCase();
+    return normalized === 'oauth' || normalized === 'oauth2' || normalized === 'gemini-cli-oauth';
+  });
+
+  return hasOAuthSignal && Boolean(resolveGeminiCliProjectId(file));
 }
 
 export function isKimiFile(file: AuthFileItem): boolean {
