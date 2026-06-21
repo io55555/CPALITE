@@ -2,8 +2,8 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: 35c3d80ab9ea2def6bf7ca0a26c09263257e3485
-- tag: v7.2.22
+- commit: 369e560f061c4558831141d7f7a76fcff345ba14
+- tag: v7.2.26
 
 ## Cli-Proxy-API-Management-Center
 - branch: main

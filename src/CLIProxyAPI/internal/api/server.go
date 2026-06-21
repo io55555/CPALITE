@@ -36,6 +36,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
@@ -56,6 +57,19 @@ const oauthCallbackSuccessHTML = `<html><head><meta charset="utf-8"><title>Authe
 
 const defaultManagementConcurrencyLimit = 16
 const defaultManagementQueueLimit = 16
+
+var corsExposedResponseHeaders = []string{
+	"X-CPA-VERSION",
+	"X-CPA-COMMIT",
+	"X-CPA-BUILD-DATE",
+	"X-CPA-SUPPORT-PLUGIN",
+	"X-CPA-HOME-VERSION",
+	"X-CPA-HOME-BUILD-DATE",
+	"X-SERVER-VERSION",
+	"X-SERVER-BUILD-DATE",
+}
+
+var corsExposedResponseHeadersJoined = strings.Join(corsExposedResponseHeaders, ", ")
 
 type managementProcessorPool struct {
 	workers chan struct{}
@@ -129,6 +143,7 @@ type serverOptionConfig struct {
 	keepAliveTimeout     time.Duration
 	keepAliveOnTimeout   func()
 	postAuthHook         auth.PostAuthHook
+	pluginHost           *pluginhost.Host
 }
 
 // ServerOption customises HTTP server construction.
@@ -196,6 +211,13 @@ func WithPostAuthHook(hook auth.PostAuthHook) ServerOption {
 	}
 }
 
+// WithPluginHost registers dynamic plugin HTTP adapters with the server.
+func WithPluginHost(host *pluginhost.Host) ServerOption {
+	return func(cfg *serverOptionConfig) {
+		cfg.pluginHost = host
+	}
+}
+
 // Server represents the main API server.
 // It encapsulates the Gin engine, HTTP server, handlers, and configuration.
 type Server struct {
@@ -227,6 +249,9 @@ type Server struct {
 	// requestLogger is the request logger instance for dynamic configuration updates.
 	requestLogger logging.RequestLogger
 	loggerToggle  func(bool)
+
+	// pluginHost owns dynamic plugin route dispatch and interceptor wiring.
+	pluginHost *pluginhost.Host
 
 	// configFilePath is the absolute path to the YAML config file for persistence.
 	configFilePath string
@@ -340,8 +365,14 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		currentPath:         wd,
 		envManagementSecret: envManagementSecret,
 		wsRoutes:            make(map[string]struct{}),
+		pluginHost:          optionState.pluginHost,
 	}
 	s.wsAuthEnabled.Store(cfg.WebsocketAuth)
+	s.handlers.SetPluginHost(optionState.pluginHost)
+	if optionState.pluginHost != nil {
+		optionState.pluginHost.SetModelExecutor(s.handlers)
+		optionState.pluginHost.SetAuthManager(authManager)
+	}
 	s.configurePacketCaptureRulesProvider()
 	// Save initial YAML snapshot
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
@@ -355,6 +386,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	applySignatureCacheConfig(nil, cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
+	s.mgmt.SetPluginHost(optionState.pluginHost)
 	if optionState.localPassword != "" {
 		s.mgmt.SetLocalPassword(optionState.localPassword)
 	}
@@ -709,6 +741,9 @@ func (s *Server) registerManagementRoutes() {
 
 	log.Info("management routes registered after secret key configuration")
 
+	s.engine.POST("/v0/management/oauth-callback", s.managementAvailabilityMiddleware(), s.mgmt.PostOAuthCallback)
+	s.engine.GET("/v0/management/oauth-callback", s.managementAvailabilityMiddleware(), s.mgmt.GetOAuthCallback)
+
 	mgmt := s.engine.Group("/v0/management")
 	mgmt.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
 	{
@@ -897,7 +932,6 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
 		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
 		mgmt.GET("/xai-auth-url", s.mgmt.RequestXAIToken)
-		mgmt.POST("/oauth-callback", s.mgmt.PostOAuthCallback)
 		mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 	}
 }
@@ -1611,6 +1645,8 @@ func corsMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "*")
+		c.Header("Access-Control-Expose-Headers", corsExposedResponseHeadersJoined)
+		c.Header("X-CPA-SUPPORT-PLUGIN", pluginhost.SupportPluginHeaderValue())
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -1745,10 +1781,16 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
 
 	s.handlers.UpdateClients(&cfg.SDKConfig)
+	s.handlers.SetPluginHost(s.pluginHost)
+	if s.pluginHost != nil {
+		s.pluginHost.SetModelExecutor(s.handlers)
+		s.pluginHost.SetAuthManager(s.handlers.AuthManager)
+	}
 
 	if s.mgmt != nil {
 		s.mgmt.SetConfig(cfg)
 		s.mgmt.SetAuthManager(s.handlers.AuthManager)
+		s.mgmt.SetPluginHost(s.pluginHost)
 	}
 	s.ensureOpenAICompatKeyState(cfg)
 	if s.mgmt != nil {

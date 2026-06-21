@@ -25,6 +25,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/diff"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/synthesizer"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/wsrelay"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
@@ -372,6 +373,24 @@ func (s *Service) applyCoreAuthRemoval(ctx context.Context, id string) {
 	}
 }
 
+func (s *Service) unregisterOpenAICompatExecutor(providerKey string) {
+	if s == nil || s.coreManager == nil {
+		return
+	}
+	providerKey = strings.ToLower(strings.TrimSpace(providerKey))
+	if providerKey == "" {
+		return
+	}
+	existing, okExecutor := s.coreManager.Executor(providerKey)
+	if !okExecutor || existing == nil {
+		return
+	}
+	if _, okOpenAICompat := existing.(*executor.OpenAICompatExecutor); !okOpenAICompat {
+		return
+	}
+	s.coreManager.UnregisterExecutor(providerKey)
+}
+
 func (s *Service) applyRetryConfig(cfg *config.Config) {
 	if s == nil || s.coreManager == nil || cfg == nil {
 		return
@@ -464,6 +483,12 @@ func (s *Service) ensureExecutorsForAuthWithMode(a *coreauth.Auth, forceReplace 
 		providerKey := strings.ToLower(strings.TrimSpace(a.Provider))
 		if providerKey == "" {
 			providerKey = "openai-compatibility"
+		}
+		if s.pluginHost != nil &&
+			s.pluginHost.HasExecutorCandidateProvider(providerKey) &&
+			!s.hasNativeOpenAICompatExecutorConfig(a, providerKey) {
+			s.unregisterOpenAICompatExecutor(providerKey)
+			return
 		}
 		s.coreManager.RegisterExecutor(executor.NewOpenAICompatExecutor(providerKey, s.cfg))
 	}
@@ -602,9 +627,22 @@ func (s *Service) applyConfigUpdate(newCfg *config.Config) {
 		s.coreManager.SetConfig(newCfg)
 		s.coreManager.SetOAuthModelAlias(newCfg.OAuthModelAlias)
 	}
+	ctx := coreauth.WithSkipPersist(context.Background())
+	s.syncPluginRuntimeConfig(ctx)
+	var auths []*coreauth.Auth
+	if s.coreManager != nil {
+		auths = s.coreManager.List()
+	}
+	s.registerAvailableExecutors(context.Background(), executorRegistrationOptions{
+		includeBaseline:   newCfg.Home.Enabled,
+		forceReplaceAuths: true,
+		auths:             auths,
+	})
+	s.registerConfigAPIKeyAuths(ctx, newCfg)
 	if newCfg.Home.Enabled {
 		s.registerHomeExecutors()
 	}
+	s.syncPluginModelRuntime(ctx)
 	s.rebindExecutors()
 }
 
@@ -708,6 +746,53 @@ func (s *Service) syncPluginRuntimeConfig(ctx context.Context) bool {
 	}
 	s.coreManager.SetPluginScheduler(s.pluginHost)
 	return true
+}
+
+func (s *Service) registerConfigAPIKeyAuths(ctx context.Context, cfg *config.Config) {
+	if s == nil || s.coreManager == nil || cfg == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	configSynth := synthesizer.NewConfigSynthesizer()
+	auths, errSynthesize := configSynth.Synthesize(&synthesizer.SynthesisContext{
+		Config:      cfg,
+		Now:         time.Now(),
+		IDGenerator: synthesizer.NewStableIDGenerator(),
+	})
+	if errSynthesize != nil {
+		log.Warnf("failed to synthesize config API key auths: %v", errSynthesize)
+		return
+	}
+	for _, auth := range auths {
+		if !coreauth.IsConfigAPIKeyAuth(auth) {
+			continue
+		}
+		s.applyCoreAuthAddOrUpdate(ctx, auth)
+	}
+}
+
+func (s *Service) syncPluginModelRuntime(ctx context.Context) {
+	if s == nil || s.pluginHost == nil || s.coreManager == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.pluginHost.RegisterModels(ctx, registry.GetGlobalRegistry())
+	s.registerAvailableExecutors(ctx, executorRegistrationOptions{
+		includeBaseline:   s.cfg != nil && s.cfg.Home.Enabled,
+		includePlugins:    true,
+		forceReplaceAuths: true,
+		auths:             s.coreManager.List(),
+	})
+	for _, auth := range s.coreManager.List() {
+		s.registerModelsForAuth(auth)
+		if auth != nil {
+			s.coreManager.RefreshSchedulerEntry(auth.ID)
+		}
+	}
 }
 
 func (s *Service) applyHomeOverlay(remoteCfg *config.Config) {
