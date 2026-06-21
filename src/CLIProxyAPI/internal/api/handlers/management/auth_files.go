@@ -348,8 +348,33 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 				emailValue := gjson.GetBytes(data, "email").String()
 				fileData["type"] = typeValue
 				fileData["email"] = emailValue
+				for _, accountType := range []string{
+					gjson.GetBytes(data, "account_type").String(),
+					gjson.GetBytes(data, "accountType").String(),
+					gjson.GetBytes(data, "auth_kind").String(),
+					gjson.GetBytes(data, "authKind").String(),
+				} {
+					if accountType = strings.TrimSpace(accountType); accountType != "" {
+						fileData["account_type"] = accountType
+						break
+					}
+				}
+				if account := strings.TrimSpace(gjson.GetBytes(data, "account").String()); account != "" {
+					fileData["account"] = account
+				}
 				if projectID := strings.TrimSpace(gjson.GetBytes(data, "project_id").String()); projectID != "" {
 					fileData["project_id"] = projectID
+				}
+				normalizedType := strings.ToLower(strings.TrimSpace(typeValue))
+				if _, hasAccountType := fileData["account_type"]; !hasAccountType &&
+					(normalizedType == "gemini" || normalizedType == "gemini-cli") &&
+					strings.TrimSpace(gjson.GetBytes(data, "project_id").String()) != "" &&
+					strings.TrimSpace(gjson.GetBytes(data, "api_key").String()) == "" &&
+					strings.TrimSpace(gjson.GetBytes(data, "apiKey").String()) == "" {
+					fileData["account_type"] = "oauth"
+					if _, hasAccount := fileData["account"]; !hasAccount && strings.TrimSpace(emailValue) != "" {
+						fileData["account"] = strings.TrimSpace(emailValue)
+					}
 				}
 				if pv := gjson.GetBytes(data, "priority"); pv.Exists() {
 					switch pv.Type {

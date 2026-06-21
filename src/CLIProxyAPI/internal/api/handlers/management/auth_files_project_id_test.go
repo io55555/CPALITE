@@ -69,6 +69,32 @@ func TestListAuthFilesFromDisk_IncludesProjectID(t *testing.T) {
 	}
 }
 
+func TestListAuthFilesFromDisk_ClassifiesGeminiCLIAuth(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+
+	authDir := t.TempDir()
+	filePath := filepath.Join(authDir, "user@example.com-project-a.json")
+	if errWrite := os.WriteFile(filePath, []byte(`{"type":"gemini","email":"user@example.com","project_id":"project-a"}`), 0o600); errWrite != nil {
+		t.Fatalf("failed to write auth file: %v", errWrite)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, nil)
+
+	entry := firstAuthFileEntry(t, h)
+	if got := entry["type"]; got != "gemini" {
+		t.Fatalf("expected type gemini, got %#v", got)
+	}
+	if got := entry["project_id"]; got != "project-a" {
+		t.Fatalf("expected project_id %q, got %#v", "project-a", got)
+	}
+	if got := entry["account_type"]; got != "oauth" {
+		t.Fatalf("expected account_type oauth, got %#v", got)
+	}
+	if got := entry["account"]; got != "user@example.com" {
+		t.Fatalf("expected account email, got %#v", got)
+	}
+}
+
 func TestListAuthFiles_IncludesWebsocketsFromManager(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 

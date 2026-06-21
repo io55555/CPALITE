@@ -131,8 +131,20 @@ export function isGeminiCliFile(file: AuthFileItem): boolean {
     const normalized = readStringValue(candidate).toLowerCase();
     return normalized === 'oauth' || normalized === 'oauth2' || normalized === 'gemini-cli-oauth';
   });
+  const hasAPIKeySignal = accountTypeCandidates.some((candidate) => {
+    const normalized = readStringValue(candidate).toLowerCase();
+    return normalized === 'api_key' || normalized === 'api-key' || normalized === 'apikey';
+  }) || Boolean(readStringValue(file.api_key ?? file.apiKey ?? metadata?.api_key ?? metadata?.apiKey ?? attributes?.api_key ?? attributes?.apiKey));
+  const hasOAuthIdentity = [
+    file.email,
+    file.account,
+    metadata?.email,
+    metadata?.account,
+    attributes?.email,
+    attributes?.account,
+  ].some((candidate) => Boolean(readStringValue(candidate)));
 
-  return hasOAuthSignal && Boolean(resolveGeminiCliProjectId(file));
+  return Boolean(resolveGeminiCliProjectId(file)) && (hasOAuthSignal || (!hasAPIKeySignal && hasOAuthIdentity));
 }
 
 export function isKimiFile(file: AuthFileItem): boolean {
