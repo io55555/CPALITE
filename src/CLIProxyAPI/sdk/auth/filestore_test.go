@@ -193,6 +193,42 @@ func TestFileTokenStoreListExpandsPluginMultiAuths(t *testing.T) {
 	}
 }
 
+func TestFileTokenStoreListKeepsGeminiOAuthAuth(t *testing.T) {
+	baseDir := t.TempDir()
+	path := filepath.Join(baseDir, "user@example.com-project-a.json")
+	if errWrite := os.WriteFile(path, []byte(`{"type":"gemini","email":"user@example.com","project_id":"project-a"}`), 0o600); errWrite != nil {
+		t.Fatalf("write auth file: %v", errWrite)
+	}
+
+	RegisterPluginAuthParser(nil)
+	t.Cleanup(func() {
+		RegisterPluginAuthParser(nil)
+	})
+
+	store := NewFileTokenStore()
+	store.SetBaseDir(baseDir)
+	auths, errList := store.List(context.Background())
+	if errList != nil {
+		t.Fatalf("List() error = %v", errList)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("List() len = %d, want one Gemini OAuth auth", len(auths))
+	}
+	auth := auths[0]
+	if auth.Provider != "gemini" {
+		t.Fatalf("Provider = %q, want gemini", auth.Provider)
+	}
+	if gotProject := auth.Metadata["project_id"]; gotProject != "project-a" {
+		t.Fatalf("project_id = %#v, want project-a", gotProject)
+	}
+	if gotEmail := auth.Attributes["email"]; gotEmail != "user@example.com" {
+		t.Fatalf("email attribute = %q, want user@example.com", gotEmail)
+	}
+	if gotKind, gotAccount := auth.AccountInfo(); gotKind != "oauth" || gotAccount != "user@example.com" {
+		t.Fatalf("AccountInfo() = %q/%q, want oauth/user@example.com", gotKind, gotAccount)
+	}
+}
+
 func TestFileTokenStoreListPluginHandledEmptySuppressesBuiltin(t *testing.T) {
 	baseDir := t.TempDir()
 	path := filepath.Join(baseDir, "codex.json")
