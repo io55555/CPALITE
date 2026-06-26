@@ -2,13 +2,15 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: 369e560f061c4558831141d7f7a76fcff345ba14
-- tag: v7.2.26
+- commit: 4c0c60292d27102f370b2469468594073fa49062
+- tag: v7.2.42
+- note: merged with local enhancement-preserving overrides
 
 ## Cli-Proxy-API-Management-Center
 - branch: main
-- commit: ed4124ff3b24f526b0a84003451121794c14d9bd
-- tag: v1.17.1
+- commit: d7847dad8190ff1eaec3aa5db93ae8abeec3c0d5
+- tag: v1.17.6
+- note: merged with local Provider Workbench/quota preservation; incompatible sponsor UI wiring was not enabled
 
 ## CLIProxyAPI-Pro
 - repository: https://github.com/ssfun/CLIProxyAPI-Pro

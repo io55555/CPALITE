@@ -1,4 +1,4 @@
-import type { SVGProps } from 'react';
+﻿import type { SVGProps } from 'react';
 
 // Inline SVG icons (Lucide, ISC). We embed paths to keep the WebUI single-file/offline friendly.
 // Source: https://github.com/lucide-icons/lucide (via lucide-static).
@@ -467,6 +467,14 @@ export function IconSidebarDashboard({ size = 20, ...props }: IconProps) {
       <rect x="13.5" y="3" width="7.5" height="5" rx="1.5" fill="currentColor" fillOpacity="0.12" />
       <rect x="3" y="14" width="7.5" height="7" rx="1.5" fill="currentColor" fillOpacity="0.12" />
       <rect x="13.5" y="11" width="7.5" height="10" rx="1.5" />
+    </svg>
+  );
+}
+
+export function IconSidebarQuickStart({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...sidebarSvgProps} width={size} height={size} {...props}>
+      <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />
     </svg>
   );
 }

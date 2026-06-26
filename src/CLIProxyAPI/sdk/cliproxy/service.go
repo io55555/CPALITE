@@ -15,6 +15,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/authrecovery"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/homeplugins"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
@@ -106,6 +107,9 @@ type Service struct {
 	homeCancel       context.CancelFunc
 	homeLogForwarder *logging.HomeAppLogForwarder
 	pluginHost       *pluginhost.Host
+
+	homePluginSyncMu  sync.Mutex
+	homePluginSyncKey string
 }
 
 type executorRegistrationOptions struct {
@@ -796,15 +800,24 @@ func (s *Service) syncPluginModelRuntime(ctx context.Context) {
 }
 
 func (s *Service) applyHomeOverlay(remoteCfg *config.Config) {
+	if errApply := s.applyHomeOverlayContext(context.Background(), remoteCfg); errApply != nil {
+		log.Warnf("failed to apply home config payload: %v", errApply)
+	}
+}
+
+func (s *Service) applyHomeOverlayContext(ctx context.Context, remoteCfg *config.Config) error {
 	if s == nil || remoteCfg == nil {
-		return
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	s.cfgMu.RLock()
 	baseCfg := s.cfg
 	s.cfgMu.RUnlock()
 	if baseCfg == nil {
-		return
+		return nil
 	}
 
 	merged := *remoteCfg
@@ -815,7 +828,23 @@ func (s *Service) applyHomeOverlay(remoteCfg *config.Config) {
 	forceHomeRuntimeConfig(&merged)
 
 	logHomeConfigChanges(baseCfg, &merged)
+	report, syncKey, didSync, errSync := s.syncHomePlugins(ctx, &merged)
+	if didSync && errSync != nil {
+		log.Warnf("failed to sync home plugins: %v", errSync)
+	}
 	s.applyConfigUpdate(&merged)
+	if didSync {
+		errLoad := homeplugins.MarkLoadResults(&report, s.pluginHost)
+		if errLoad != nil {
+			log.Warnf("failed to load home plugins after config update: %v", errLoad)
+		}
+		s.reportHomePluginStatus(ctx, &merged, report)
+		if errSync == nil && errLoad == nil {
+			s.markHomePluginsSynced(syncKey)
+		}
+	}
+	s.processHomePluginTasks(ctx, &merged)
+	return nil
 }
 
 func logHomeConfigChanges(oldCfg, newCfg *config.Config) {

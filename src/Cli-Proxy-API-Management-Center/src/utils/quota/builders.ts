@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Builder functions for constructing quota data structures.
  */
 
@@ -324,12 +324,13 @@ function kimiResetHint(data: Record<string, unknown>): string | undefined {
 
 function kimiDurationToken(duration: number, rawTimeUnit: unknown): string {
   const unit = typeof rawTimeUnit === 'string' ? rawTimeUnit.trim().toUpperCase() : '';
-  if (unit === 'MINUTES') {
+  if (unit === 'SECONDS' || unit === 'SECOND') return `${duration}s`;
+  if (!unit || unit === 'MINUTES' || unit === 'MINUTE') {
     return duration % 60 === 0 ? `${duration / 60}h` : `${duration}m`;
   }
-  if (unit === 'HOURS') return `${duration}h`;
-  if (unit === 'DAYS') return `${duration}d`;
-  return `${duration}s`;
+  if (unit === 'HOURS' || unit === 'HOUR') return `${duration}h`;
+  if (unit === 'DAYS' || unit === 'DAY') return `${duration}d`;
+  return duration % 60 === 0 ? `${duration / 60}h` : `${duration}m`;
 }
 
 function kimiLimitLabel(

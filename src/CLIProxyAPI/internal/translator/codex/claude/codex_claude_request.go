@@ -14,6 +14,7 @@ import (
 
 	sigcompat "github.com/router-for-me/CLIProxyAPI/v7/internal/signature"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
+	translatorcommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/common"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -87,6 +88,14 @@ func ConvertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool) 
 		for i := 0; i < len(messageResults); i++ {
 			messageResult := messageResults[i]
 			messageRole := messageResult.Get("role").String()
+			if messageRole == "system" {
+				if reminderText, ok := translatorcommon.ClaudeMessageSystemReminderText(messageResult.Get("content")); ok {
+					message := []byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}`)
+					message, _ = sjson.SetBytes(message, "content.0.text", reminderText)
+					template, _ = sjson.SetRawBytes(template, "input.-1", message)
+				}
+				continue
+			}
 
 			newMessage := func() []byte {
 				msg := []byte(`{"type":"message","role":"","content":[]}`)

@@ -1,4 +1,4 @@
-export type PluginConfigFieldType =
+﻿export type PluginConfigFieldType =
   | 'string'
   | 'number'
   | 'integer'
@@ -39,6 +39,7 @@ export interface PluginListEntry {
   enabled: boolean;
   effectiveEnabled: boolean;
   supportsOAuth: boolean;
+  oauthProvider?: string;
   logo: string;
   configFields: PluginConfigField[];
   menus: PluginMenu[];
