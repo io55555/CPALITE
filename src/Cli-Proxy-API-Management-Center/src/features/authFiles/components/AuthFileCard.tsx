@@ -7,7 +7,9 @@ import {
   IconDownload,
   IconInfo,
   IconModelCluster,
+  IconRefreshCw,
   IconSettings,
+  IconTimer,
   IconTrash2,
 } from '@/components/ui/icons';
 import { ProviderStatusBar } from '@/components/providers/ProviderStatusBar';
@@ -35,6 +37,7 @@ import {
 } from '@/features/authFiles/constants';
 import type { AuthFileStatusBarData } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
 import { AuthFileQuotaSection } from '@/features/authFiles/components/AuthFileQuotaSection';
+import { parseTimestampMs } from '@/utils/timestamp';
 import styles from '@/pages/AuthFilesPage.module.scss';
 
 const HEALTHY_STATUS_MESSAGES = new Set(['ok', 'healthy', 'ready', 'success', 'available']);
@@ -55,12 +58,35 @@ export type AuthFileCardProps = {
   onDelete: (name: string) => void;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
   onToggleSelect: (name: string) => void;
+  nowMs?: number;
+  clearingCooldown?: boolean;
+  onClearCooldown?: (file: AuthFileItem) => void;
 };
 
 const resolveQuotaType = (file: AuthFileItem): QuotaProviderType | null => {
   const provider = resolveAuthProvider(file);
   if (!QUOTA_PROVIDER_TYPES.has(provider as QuotaProviderType)) return null;
   return provider as QuotaProviderType;
+};
+
+const formatCooldownDuration = (durationMs: number): string => {
+  const totalSeconds = Math.max(0, Math.ceil(durationMs / 1000));
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}天`);
+  if (hours > 0 || parts.length > 0) parts.push(`${hours}小时`);
+  if (minutes > 0 || parts.length > 0) parts.push(`${minutes}分钟`);
+  parts.push(`${seconds}秒`);
+  return parts.join('');
+};
+
+export const getAuthFileCooldownUntilMs = (file: AuthFileItem): number | null => {
+  const parsed = parseTimestampMs(file.next_retry_after ?? file.nextRetryAfter);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
 };
 
 export function AuthFileCard(props: AuthFileCardProps) {
@@ -81,6 +107,9 @@ export function AuthFileCard(props: AuthFileCardProps) {
     onDelete,
     onToggleStatus,
     onToggleSelect,
+    nowMs = Date.now(),
+    clearingCooldown = false,
+    onClearCooldown,
   } = props;
 
   const recentBuckets = normalizeRecentRequestBuckets(file.recent_requests ?? file.recentRequests);
@@ -125,6 +154,11 @@ export function AuthFileCard(props: AuthFileCardProps) {
 
   const priorityValue = parsePriorityValue(file.priority ?? file['priority']);
   const noteValue = typeof file.note === 'string' ? file.note.trim() : '';
+  const cooldownUntilMs = getAuthFileCooldownUntilMs(file);
+  const cooldownRemainingMs =
+    cooldownUntilMs !== null ? Math.max(0, cooldownUntilMs - nowMs) : 0;
+  const isCooling = cooldownRemainingMs > 0;
+  const cooldownLabel = isCooling ? formatCooldownDuration(cooldownRemainingMs) : '';
   const stateLabel = isRuntimeOnly
     ? t('auth_files.type_virtual') || '虚拟认证文件'
     : file.disabled
@@ -255,6 +289,37 @@ export function AuthFileCard(props: AuthFileCardProps) {
                 quotaType={quotaType}
                 disableControls={disableControls}
               />
+            )}
+
+            {isCooling && (
+              <div className={styles.cooldownPanel}>
+                <div className={styles.cooldownInfo}>
+                  <IconTimer className={styles.cooldownIcon} size={15} />
+                  <span className={styles.cooldownLabel}>
+                    {t('auth_files.cooldown_countdown_label', { defaultValue: '冷却倒计时' })}
+                  </span>
+                  <span className={styles.cooldownValue}>{cooldownLabel}</span>
+                </div>
+                {onClearCooldown && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onClearCooldown(file)}
+                    className={styles.cooldownClearButton}
+                    title={t('auth_files.clear_cooldown_button', { defaultValue: '清除冷却' })}
+                    disabled={disableControls || clearingCooldown}
+                  >
+                    {clearingCooldown ? (
+                      <LoadingSpinner size={13} />
+                    ) : (
+                      <IconRefreshCw className={styles.actionIcon} size={14} />
+                    )}
+                    <span className={styles.actionButtonLabel}>
+                      {t('auth_files.clear_cooldown_button', { defaultValue: '清除冷却' })}
+                    </span>
+                  </Button>
+                )}
+              </div>
             )}
           </div>
 

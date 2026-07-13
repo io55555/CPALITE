@@ -46,6 +46,7 @@ import { AuthFileModelsModal } from '@/features/authFiles/components/AuthFileMod
 import { AuthFilesPrefixProxyEditorModal } from '@/features/authFiles/components/AuthFilesPrefixProxyEditorModal';
 import { OAuthExcludedCard } from '@/features/authFiles/components/OAuthExcludedCard';
 import { OAuthModelAliasCard } from '@/features/authFiles/components/OAuthModelAliasCard';
+import { authFilesApi } from '@/services/api';
 import { useAuthFilesData } from '@/features/authFiles/hooks/useAuthFilesData';
 import { useAuthFilesModels } from '@/features/authFiles/hooks/useAuthFilesModels';
 import { useAuthFilesOauth } from '@/features/authFiles/hooks/useAuthFilesOauth';
@@ -62,6 +63,8 @@ import {
   type AuthFilesSortMode,
 } from '@/features/authFiles/uiState';
 import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';
+import type { AuthFileItem } from '@/types';
+import { getAuthFileCooldownUntilMs } from '@/features/authFiles/components/AuthFileCard';
 import styles from './AuthFilesPage.module.scss';
 
 const easePower3Out = (progress: number) => 1 - (1 - progress) ** 4;
@@ -99,7 +102,11 @@ const normalizePersistedStatusFilterMode = (value: unknown): AuthFilesStatusFilt
   return isAuthFilesStatusFilterMode(value) ? value : null;
 };
 
-export function AuthFilesPage() {
+type AuthFilesPageContentProps = {
+  cooldownView?: boolean;
+};
+
+function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProps) {
   const { t } = useTranslation();
   const showNotification = useNotificationStore((state) => state.showNotification);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -111,6 +118,9 @@ export function AuthFilesPage() {
   const [filter, setFilter] = useState<'all' | string>('all');
   const [statusFilterMode, setStatusFilterMode] = useState<AuthFilesStatusFilterMode>('all');
   const [compactMode, setCompactMode] = useState(false);
+  const [cooldownOnly, setCooldownOnly] = useState(cooldownView);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [clearingCooldown, setClearingCooldown] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSizeByMode, setPageSizeByMode] = useState({
@@ -209,6 +219,13 @@ export function AuthFilesPage() {
   const problemOnly = statusFilterMode === 'problem';
   const disabledOnly = statusFilterMode === 'disabled';
   const enabledOnly = statusFilterMode === 'enabled';
+
+  useInterval(
+    () => {
+      setNowMs(Date.now());
+    },
+    cooldownView ? 1000 : null
+  );
 
   useEffect(() => {
     const persistedCompactMode = readPersistedAuthFilesCompactMode();
@@ -365,6 +382,48 @@ export function AuthFilesPage() {
     await Promise.all([loadFiles(), loadExcluded(), loadModelAlias()]);
   }, [loadFiles, loadExcluded, loadModelAlias]);
 
+  const handleClearCooldown = useCallback(
+    async (file: AuthFileItem) => {
+      const authID = typeof file.id === 'string' ? file.id.trim() : '';
+      const authIndex =
+        typeof file['auth_index'] === 'string' || typeof file['auth_index'] === 'number'
+          ? String(file['auth_index']).trim()
+          : typeof file.authIndex === 'string' || typeof file.authIndex === 'number'
+            ? String(file.authIndex).trim()
+            : '';
+      const name = file.name?.trim() ?? '';
+      const key = authID || authIndex || name;
+      if (!key) return;
+      setClearingCooldown((current) => ({ ...current, [key]: true }));
+      try {
+        await authFilesApi.clearCooldown({
+          auth_id: authID || undefined,
+          auth_index: authIndex || undefined,
+          name: name || undefined,
+        });
+        showNotification(
+          t('auth_files.clear_cooldown_success', { defaultValue: '已清除冷却状态' }),
+          'success'
+        );
+        await loadFiles();
+      } catch (err) {
+        showNotification(
+          err instanceof Error && err.message
+            ? err.message
+            : t('auth_files.clear_cooldown_failed', { defaultValue: '清除冷却状态失败' }),
+          'error'
+        );
+      } finally {
+        setClearingCooldown((current) => {
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+      }
+    },
+    [loadFiles, showNotification, t]
+  );
+
   useHeaderRefresh(handleHeaderRefresh);
 
   useEffect(() => {
@@ -396,9 +455,13 @@ export function AuthFilesPage() {
         if (enabledOnly && file.disabled === true) return false;
         if (disabledOnly && file.disabled !== true) return false;
         if (problemOnly && !hasAuthFileStatusMessage(file)) return false;
+        if (cooldownOnly) {
+          const untilMs = getAuthFileCooldownUntilMs(file);
+          if (untilMs === null || untilMs <= nowMs) return false;
+        }
         return true;
       }),
-    [disabledOnly, enabledOnly, files, problemOnly]
+    [cooldownOnly, disabledOnly, enabledOnly, files, nowMs, problemOnly]
   );
 
   const statusFilterOptions = useMemo(
@@ -705,8 +768,18 @@ export function AuthFilesPage() {
   return (
     <div className={styles.container}>
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>{t('auth_files.title')}</h1>
-        <p className={styles.description}>{t('auth_files.description')}</p>
+        <h1 className={styles.pageTitle}>
+          {cooldownView
+            ? t('auth_files.cooldown_title', { defaultValue: '认证文件(冷却)' })
+            : t('auth_files.title')}
+        </h1>
+        <p className={styles.description}>
+          {cooldownView
+            ? t('auth_files.cooldown_description', {
+                defaultValue: '查看认证文件冷却倒计时，并清除已确认可恢复账号的冷却状态。',
+              })
+            : t('auth_files.description')}
+        </p>
       </div>
 
       <Card
@@ -818,6 +891,23 @@ export function AuthFilesPage() {
                       }
                     />
                   </div>
+                  <div className={styles.filterOptionsToggle}>
+                    <ToggleSwitch
+                      checked={cooldownOnly}
+                      onChange={(value) => {
+                        setCooldownOnly(value);
+                        setPage(1);
+                      }}
+                      ariaLabel={t('auth_files.cooldown_only_label', {
+                        defaultValue: '冷却账号',
+                      })}
+                      label={
+                        <span className={styles.filterToggleLabel}>
+                          {t('auth_files.cooldown_only_label', { defaultValue: '冷却账号' })}
+                        </span>
+                      }
+                    />
+                  </div>
                 </div>
                 <div className={`${styles.filterItem} ${styles.filterToggleItem}`}>
                   <label>{t('auth_files.display_options_label')}</label>
@@ -858,6 +948,18 @@ export function AuthFilesPage() {
                     statusUpdating={statusUpdating}
                     quotaFilterType={quotaFilterType}
                     statusBarCache={statusBarCache}
+                    nowMs={nowMs}
+                    clearingCooldown={
+                      clearingCooldown[
+                        (typeof file.id === 'string' && file.id.trim()) ||
+                          (typeof file['auth_index'] === 'string' ||
+                          typeof file['auth_index'] === 'number'
+                            ? String(file['auth_index']).trim()
+                            : '') ||
+                          file.name
+                      ] === true
+                    }
+                    onClearCooldown={cooldownView ? handleClearCooldown : undefined}
                     onShowModels={showModels}
                     onDownload={handleDownload}
                     onOpenPrefixProxyEditor={openPrefixProxyEditor}
@@ -1025,4 +1127,12 @@ export function AuthFilesPage() {
         : null}
     </div>
   );
+}
+
+export function AuthFilesPage() {
+  return <AuthFilesPageContent />;
+}
+
+export function AuthFilesCooldownPage() {
+  return <AuthFilesPageContent cooldownView />;
 }

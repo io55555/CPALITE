@@ -29,6 +29,10 @@ export interface Config {
   debug?: boolean;
   proxyUrl?: string;
   requestRetry?: number;
+  quotaCooldownBaseSeconds?: number;
+  quotaCooldownMaxSeconds?: number;
+  proxyFailureCooldownSeconds?: number;
+  proxyFailureMaxCooldownSeconds?: number;
   quotaExceeded?: QuotaExceededConfig;
   clean?: AuthPoolCleanConfig;
   usageStatisticsEnabled?: boolean;

@@ -394,6 +394,7 @@ export function MainLayout() {
     { path: '/ai-providers', label: t('nav.ai_providers'), icon: sidebarIcons.aiProviders },
     { path: '/ai-providers-class', label: 'AI 提供商class', icon: sidebarIcons.aiProviders },
     { path: '/auth-files', label: t('nav.auth_files'), icon: sidebarIcons.authFiles },
+    { path: '/auth-files-cooldown', label: '认证文件(冷却)', icon: sidebarIcons.authFiles },
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
     { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },
     { path: '/monitor', label: t('nav.monitoring_center'), icon: sidebarIcons.monitoring },
@@ -428,6 +429,7 @@ export function MainLayout() {
     const authFilesIndex = navOrder.indexOf('/auth-files');
     if (authFilesIndex !== -1) {
       if (normalizedPath === '/auth-files') return authFilesIndex;
+      if (normalizedPath === '/auth-files-cooldown') return authFilesIndex + 0.05;
       if (normalizedPath.startsWith('/auth-files/')) {
         if (normalizedPath.startsWith('/auth-files/oauth-excluded')) return authFilesIndex + 0.1;
         if (normalizedPath.startsWith('/auth-files/oauth-model-alias')) return authFilesIndex + 0.2;
@@ -453,7 +455,9 @@ export function MainLayout() {
     const from = normalize(fromPathname);
     const to = normalize(toPathname);
     const isAuthFiles = (pathname: string) =>
-      pathname === '/auth-files' || pathname.startsWith('/auth-files/');
+      pathname === '/auth-files' ||
+      pathname === '/auth-files-cooldown' ||
+      pathname.startsWith('/auth-files/');
     const isAiProviders = (pathname: string) =>
       pathname === '/ai-providers' || pathname.startsWith('/ai-providers/');
     if (isAuthFiles(from) && isAuthFiles(to)) return 'ios';

@@ -87,8 +87,8 @@ const (
 	// wasn't updated). Without this guard, the auto-refresh loop can tight-loop and
 	// burn CPU at idle.
 	refreshIneffectiveBackoff = 30 * time.Second
-	quotaBackoffBase          = time.Second
-	quotaBackoffMax           = 30 * time.Minute
+	defaultQuotaBackoffBase   = 10 * time.Minute
+	defaultQuotaBackoffMax    = 12 * time.Hour
 )
 
 var quotaCooldownDisabled atomic.Bool
@@ -107,7 +107,7 @@ func quotaCooldownDisabledForAuth(auth *Auth) bool {
 	return quotaCooldownDisabled.Load()
 }
 
-const defaultProxyFailureCooldown = 300 * time.Second
+const defaultProxyFailureCooldown = 180 * time.Second
 
 // Result captures execution outcome used to adjust auth state.
 type Result struct {
@@ -2994,7 +2994,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 								if result.RetryAfter != nil {
 									next = now.Add(*result.RetryAfter)
 								} else {
-									cooldown, nextLevel := nextQuotaCooldown(backoffLevel, disableCooling)
+									cooldown, nextLevel := m.nextQuotaCooldown(backoffLevel, disableCooling)
 									if cooldown > 0 {
 										next = now.Add(cooldown)
 									}
@@ -3030,7 +3030,8 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					updateAggregatedAvailability(auth, now)
 				}
 			} else {
-				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown())
+				baseCooldown, maxCooldown := m.quotaCooldownBounds()
+				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown(), baseCooldown, maxCooldown)
 			}
 			applyPacketFilterActionState(ctx, auth, result.AuthID, result.Model, now)
 		}
@@ -3517,6 +3518,37 @@ func (m *Manager) proxyFailureCooldown() time.Duration {
 	return time.Duration(cfg.ProxyFailureCooldownSeconds) * time.Second
 }
 
+func (m *Manager) quotaCooldownBounds() (time.Duration, time.Duration) {
+	base := defaultQuotaBackoffBase
+	maxCooldown := defaultQuotaBackoffMax
+	if m != nil {
+		cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+		if cfg != nil {
+			if cfg.QuotaCooldownBaseSeconds > 0 {
+				base = time.Duration(cfg.QuotaCooldownBaseSeconds) * time.Second
+			}
+			if cfg.QuotaCooldownMaxSeconds > 0 {
+				maxCooldown = time.Duration(cfg.QuotaCooldownMaxSeconds) * time.Second
+			}
+		}
+	}
+	if base <= 0 {
+		base = defaultQuotaBackoffBase
+	}
+	if maxCooldown <= 0 {
+		maxCooldown = defaultQuotaBackoffMax
+	}
+	if maxCooldown < base {
+		maxCooldown = base
+	}
+	return base, maxCooldown
+}
+
+func (m *Manager) nextQuotaCooldown(prevLevel int, disableCooling bool) (time.Duration, int) {
+	base, maxCooldown := m.quotaCooldownBounds()
+	return nextQuotaCooldown(prevLevel, disableCooling, base, maxCooldown)
+}
+
 func isRequestScopedNotFoundMessage(message string) bool {
 	if message == "" {
 		return false
@@ -3575,7 +3607,7 @@ func isRequestInvalidError(err error) bool {
 	}
 }
 
-func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time, proxyCooldown time.Duration) {
+func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time, proxyCooldown time.Duration, quotaCooldownBase time.Duration, quotaCooldownMax time.Duration) {
 	if auth == nil {
 		return
 	}
@@ -3632,7 +3664,7 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 			if retryAfter != nil {
 				next = now.Add(*retryAfter)
 			} else {
-				cooldown, nextLevel := nextQuotaCooldown(auth.Quota.BackoffLevel, disableCooling)
+				cooldown, nextLevel := nextQuotaCooldown(auth.Quota.BackoffLevel, disableCooling, quotaCooldownBase, quotaCooldownMax)
 				if cooldown > 0 {
 					next = now.Add(cooldown)
 				}
@@ -3656,19 +3688,28 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 }
 
 // nextQuotaCooldown returns the next cooldown duration and updated backoff level for repeated quota errors.
-func nextQuotaCooldown(prevLevel int, disableCooling bool) (time.Duration, int) {
+func nextQuotaCooldown(prevLevel int, disableCooling bool, base time.Duration, maxCooldown time.Duration) (time.Duration, int) {
 	if prevLevel < 0 {
 		prevLevel = 0
 	}
 	if disableCooling {
 		return 0, prevLevel
 	}
-	cooldown := quotaBackoffBase * time.Duration(1<<prevLevel)
-	if cooldown < quotaBackoffBase {
-		cooldown = quotaBackoffBase
+	if base <= 0 {
+		base = defaultQuotaBackoffBase
 	}
-	if cooldown >= quotaBackoffMax {
-		return quotaBackoffMax, prevLevel
+	if maxCooldown <= 0 {
+		maxCooldown = defaultQuotaBackoffMax
+	}
+	if maxCooldown < base {
+		maxCooldown = base
+	}
+	cooldown := base * time.Duration(1<<prevLevel)
+	if cooldown < base {
+		cooldown = base
+	}
+	if cooldown >= maxCooldown {
+		return maxCooldown, prevLevel
 	}
 	return cooldown, prevLevel + 1
 }

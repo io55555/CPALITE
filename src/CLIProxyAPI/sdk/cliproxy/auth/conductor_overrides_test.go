@@ -252,6 +252,25 @@ func (e *retryAfterStatusError) RetryAfter() *time.Duration {
 	return &d
 }
 
+type statusOnlyError struct {
+	status  int
+	message string
+}
+
+func (e *statusOnlyError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.message
+}
+
+func (e *statusOnlyError) StatusCode() int {
+	if e == nil {
+		return 0
+	}
+	return e.status
+}
+
 func newCredentialRetryLimitTestManager(t *testing.T, maxRetryCredentials int) (*Manager, *credentialRetryLimitExecutor) {
 	t.Helper()
 
@@ -807,6 +826,114 @@ func TestManager_Execute_DisableCooling_RetriesAfter429RetryAfter(t *testing.T) 
 	calls := executor.ExecuteCalls()
 	if len(calls) != 4 {
 		t.Fatalf("execute calls = %d, want 4 (initial + 3 retries)", len(calls))
+	}
+}
+
+func TestManager_Execute_429WithoutRetryAfterDoesNotRetryInsideMaxInterval(t *testing.T) {
+	prev := quotaCooldownDisabled.Load()
+	quotaCooldownDisabled.Store(false)
+	t.Cleanup(func() { quotaCooldownDisabled.Store(prev) })
+
+	m := NewManager(nil, nil, nil)
+	m.SetRetryConfig(3, 30*time.Second, 0)
+
+	executor := &authFallbackExecutor{
+		id: "claude",
+		executeErrors: map[string]error{
+			"auth-429-no-retryafter": &statusOnlyError{
+				status:  http.StatusTooManyRequests,
+				message: "quota exhausted",
+			},
+		},
+	}
+	m.RegisterExecutor(executor)
+
+	auth := &Auth{ID: "auth-429-no-retryafter", Provider: "claude"}
+	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	model := "test-model-429-no-retryafter"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(auth.ID, "claude", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { reg.UnregisterClient(auth.ID) })
+
+	_, errExecute := m.Execute(context.Background(), []string{"claude"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute == nil {
+		t.Fatal("expected execute error")
+	}
+	if statusCodeFromError(errExecute) != http.StatusTooManyRequests {
+		t.Fatalf("execute status = %d, want %d", statusCodeFromError(errExecute), http.StatusTooManyRequests)
+	}
+
+	calls := executor.ExecuteCalls()
+	if len(calls) != 1 {
+		t.Fatalf("execute calls = %d, want 1", len(calls))
+	}
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	state := updated.ModelStates[model]
+	if state == nil {
+		t.Fatalf("expected model state to be present")
+	}
+	remaining := time.Until(state.NextRetryAfter)
+	if remaining < 9*time.Minute {
+		t.Fatalf("429 cooldown remaining = %v, want at least 9m", remaining)
+	}
+}
+
+func TestManager_Execute_429WithoutRetryAfterUsesConfiguredCooldownBounds(t *testing.T) {
+	prev := quotaCooldownDisabled.Load()
+	quotaCooldownDisabled.Store(false)
+	t.Cleanup(func() { quotaCooldownDisabled.Store(prev) })
+
+	m := NewManager(nil, nil, nil)
+	m.SetRetryConfig(3, time.Second, 0)
+	m.SetConfig(&internalconfig.Config{
+		QuotaCooldownBaseSeconds: 42,
+		QuotaCooldownMaxSeconds:  45,
+	})
+
+	executor := &authFallbackExecutor{
+		id: "claude",
+		executeErrors: map[string]error{
+			"auth-429-configured": &statusOnlyError{
+				status:  http.StatusTooManyRequests,
+				message: "quota exhausted",
+			},
+		},
+	}
+	m.RegisterExecutor(executor)
+
+	auth := &Auth{ID: "auth-429-configured", Provider: "claude"}
+	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	model := "test-model-429-configured"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(auth.ID, "claude", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { reg.UnregisterClient(auth.ID) })
+
+	_, errExecute := m.Execute(context.Background(), []string{"claude"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute == nil {
+		t.Fatal("expected execute error")
+	}
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	state := updated.ModelStates[model]
+	if state == nil {
+		t.Fatalf("expected model state to be present")
+	}
+	remaining := time.Until(state.NextRetryAfter)
+	if remaining < 40*time.Second || remaining > 43*time.Second {
+		t.Fatalf("429 cooldown remaining = %v, want about 42s", remaining)
 	}
 }
 

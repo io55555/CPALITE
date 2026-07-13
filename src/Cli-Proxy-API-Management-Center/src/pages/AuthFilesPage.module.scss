@@ -308,7 +308,7 @@
 .filterOptionsCard {
   grid-area: options;
   display: grid;
-  grid-template-columns: minmax(96px, 0.58fr) minmax(156px, 1fr);
+  grid-template-columns: minmax(96px, 0.58fr) minmax(118px, 0.7fr) minmax(118px, 0.7fr);
   gap: 12px;
   align-content: center;
   min-width: 0;
@@ -339,7 +339,6 @@
 
 .filterOptionsToggle {
   display: flex;
-  grid-column: 1 / -1;
   align-items: center;
   justify-content: center;
   min-width: 0;
@@ -1530,6 +1529,52 @@
 }
 
 // 状态监测栏
+.cooldownPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning-color) 26%, var(--border-color));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning-color) 9%, var(--bg-secondary));
+}
+
+.cooldownInfo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cooldownIcon {
+  flex: 0 0 auto;
+  color: var(--warning-color);
+}
+
+.cooldownLabel {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.cooldownValue {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--warning-color);
+  word-break: break-word;
+}
+
+.cooldownClearButton:global(.btn.btn-sm) {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding-inline: 9px;
+}
+
 .statusBar {
   display: flex;
   align-items: center;

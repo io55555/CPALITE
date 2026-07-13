@@ -18,6 +18,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const normalizeBoolean = (value: unknown): boolean | undefined =>
   typeof value === 'boolean' ? value : undefined;
 
+const normalizeNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
+
 const normalizeModelAliases = (models: unknown): ModelAlias[] => {
   if (!Array.isArray(models)) return [];
   return models
@@ -349,15 +358,11 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
   const proxyUrl = raw['proxy-url'];
   config.proxyUrl =
     typeof proxyUrl === 'string' ? proxyUrl : proxyUrl === undefined || proxyUrl === null ? undefined : String(proxyUrl);
-  const requestRetry = raw['request-retry'];
-  if (typeof requestRetry === 'number' && Number.isFinite(requestRetry)) {
-    config.requestRetry = requestRetry;
-  } else if (typeof requestRetry === 'string' && requestRetry.trim() !== '') {
-    const parsed = Number(requestRetry);
-    if (Number.isFinite(parsed)) {
-      config.requestRetry = parsed;
-    }
-  }
+  config.requestRetry = normalizeNumber(raw['request-retry']);
+  config.quotaCooldownBaseSeconds = normalizeNumber(raw['quota-cooldown-base-seconds']);
+  config.quotaCooldownMaxSeconds = normalizeNumber(raw['quota-cooldown-max-seconds']);
+  config.proxyFailureCooldownSeconds = normalizeNumber(raw['proxy-failure-cooldown-seconds']);
+  config.proxyFailureMaxCooldownSeconds = normalizeNumber(raw['proxy-failure-max-cooldown-seconds']);
 
   const quota = raw['quota-exceeded'];
   if (isRecord(quota)) {

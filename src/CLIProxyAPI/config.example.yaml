@@ -95,10 +95,18 @@ max-retry-interval: 30
 # When true, disable auth/model cooldown scheduling globally (prevents blackout windows after failure states).
 disable-cooling: false
 
+# Initial cooldown in seconds after a credential/model receives HTTP 429 without a provider Retry-After.
+# Applies to quota/rate-limit cooldowns for auth files, including Codex auth files. Default: 600 seconds (10 minutes).
+quota-cooldown-base-seconds: 600
+
+# Maximum progressive cooldown in seconds for repeated HTTP 429 quota/rate-limit failures.
+# Default: 43200 seconds (12 hours).
+quota-cooldown-max-seconds: 43200
+
 # How long to cool down a credential/model after its per-key proxy connection fails.
 # This protects fill-first routing from repeatedly selecting the same key when its proxy is down.
-# Default: 300 seconds.
-proxy-failure-cooldown-seconds: 300
+# Default: 180 seconds.
+proxy-failure-cooldown-seconds: 180
 
 # Maximum proxy failure cooldown after consecutive proxy/network failures.
 # Default: 600 seconds.

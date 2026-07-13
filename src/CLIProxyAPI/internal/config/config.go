@@ -92,8 +92,15 @@ type Config struct {
 	// 0 keeps the legacy default cooldown. Negative values disable these cooldowns.
 	TransientErrorCooldownSeconds int `yaml:"transient-error-cooldown-seconds" json:"transient-error-cooldown-seconds"`
 
+	// QuotaCooldownBaseSeconds controls the initial cooldown after a 429 quota/rate-limit response.
+	// Default: 600 seconds.
+	QuotaCooldownBaseSeconds int `yaml:"quota-cooldown-base-seconds" json:"quota-cooldown-base-seconds"`
+	// QuotaCooldownMaxSeconds caps progressive 429 quota/rate-limit cooldown.
+	// Default: 43200 seconds.
+	QuotaCooldownMaxSeconds int `yaml:"quota-cooldown-max-seconds" json:"quota-cooldown-max-seconds"`
+
 	// ProxyFailureCooldownSeconds controls how long an auth/model is cooled down after a per-key proxy connection failure.
-	// Default: 300 seconds.
+	// Default: 180 seconds.
 	ProxyFailureCooldownSeconds int `yaml:"proxy-failure-cooldown-seconds" json:"proxy-failure-cooldown-seconds"`
 	// ProxyFailureMaxCooldownSeconds caps progressive proxy failure cooldown.
 	// Default: 600 seconds.
@@ -907,7 +914,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.DisableCooling = false
 	cfg.SaveCooldownStatus = false
 	cfg.TransientErrorCooldownSeconds = 0
-	cfg.ProxyFailureCooldownSeconds = 300
+	cfg.QuotaCooldownBaseSeconds = 600
+	cfg.QuotaCooldownMaxSeconds = 43200
+	cfg.ProxyFailureCooldownSeconds = 180
 	cfg.ProxyFailureMaxCooldownSeconds = 600
 	cfg.DisableImageGeneration = DisableImageGenerationOff
 	cfg.Pprof.Enable = false
@@ -983,8 +992,17 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.MaxRetryCredentials == 0 {
 		cfg.MaxRetryCredentials = 10
 	}
+	if cfg.QuotaCooldownBaseSeconds <= 0 {
+		cfg.QuotaCooldownBaseSeconds = 600
+	}
+	if cfg.QuotaCooldownMaxSeconds <= 0 {
+		cfg.QuotaCooldownMaxSeconds = 43200
+	}
+	if cfg.QuotaCooldownMaxSeconds < cfg.QuotaCooldownBaseSeconds {
+		cfg.QuotaCooldownMaxSeconds = cfg.QuotaCooldownBaseSeconds
+	}
 	if cfg.ProxyFailureCooldownSeconds <= 0 {
-		cfg.ProxyFailureCooldownSeconds = 300
+		cfg.ProxyFailureCooldownSeconds = 180
 	}
 	if cfg.ProxyFailureMaxCooldownSeconds <= 0 {
 		cfg.ProxyFailureMaxCooldownSeconds = 600

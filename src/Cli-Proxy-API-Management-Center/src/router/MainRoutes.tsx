@@ -12,7 +12,7 @@ import { AiProvidersOpenAIEditLayout } from '@/pages/AiProvidersOpenAIEditLayout
 import { AiProvidersOpenAIEditPage } from '@/pages/AiProvidersOpenAIEditPage';
 import { AiProvidersOpenAIModelsPage } from '@/pages/AiProvidersOpenAIModelsPage';
 import { AiProvidersVertexEditPage } from '@/pages/AiProvidersVertexEditPage';
-import { AuthFilesPage } from '@/pages/AuthFilesPage';
+import { AuthFilesCooldownPage, AuthFilesPage } from '@/pages/AuthFilesPage';
 import { AuthFilesOAuthExcludedEditPage } from '@/pages/AuthFilesOAuthExcludedEditPage';
 import { AuthFilesOAuthModelAliasEditPage } from '@/pages/AuthFilesOAuthModelAliasEditPage';
 import { OAuthPage } from '@/pages/OAuthPage';
@@ -74,6 +74,7 @@ const mainRoutes = [
     ],
   },
   { path: '/auth-files', element: <AuthFilesPage /> },
+  { path: '/auth-files-cooldown', element: <AuthFilesCooldownPage /> },
   { path: '/auth-files/oauth-excluded', element: <AuthFilesOAuthExcludedEditPage /> },
   { path: '/auth-files/oauth-model-alias', element: <AuthFilesOAuthModelAliasEditPage /> },
   { path: '/oauth', element: <OAuthPage /> },

@@ -1136,7 +1136,7 @@ func (e *OpenAICompatExecutor) markProxyFailure(auth *cliproxyauth.Auth, apiKey,
 }
 
 func (e *OpenAICompatExecutor) nextProxyFailureCooldown(provider, apiKey, model string) time.Duration {
-	base := 300 * time.Second
+	base := 180 * time.Second
 	maxCooldown := 600 * time.Second
 	if e.cfg != nil {
 		if e.cfg.ProxyFailureCooldownSeconds > 0 {

@@ -529,6 +529,71 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	return entry
 }
 
+func (h *Handler) PatchAuthFileCooldown(c *gin.Context) {
+	var req struct {
+		AuthID    string `json:"auth_id"`
+		AuthIndex string `json:"auth_index"`
+		Name      string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	manager := h.authManager
+	if manager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "auth manager unavailable"})
+		return
+	}
+
+	authID := strings.TrimSpace(req.AuthID)
+	if authID == "" {
+		authID = h.resolveAuthIDForCooldown(strings.TrimSpace(req.AuthIndex), strings.TrimSpace(req.Name))
+	}
+	if authID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "auth file not found"})
+		return
+	}
+
+	manager.MarkQuotaRecovered(c.Request.Context(), authID)
+	updated, ok := manager.GetByID(authID)
+	if !ok || updated == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "auth file not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "file": h.buildAuthFileEntry(updated)})
+}
+
+func (h *Handler) resolveAuthIDForCooldown(authIndex string, name string) string {
+	manager := h.authManager
+	if manager == nil {
+		return ""
+	}
+	authIndex = strings.TrimSpace(authIndex)
+	name = strings.TrimSpace(name)
+	if authIndex == "" && name == "" {
+		return ""
+	}
+	for _, auth := range manager.List() {
+		if auth == nil {
+			continue
+		}
+		auth.EnsureIndex()
+		if authIndex != "" && strings.EqualFold(strings.TrimSpace(auth.Index), authIndex) {
+			return auth.ID
+		}
+		if name == "" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(auth.ID), name) ||
+			strings.EqualFold(strings.TrimSpace(auth.FileName), name) ||
+			strings.EqualFold(strings.TrimSpace(auth.Label), name) {
+			return auth.ID
+		}
+	}
+	return ""
+}
+
 func authWebsocketsValue(auth *coreauth.Auth) (bool, bool) {
 	if auth == nil {
 		return false, false

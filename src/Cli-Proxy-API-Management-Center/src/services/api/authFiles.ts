@@ -11,6 +11,7 @@ import { parseTimestampMs } from '@/utils/timestamp';
 type StatusError = { status?: number };
 type AuthFileStatusResponse = { status: string; disabled: boolean };
 type AuthFilePatchPayload = { name: string; disabled?: boolean; [key: string]: unknown };
+type AuthFileCooldownResponse = { status: string; file?: AuthFileEntry };
 type AuthFileEntry = AuthFilesResponse['files'][number];
 export type AuthFileFieldsPatch = {
   prefix?: string;
@@ -359,6 +360,9 @@ export const authFilesApi = {
 
   patchFields: (name: string, fields: AuthFileFieldsPatch) =>
     apiClient.patch('/auth-files/fields', { name, ...fields }),
+
+  clearCooldown: (payload: { auth_id?: string; auth_index?: string; name?: string }) =>
+    apiClient.patch<AuthFileCooldownResponse>('/auth-files/cooldown', payload),
 
   uploadFiles: async (files: File[]): Promise<AuthFileBatchUploadResult> => {
     const requestedNames = files.map((file) => file.name);
