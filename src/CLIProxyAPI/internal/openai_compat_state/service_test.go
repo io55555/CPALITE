@@ -55,6 +55,39 @@ func TestApplyToAuthReenablesRuntimeAuth(t *testing.T) {
 	}
 }
 
+func TestApplyToAuthDoesNotClearModelCooldownOnPlainErrorState(t *testing.T) {
+	service, err := New(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	defer service.Close()
+	next := time.Now().Add(10 * time.Minute)
+	auth := &cliproxyauth.Auth{
+		ID:         "auth-1",
+		Provider:   "pool",
+		Attributes: map[string]string{"compat_name": "pool", "api_key": "key-1"},
+		ModelStates: map[string]*cliproxyauth.ModelState{
+			"gpt-5": {
+				Status:         cliproxyauth.StatusError,
+				Unavailable:    true,
+				NextRetryAfter: next,
+				LastError:      &cliproxyauth.Error{HTTPStatus: 401, Message: "unauthorized"},
+			},
+		},
+	}
+	service.MarkErrorForModel("pool", "key-1", "gpt-5", "unauthorized", "", "")
+
+	service.ApplyToAuth(auth)
+
+	state := auth.ModelStates["gpt-5"]
+	if state == nil || !state.Unavailable || !state.NextRetryAfter.Equal(next) {
+		t.Fatalf("model cooldown was cleared: %#v", state)
+	}
+	if auth.Disabled {
+		t.Fatalf("auth.Disabled = true, want false")
+	}
+}
+
 func TestApplyToAuthClearsStaleRuntimeStateWithoutPersistedState(t *testing.T) {
 	service, err := New(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

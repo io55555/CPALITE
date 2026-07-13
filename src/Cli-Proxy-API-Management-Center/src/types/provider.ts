@@ -8,6 +8,8 @@ export interface ModelAlias {
   alias?: string;
   priority?: number;
   testModel?: string;
+  image?: boolean;
+  thinking?: Record<string, unknown>;
 }
 
 export interface ApiKeyEntry {
@@ -62,6 +64,7 @@ export interface GeminiKeyConfig {
   models?: ModelAlias[];
   headers?: Record<string, string>;
   excludedModels?: string[];
+  disableCooling?: boolean;
   authIndex?: string;
 }
 
@@ -75,7 +78,9 @@ export interface ProviderKeyConfig {
   headers?: Record<string, string>;
   models?: ModelAlias[];
   excludedModels?: string[];
+  disableCooling?: boolean;
   cloak?: CloakConfig;
+  experimentalCchSigning?: boolean;
   authIndex?: string;
 }
 

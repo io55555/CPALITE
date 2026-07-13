@@ -283,6 +283,49 @@ func TestSelectorPick_AllCooldownReturnsModelCooldownError(t *testing.T) {
 	})
 }
 
+func TestSelectorPick_AllStatusErrorRetryAfterReturnsModelCooldownError(t *testing.T) {
+	t.Parallel()
+
+	model := "test-model"
+	next := time.Now().Add(60 * time.Second)
+	auths := []*Auth{
+		{
+			ID: "a",
+			ModelStates: map[string]*ModelState{
+				model: {
+					Status:         StatusError,
+					Unavailable:    true,
+					NextRetryAfter: next,
+					LastError:      &Error{HTTPStatus: http.StatusUnauthorized, Message: "unauthorized"},
+				},
+			},
+		},
+		{
+			ID: "b",
+			ModelStates: map[string]*ModelState{
+				model: {
+					Status:         StatusError,
+					Unavailable:    true,
+					NextRetryAfter: next,
+					LastError:      &Error{HTTPStatus: http.StatusTooManyRequests, Message: "rate limited"},
+				},
+			},
+		},
+	}
+
+	_, err := (&FillFirstSelector{}).Pick(context.Background(), "openai", model, cliproxyexecutor.Options{}, auths)
+	if err == nil {
+		t.Fatalf("Pick() error = nil")
+	}
+	var mce *modelCooldownError
+	if !errors.As(err, &mce) {
+		t.Fatalf("Pick() error = %T, want *modelCooldownError", err)
+	}
+	if mce.StatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("StatusCode() = %d, want %d", mce.StatusCode(), http.StatusTooManyRequests)
+	}
+}
+
 func TestIsAuthBlockedForModel_UnavailableWithoutNextRetryIsNotBlocked(t *testing.T) {
 	t.Parallel()
 

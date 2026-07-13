@@ -123,7 +123,6 @@ export function LogsPage() {
   const [requestLogId, setRequestLogId] = useState<string | null>(null);
   const [requestLogDownloading, setRequestLogDownloading] = useState(false);
 
-  const logScrollerRef = useRef<ReturnType<typeof useLogScroller> | null>(null);
   const requestLogHomeIpByIdRef = useRef<Record<string, string>>({});
   const longPressRef = useRef<{
     timer: number | null;
@@ -142,7 +141,7 @@ export function LogsPage() {
   const autoRefreshDisabled = disableControls || showFileLoggingRequired;
   const clearDisabled = disableControls || loading || showFileLoggingRequired;
 
-  const loadLogs = async (incremental = false) => {
+  async function loadLogs(incremental = false) {
     if (connectionStatus !== 'connected') {
       setLoading(false);
       return;
@@ -175,11 +174,9 @@ export function LogsPage() {
     setError('');
 
     try {
-      const scrollerInstance = logScrollerRef.current;
-      const stickToBottom =
-        !incremental || isNearBottom(scrollerInstance?.logViewerRef.current ?? null);
+      const stickToBottom = !incremental || isNearBottom(logViewerRef.current);
       if (stickToBottom) {
-        scrollerInstance?.requestScrollToBottom();
+        requestScrollToBottom();
       }
 
       const params =
@@ -242,7 +239,7 @@ export function LogsPage() {
         void loadLogs(false);
       }
     }
-  };
+  }
 
   useHeaderRefresh(() => loadLogs(false));
 
@@ -449,7 +446,7 @@ export function LogsPage() {
 
   const rawVisibleText = useMemo(() => filteredLines.join('\n'), [filteredLines]);
 
-  const scroller = useLogScroller({
+  const { canLoadMore, handleLogScroll, logViewerRef, requestScrollToBottom } = useLogScroller({
     logState,
     setLogState,
     loading,
@@ -458,8 +455,7 @@ export function LogsPage() {
     hasStructuredFilters: filters.hasStructuredFilters,
     showRawLogs
   });
-
-  logScrollerRef.current = scroller;
+  const fullscreenLogs = false;
 
   const copyLogLine = async (raw: string) => {
     const ok = await copyToClipboard(raw);
@@ -810,11 +806,13 @@ export function LogsPage() {
               <div className="hint">{t('logs.loading')}</div>
             ) : logState.buffer.length > 0 && filteredLines.length > 0 ? (
               <div
-                ref={scroller.logViewerRef}
-                className={styles.logPanel}
-                onScroll={scroller.handleLogScroll}
+                ref={logViewerRef}
+                className={[styles.logPanel, fullscreenLogs ? styles.logPanelFullscreen : '']
+                  .filter(Boolean)
+                  .join(' ')}
+                onScroll={handleLogScroll}
               >
-                {scroller.canLoadMore && (
+                {canLoadMore && (
                   <div className={styles.loadMoreBanner}>
                     <span>{t('logs.load_more_hint')}</span>
                     <div className={styles.loadMoreStats}>

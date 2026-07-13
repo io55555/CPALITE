@@ -28,12 +28,21 @@ type ConfigEditorTab = 'visual' | 'source';
 const LazyConfigSourceEditor = lazy(() => import('@/components/config/ConfigSourceEditor'));
 
 function readCommercialModeFromYaml(yamlContent: string): boolean {
+	try {
+		const parsed = parseYaml(yamlContent);
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+		return Boolean((parsed as Record<string, unknown>)['commercial-mode']);
+	} catch {
+		return false;
+	}
+}
+
+function normalizeYamlForVisualDiff(yamlContent: string): string {
   try {
-    const parsed = parseYaml(yamlContent);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-    return Boolean((parsed as Record<string, unknown>)['commercial-mode']);
+    const doc = parseDocument(yamlContent);
+    return doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 });
   } catch {
-    return false;
+    return yamlContent;
   }
 }
 
@@ -72,6 +81,8 @@ export function ConfigPage() {
   const [diffModalOpen, setDiffModalOpen] = useState(false);
   const [serverYaml, setServerYaml] = useState('');
   const [mergedYaml, setMergedYaml] = useState('');
+  const [previewServerYaml, setPreviewServerYaml] = useState('');
+  const [previewTab, setPreviewTab] = useState<ConfigEditorTab>('visual');
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -116,6 +127,7 @@ export function ConfigPage() {
       setDiffModalOpen(false);
       setServerYaml(data);
       setMergedYaml(data);
+      setPreviewServerYaml(data);
       loadVisualValuesFromYaml(data);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('notification.refresh_failed');
@@ -143,7 +155,30 @@ export function ConfigPage() {
   const handleConfirmSave = async () => {
     setSaving(true);
     try {
-      const previousCommercialMode = readCommercialModeFromYaml(serverYaml);
+      const latestServerYaml = await configFileApi.fetchConfigYaml();
+      if (latestServerYaml !== previewServerYaml) {
+        const nextMergedYaml =
+          previewTab === 'visual' && !dirty
+            ? applyVisualChangesToYaml(latestServerYaml)
+            : mergedYaml;
+        const nextServerYaml =
+          previewTab === 'visual' ? normalizeYamlForVisualDiff(latestServerYaml) : latestServerYaml;
+
+        setPreviewServerYaml(latestServerYaml);
+        setServerYaml(nextServerYaml);
+        setMergedYaml(nextMergedYaml);
+
+        if (nextServerYaml === nextMergedYaml) {
+          setDirty(false);
+          setDiffModalOpen(false);
+          setContent(latestServerYaml);
+          loadVisualValuesFromYaml(latestServerYaml);
+          showNotification(t('config_management.diff.no_changes'), 'info');
+        }
+        return;
+      }
+
+      const previousCommercialMode = readCommercialModeFromYaml(latestServerYaml);
       const nextCommercialMode = readCommercialModeFromYaml(mergedYaml);
       const commercialModeChanged = previousCommercialMode !== nextCommercialMode;
 
@@ -154,6 +189,7 @@ export function ConfigPage() {
       setContent(latestContent);
       setServerYaml(latestContent);
       setMergedYaml(latestContent);
+      setPreviewServerYaml(latestContent);
       loadVisualValuesFromYaml(latestContent);
 
       // Keep the global config store in sync so sidebar / other pages reflect YAML changes immediately.
@@ -232,6 +268,7 @@ export function ConfigPage() {
         setContent(latestServerYaml);
         setServerYaml(latestServerYaml);
         setMergedYaml(nextMergedYaml);
+        setPreviewServerYaml(latestServerYaml);
         loadVisualValuesFromYaml(latestServerYaml);
         showNotification(t('config_management.diff.no_changes'), 'info');
         return;
@@ -239,6 +276,8 @@ export function ConfigPage() {
 
       setServerYaml(diffOriginal);
       setMergedYaml(nextMergedYaml);
+      setPreviewServerYaml(latestServerYaml);
+      setPreviewTab(activeTab);
       setDiffModalOpen(true);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '';

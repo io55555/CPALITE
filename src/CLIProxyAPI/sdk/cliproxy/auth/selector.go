@@ -387,7 +387,7 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 						if next.Before(now) {
 							next = now
 						}
-						if state.Quota.Exceeded {
+						if state.Quota.Exceeded || state.Status == StatusError || state.LastError != nil {
 							return true, blockReasonCooldown, next
 						}
 						return true, blockReasonOther, next
@@ -406,7 +406,7 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 		if next.Before(now) {
 			next = now
 		}
-		if auth.Quota.Exceeded {
+		if auth.Quota.Exceeded || auth.Status == StatusError || auth.LastError != nil {
 			return true, blockReasonCooldown, next
 		}
 		return true, blockReasonOther, next

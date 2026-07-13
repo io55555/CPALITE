@@ -16,6 +16,7 @@ import { ProviderCategoryList } from './components/ProviderCategoryList';
 import { ProviderResourcePanel } from './components/ProviderResourcePanel';
 import type { ProviderPanelControls } from './components/ProviderResourcePanel';
 import { ProviderSheet, type ProviderSheetHandle } from './sheets/ProviderSheet';
+import { isSponsorPartialMutationError } from './sponsorMutationRecovery';
 import { useProviderWorkbench } from './useProviderWorkbench';
 import {
   getProviderFilterState,
@@ -74,10 +75,8 @@ const getResourceRecentSuccess = (
   usageByProvider: ProviderRecentUsageMap
 ): number => {
   if (resource.brand === 'openaiCompatibility') {
-    return getOpenAIProviderRecentWindowStats(
-      resource.raw as OpenAIProviderConfig,
-      usageByProvider
-    ).success;
+    return getOpenAIProviderRecentWindowStats(resource.raw as OpenAIProviderConfig, usageByProvider)
+      .success;
   }
   return getProviderRecentWindowStats(
     usageByProvider,
@@ -96,9 +95,7 @@ export function ProvidersWorkbenchPage() {
   const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.status === 'current' : true;
 
   const workbench = useProviderWorkbench();
-  const [uiState, setUiState] = useState<ProvidersWorkbenchUiState>(
-    readProvidersWorkbenchUiState
-  );
+  const [uiState, setUiState] = useState<ProvidersWorkbenchUiState>(readProvidersWorkbenchUiState);
   const [sheetState, setSheetState] = useState<SheetState>({
     open: false,
     brand: 'gemini',
@@ -113,10 +110,7 @@ export function ProvidersWorkbenchPage() {
   });
 
   const handleRefresh = useCallback(async () => {
-    await Promise.allSettled([
-      workbench.refetch(),
-      refreshRecentRequests().catch(() => undefined),
-    ]);
+    await Promise.allSettled([workbench.refetch(), refreshRecentRequests().catch(() => undefined)]);
   }, [refreshRecentRequests, workbench]);
 
   useHeaderRefresh(handleRefresh, isCurrentLayer);
@@ -169,8 +163,7 @@ export function ProvidersWorkbenchPage() {
   const filter = activeFilterState.filter;
   const providerSortBy = activeFilterState.sortBy;
   const providerSortDir = activeFilterState.sortDir;
-  const activeGroup =
-    groups.find((g) => g.id === activeBrand) ?? groups[0] ?? null;
+  const activeGroup = groups.find((g) => g.id === activeBrand) ?? groups[0] ?? null;
 
   const filteredResources = useMemo(() => {
     if (!activeGroup) return [];
@@ -190,9 +183,7 @@ export function ProvidersWorkbenchPage() {
   const selectedModels = useMemo(() => {
     if (availableModels.length === 0) return new Set<string>();
     const availableModelSet = new Set(availableModels);
-    return new Set(
-      activeFilterState.selectedModels.filter((name) => availableModelSet.has(name))
-    );
+    return new Set(activeFilterState.selectedModels.filter((name) => availableModelSet.has(name)));
   }, [activeFilterState.selectedModels, availableModels]);
 
   const visibleResources = useMemo(() => {
@@ -202,30 +193,19 @@ export function ProvidersWorkbenchPage() {
     }
 
     const sorted = [...arr].sort((a, b) => {
-      let diff = 0;
-      if (providerSortBy === 'name') {
-        diff = getResourceSortName(a).localeCompare(getResourceSortName(b));
-      } else if (providerSortBy === 'priority') {
-        diff = a.priority - b.priority;
-      } else {
-        diff =
-          getResourceRecentSuccess(a, usageByProvider) -
-          getResourceRecentSuccess(b, usageByProvider);
-      }
-      if (diff === 0) {
-        diff = a.originalIndex - b.originalIndex;
-      }
+      const sortDiff =
+        providerSortBy === 'name'
+          ? getResourceSortName(a).localeCompare(getResourceSortName(b))
+          : providerSortBy === 'priority'
+            ? a.priority - b.priority
+            : getResourceRecentSuccess(a, usageByProvider) -
+              getResourceRecentSuccess(b, usageByProvider);
+      const diff = sortDiff || a.originalIndex - b.originalIndex;
       return providerSortDir === 'asc' ? diff : -diff;
     });
 
     return sorted;
-  }, [
-    filteredResources,
-    providerSortBy,
-    providerSortDir,
-    selectedModels,
-    usageByProvider,
-  ]);
+  }, [filteredResources, providerSortBy, providerSortDir, selectedModels, usageByProvider]);
 
   const toolbarControls = useMemo<ProviderPanelControls | undefined>(() => {
     if (!activeGroup) return undefined;
@@ -252,29 +232,21 @@ export function ProvidersWorkbenchPage() {
 
   const totalResources = useMemo(
     () =>
-      groups.reduce(
-        (sum, g) => sum + g.resources.filter((r) => !r.flags.isPlaceholder).length,
-        0
-      ),
+      groups.reduce((sum, g) => sum + g.resources.filter((r) => !r.flags.isPlaceholder).length, 0),
     [groups]
   );
 
   const totalActive = useMemo(
     () =>
       groups.reduce(
-        (sum, g) =>
-          sum +
-          g.resources.filter((r) => !r.disabled && !r.flags.isPlaceholder).length,
+        (sum, g) => sum + g.resources.filter((r) => !r.disabled && !r.flags.isPlaceholder).length,
         0
       ),
     [groups]
   );
 
   const providerFamilies = useMemo(
-    () =>
-      groups.filter(
-        (g) => g.resources.some((r) => !r.flags.isPlaceholder)
-      ).length,
+    () => groups.filter((g) => g.resources.some((r) => !r.flags.isPlaceholder)).length,
     [groups]
   );
 
@@ -311,8 +283,7 @@ export function ProvidersWorkbenchPage() {
 
   const handleDelete = useCallback(
     (resource: ProviderResource) => {
-      const name =
-        resource.name ?? resource.apiKeyPreview ?? resource.identifier ?? '';
+      const name = resource.name ?? resource.apiKeyPreview ?? resource.identifier ?? '';
       showConfirmation({
         title: t('providersPage.delete.title'),
         message: t('providersPage.delete.confirm', { name }),
@@ -323,6 +294,10 @@ export function ProvidersWorkbenchPage() {
             await workbench.deleteProvider(resource);
             showNotification(t('providersPage.toast.deleted'), 'success');
           } catch (err) {
+            if (isSponsorPartialMutationError(err)) {
+              showNotification(t('providersPage.sponsor.partialMutationWarning'), 'warning');
+              return;
+            }
             const msg = err instanceof Error ? err.message : String(err);
             showNotification(`${t('notification.delete_failed')}: ${msg}`, 'error');
           }
@@ -337,17 +312,16 @@ export function ProvidersWorkbenchPage() {
       try {
         await workbench.toggleDisabled(resource, disabled);
         showNotification(
-          disabled
-            ? t('providersPage.toast.disabled')
-            : t('providersPage.toast.enabled'),
+          disabled ? t('providersPage.toast.disabled') : t('providersPage.toast.enabled'),
           'success'
         );
       } catch (err) {
+        if (isSponsorPartialMutationError(err)) {
+          showNotification(t('providersPage.sponsor.partialMutationWarning'), 'warning');
+          return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
-        showNotification(
-          `${t('providersPage.toast.toggleFailed')}: ${msg}`,
-          'error'
-        );
+        showNotification(`${t('providersPage.toast.toggleFailed')}: ${msg}`, 'error');
       }
     },
     [showNotification, t, workbench]
@@ -413,9 +387,10 @@ export function ProvidersWorkbenchPage() {
           activeBrand={activeGroup.id}
           onSelect={(brand) => {
             const isSwitching = sheetState.open && sheetState.brand !== brand;
-            const proceed = isSwitching && sheetRef.current
-              ? sheetRef.current.confirmDiscardIfDirty()
-              : Promise.resolve(true);
+            const proceed =
+              isSwitching && sheetRef.current
+                ? sheetRef.current.confirmDiscardIfDirty()
+                : Promise.resolve(true);
             void proceed.then((ok) => {
               if (!ok) return;
               setActiveBrand(brand);
@@ -430,7 +405,7 @@ export function ProvidersWorkbenchPage() {
           filter={filter}
           onFilterChange={(value) => updateActiveFilterState({ filter: value })}
           filteredResources={visibleResources}
-          selectedId={sheetState.open ? sheetState.resource?.id ?? null : null}
+          selectedId={sheetState.open ? (sheetState.resource?.id ?? null) : null}
           globalProxyUrl={workbench.globalProxyUrl}
           disableMutations={disableMutations}
           usageByProvider={usageByProvider}
@@ -448,9 +423,7 @@ export function ProvidersWorkbenchPage() {
         state={sheetState}
         onClose={closeSheet}
         onSwitchToEdit={() => {
-          setSheetState((s) =>
-            s.resource ? { ...s, mode: 'edit' } : s
-          );
+          setSheetState((s) => (s.resource ? { ...s, mode: 'edit' } : s));
         }}
         workbench={workbench}
         onCreated={handleCreated}

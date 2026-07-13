@@ -70,6 +70,12 @@ const BATCH_BAR_BASE_TRANSFORM = 'translateX(-50%)';
 const BATCH_BAR_HIDDEN_TRANSFORM = 'translateX(-50%) translateY(56px)';
 const DEFAULT_REGULAR_PAGE_SIZE = 9;
 const DEFAULT_COMPACT_PAGE_SIZE = 12;
+const STATUS_FILTER_LABELS: Record<AuthFilesStatusFilterMode, string> = {
+  all: '全部',
+  enabled: '已启用',
+  disabled: '已禁用',
+  problem: '异常',
+};
 
 const escapeWildcardSearchSegment = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -398,10 +404,28 @@ export function AuthFilesPage() {
   const statusFilterOptions = useMemo(
     () =>
       [
-        { value: 'all', label: t('auth_files.problem_filter_all') },
-        { value: 'enabled', label: t('auth_files.problem_filter_enabled') },
-        { value: 'disabled', label: t('auth_files.problem_filter_disabled') },
-        { value: 'problem', label: t('auth_files.problem_filter_problem') },
+        {
+          value: 'all',
+          label: t('auth_files.problem_filter_all', { defaultValue: STATUS_FILTER_LABELS.all }),
+        },
+        {
+          value: 'enabled',
+          label: t('auth_files.problem_filter_enabled', {
+            defaultValue: STATUS_FILTER_LABELS.enabled,
+          }),
+        },
+        {
+          value: 'disabled',
+          label: t('auth_files.problem_filter_disabled', {
+            defaultValue: STATUS_FILTER_LABELS.disabled,
+          }),
+        },
+        {
+          value: 'problem',
+          label: t('auth_files.problem_filter_problem', {
+            defaultValue: STATUS_FILTER_LABELS.problem,
+          }),
+        },
       ] satisfies Array<{ value: AuthFilesStatusFilterMode; label: string }>,
     [t]
   );
@@ -798,7 +822,7 @@ export function AuthFilesPage() {
                 <div className={`${styles.filterItem} ${styles.filterToggleItem}`}>
                   <label>{t('auth_files.display_options_label')}</label>
                   <AuthFilesStatusFilterCard
-                    label={t('auth_files.problem_filter_label')}
+                    label={t('auth_files.problem_filter_label', { defaultValue: '状态筛选' })}
                     minLabel={statusFilterOptions[0]?.label}
                     maxLabel={statusFilterOptions[statusFilterOptions.length - 1]?.label}
                     value={statusFilterMode}

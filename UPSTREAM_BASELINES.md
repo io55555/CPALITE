@@ -2,15 +2,15 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: 3554b63721aac9b4202bf2ef88ba7a82b4e5caf8
-- tag: v7.2.62
-- note: merged with local enhancement-preserving overrides
+- commit: 5b7f2361ee27d195f6514dde08656f6e4773a9a4
+- tag: v7.2.71
+- note: merged with local enhancement-preserving overrides; retained packet capture/filtering, status-rulers, provider enhancements, quota display fixes, and OpenAI-compatible cooldown/candidate-skip behavior
 
 ## Cli-Proxy-API-Management-Center
 - branch: main
-- commit: fd22c148286078410f299805ac41b21f29318f24
-- tag: v1.17.14
-- note: merged with local Provider Workbench/quota preservation; incompatible sponsor UI wiring was not enabled
+- commit: d3df9b074ecc8c1161d998d65e09948bcbcaa6ef
+- tag: v1.18.3
+- note: merged with local Provider Workbench/quota/auth-files preservation; upstream sponsor UI wiring enabled while retaining local Ampcode/provider-class enhancements
 
 ## CLIProxyAPI-Pro
 - repository: https://github.com/ssfun/CLIProxyAPI-Pro

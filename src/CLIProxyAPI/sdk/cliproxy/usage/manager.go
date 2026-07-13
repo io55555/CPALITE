@@ -29,16 +29,20 @@ type Record struct {
 	ReasoningEffort string
 	// ServiceTier stores the client-requested service tier for request event logs.
 	ServiceTier string
-	RequestedAt time.Time
-	Latency     time.Duration
-	TTFT        time.Duration
-	Failed      bool
-	ClientUA    string
-	UpstreamUA  string
-	RawRequest  string
-	RawResponse string
-	Fail        Failure
-	Detail      Detail
+	// RequestServiceTier explicitly aliases the client-requested service tier.
+	RequestServiceTier string
+	// ResponseServiceTier stores the final tier reported by the upstream response.
+	ResponseServiceTier string
+	RequestedAt         time.Time
+	Latency             time.Duration
+	TTFT                time.Duration
+	Failed              bool
+	ClientUA            string
+	UpstreamUA          string
+	RawRequest          string
+	RawResponse         string
+	Fail                Failure
+	Detail              Detail
 	// ResponseHeaders stores a snapshot of upstream response headers for usage sinks.
 	ResponseHeaders http.Header
 }
@@ -58,6 +62,7 @@ type Detail struct {
 	CacheReadTokens     int64
 	CacheCreationTokens int64
 	TotalTokens         int64
+	ResponseServiceTier string
 }
 
 type requestedModelAliasContextKey struct{}

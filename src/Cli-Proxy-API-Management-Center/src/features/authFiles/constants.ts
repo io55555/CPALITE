@@ -41,6 +41,8 @@ export const AUTH_FILE_REFRESH_WARNING_MS = 24 * 60 * 60 * 1000;
 export const INTEGER_STRING_PATTERN = /^[+-]?\d+$/;
 export const TRUTHY_TEXT_VALUES = new Set(['true', '1', 'yes', 'y', 'on']);
 export const FALSY_TEXT_VALUES = new Set(['false', '0', 'no', 'n', 'off']);
+export const AUTH_FILE_WEBSOCKET_PROVIDERS = new Set(['codex', 'xai']);
+export const AUTH_FILE_USING_API_PROVIDERS = new Set(['xai']);
 
 // 标签类型颜色配置 — 基于各提供商 Logo 品牌色调配，确保彼此不重复
 export const TYPE_COLORS: Record<string, TypeColorSet> = {
@@ -157,6 +159,9 @@ export const getTypeLabel = (t: TFunction, type: string): string => {
   const key = `auth_files.filter_${providerKey}`;
   const translated = t(key);
   if (translated !== key) return translated;
+  const legacyKey = `auth_files.${providerKey}`;
+  const legacyTranslated = t(legacyKey);
+  if (legacyTranslated !== legacyKey) return legacyTranslated;
   if (providerKey === 'iflow') return 'iFlow';
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
@@ -223,6 +228,11 @@ export const parseDisableCoolingValue = (value: unknown): boolean | undefined =>
 export const readCodexAuthFileWebsockets = (value: Record<string, unknown>): boolean =>
   parseDisableCoolingValue(value.websockets ?? value.websocket) ?? false;
 
+export const supportsAuthFileWebsockets = (providerKey: string): boolean =>
+  AUTH_FILE_WEBSOCKET_PROVIDERS.has(normalizeProviderKey(providerKey));
+
+export const readAuthFileWebsockets = readCodexAuthFileWebsockets;
+
 export const buildOAuthProviderOptions = (values: Iterable<unknown>): string[] => {
   const presets = ['anthropic', 'codex', 'gemini', 'antigravity', 'xai'];
   const baseSet = new Set(presets.map((value) => normalizeProviderKey(value)));
@@ -247,6 +257,19 @@ export const applyCodexAuthFileWebsockets = (
   return next;
 };
 
+export const applyAuthFileWebsockets = applyCodexAuthFileWebsockets;
+
+export const supportsAuthFileUsingApi = (providerKey: string): boolean =>
+  AUTH_FILE_USING_API_PROVIDERS.has(normalizeProviderKey(providerKey));
+
+export const readAuthFileUsingApi = (value: Record<string, unknown>): boolean =>
+  parseDisableCoolingValue(value.using_api) ?? false;
+
+export const applyAuthFileUsingApi = (
+  value: Record<string, unknown>,
+  usingApi: boolean
+): Record<string, unknown> => ({ ...value, using_api: usingApi });
+
 export function isRuntimeOnlyAuthFile(file: AuthFileItem): boolean {
   const raw = file['runtime_only'] ?? file.runtimeOnly;
   if (typeof raw === 'boolean') return raw;
@@ -261,7 +284,7 @@ export const formatModified = (item: AuthFileItem): string => {
   const date =
     Number.isFinite(asNumber) && !Number.isNaN(asNumber)
       ? new Date(asNumber < 1e12 ? asNumber * 1000 : asNumber)
-      : parseTimestamp(raw) ?? new Date(String(raw));
+      : (parseTimestamp(raw) ?? new Date(String(raw)));
   return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
 };
 

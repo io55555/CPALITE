@@ -1475,6 +1475,28 @@ func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowIma
 	return providers, resolvedModelName, nil
 }
 
+func (h *BaseAPIHandler) validateImageOnlyModel(modelName string, allowImageModel bool) *interfaces.ErrorMessage {
+	baseModel := strings.TrimSpace(thinking.ParseSuffix(modelName).ModelName)
+	if baseModel == "" {
+		baseModel = strings.TrimSpace(modelName)
+	}
+	if isOpenAIImageOnlyModel(baseModel) && !allowImageModel {
+		return &interfaces.ErrorMessage{
+			StatusCode: http.StatusServiceUnavailable,
+			Error:      fmt.Errorf("model %s is only supported on /v1/images/generations and /v1/images/edits", routeModelBaseName(baseModel)),
+		}
+	}
+	return nil
+}
+
+func isOpenAIImageOnlyModel(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(routeModelBaseName(model))) {
+	case "gpt-image-1.5", "gpt-image-2", "grok-imagine-image", "grok-imagine-image-quality":
+		return true
+	default:
+		return false
+	}
+}
 func routeModelBaseName(model string) string {
 	model = strings.TrimSpace(model)
 	if idx := strings.LastIndex(model, "/"); idx >= 0 && idx < len(model)-1 {

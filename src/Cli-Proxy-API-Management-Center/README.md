@@ -28,8 +28,8 @@ The address is auto-detected from the current page URL; manual override is suppo
 ### Option B: Run the dev server
 
 ```bash
-npm ci
-npm run dev
+bun install --frozen-lockfile
+bun run dev
 ```
 
 Open `http://localhost:5173`, then connect to your CLI Proxy API backend instance.
@@ -37,13 +37,13 @@ Open `http://localhost:5173`, then connect to your CLI Proxy API backend instanc
 ### Option C: Build a single HTML file
 
 ```bash
-npm ci
-npm run build
+bun install --frozen-lockfile
+bun run build
 ```
 
 - Output: `dist/index.html` (all assets are inlined).
 - For CLI Proxy API bundling, the release workflow renames it to `management.html`.
-- To preview locally: `npm run preview`
+- To preview locally: `bun run preview`
 
 Tip: opening `dist/index.html` via `file://` may be blocked by browser CORS; serving it (preview/static server) is more reliable.
 
@@ -135,12 +135,14 @@ The UI language is automatically detected from browser settings and can be manua
 ## Development
 
 ```bash
-npm run dev        # Vite dev server
-npm run build      # tsc + Vite build
-npm run preview    # serve dist locally
-npm run lint       # ESLint (fails on warnings)
-npm run format     # Prettier
-npm run type-check # tsc --noEmit
+bun run dev        # Vite dev server
+bun run build      # tsc + Vite build
+bun run preview    # serve dist locally
+bun run test       # Bun test suite
+bun run lint       # ESLint (fails on warnings)
+bun run verify     # test + lint + build
+bun run format     # Prettier
+bun run type-check # tsc --noEmit
 ```
 
 ## Contributing
@@ -149,7 +151,7 @@ Issues and PRs are welcome. Please include:
 
 - Reproduction steps (server version + UI version)
 - Screenshots for UI changes
-- Verification notes (`npm run lint`, `npm run type-check`, `npm run build`)
+- Verification notes (`bun run verify`, plus `bun run type-check` when run separately)
 
 ## License
 

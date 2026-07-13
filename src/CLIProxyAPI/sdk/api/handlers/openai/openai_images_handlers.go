@@ -1218,13 +1218,24 @@ func (h *OpenAIAPIHandler) streamOpenAICompatImages(c *gin.Context, compatReq []
 
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	model := strings.TrimSpace(imageModel)
-	dataChan, upstreamHeaders, errChan := h.ExecuteStreamWithAuthManager(cliCtx, xaiImagesHandlerType, model, compatReq, "")
-
-	setSSEHeaders := func() {
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("Access-Control-Allow-Origin", "*")
+	execution, streamStarted, canceled := h.waitImagesStreamExecution(c, flusher, func() imagesStreamExecutionResult {
+		dataChan, upstreamHeaders, errChan := h.ExecuteImageStreamWithAuthManager(cliCtx, xaiImagesHandlerType, model, compatReq, "")
+		return imagesStreamExecutionResult{Data: dataChan, UpstreamHeaders: upstreamHeaders, Errs: errChan}
+	})
+	if canceled {
+		cliCancel(c.Request.Context().Err())
+		return
+	}
+	dataChan := execution.Data
+	upstreamHeaders := execution.UpstreamHeaders
+	errChan := execution.Errs
+	keepAlive, keepAliveC := h.newImagesStreamKeepAliveTicker()
+	stopKeepAlive := func() {
+		if keepAlive != nil {
+			keepAlive.Stop()
+			keepAlive = nil
+			keepAliveC = nil
+		}
 	}
 
 	for {
@@ -1294,7 +1305,7 @@ func (h *OpenAIAPIHandler) collectImagesWithModel(c *gin.Context, imageReq []byt
 	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
 
 	model = strings.TrimSpace(model)
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiImagesHandlerType, model, imageReq, "")
+	resp, upstreamHeaders, errMsg := h.ExecuteImageWithAuthManager(cliCtx, xaiImagesHandlerType, model, imageReq, "")
 	stopKeepAlive()
 	if errMsg != nil {
 		h.WriteErrorResponse(c, errMsg)
@@ -1338,57 +1349,96 @@ func (h *OpenAIAPIHandler) streamImagesWithModel(c *gin.Context, imageReq []byte
 
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	model = strings.TrimSpace(model)
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiImagesHandlerType, model, imageReq, "")
-	if errMsg != nil {
-		h.WriteErrorResponse(c, errMsg)
-		if errMsg.Error != nil {
+	type imageStreamResult struct {
+		resp            []byte
+		upstreamHeaders http.Header
+		errMsg          *interfaces.ErrorMessage
+	}
+	resultChan := make(chan imageStreamResult, 1)
+	go func() {
+		resp, upstreamHeaders, errMsg := h.ExecuteImageWithAuthManager(cliCtx, xaiImagesHandlerType, model, imageReq, "")
+		resultChan <- imageStreamResult{resp: resp, upstreamHeaders: upstreamHeaders, errMsg: errMsg}
+	}()
+
+	keepAlive, keepAliveC := h.newImagesStreamKeepAliveTicker()
+	stopKeepAlive := func() {
+		if keepAlive != nil {
+			keepAlive.Stop()
+			keepAlive = nil
+			keepAliveC = nil
+		}
+	}
+	defer stopKeepAlive()
+	streamStarted := false
+	writeError := func(errMsg *interfaces.ErrorMessage) {
+		if streamStarted {
+			writeImagesStreamErrorEvent(c, errMsg)
+			flusher.Flush()
+		} else {
+			h.WriteErrorResponse(c, errMsg)
+		}
+		if errMsg != nil && errMsg.Error != nil {
 			cliCancel(errMsg.Error)
 		} else {
 			cliCancel(nil)
 		}
-		return
 	}
 
-	results, _, usageRaw, err := extractXAIImagesResponse(resp)
-	if err != nil {
-		errMsg := &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: err}
-		h.WriteErrorResponse(c, errMsg)
-		cliCancel(err)
-		return
-	}
-
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
-	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
-
-	eventName := streamPrefix + ".completed"
-	responseFormat = normalizeImagesResponseFormat(responseFormat)
-	for _, img := range results {
-		data := []byte(`{"type":""}`)
-		data, _ = sjson.SetBytes(data, "type", eventName)
-		if responseFormat == "url" {
-			if img.URL != "" {
-				data, _ = sjson.SetBytes(data, "url", img.URL)
-			} else {
-				data, _ = sjson.SetBytes(data, "url", "data:"+mimeTypeFromOutputFormat(img.MimeType)+";base64,"+img.B64JSON)
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			cliCancel(c.Request.Context().Err())
+			return
+		case <-keepAliveC:
+			setImagesSSEHeaders(c)
+			writeImagesStreamKeepAlive(c, flusher)
+			streamStarted = true
+		case result := <-resultChan:
+			stopKeepAlive()
+			if result.errMsg != nil {
+				writeError(result.errMsg)
+				return
 			}
-		} else if img.B64JSON != "" {
-			data, _ = sjson.SetBytes(data, "b64_json", img.B64JSON)
-		} else {
-			data, _ = sjson.SetBytes(data, "url", img.URL)
+
+			results, _, usageRaw, err := extractXAIImagesResponse(result.resp)
+			if err != nil {
+				writeError(&interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: err})
+				return
+			}
+
+			setImagesSSEHeaders(c)
+			handlers.WriteUpstreamHeaders(c.Writer.Header(), result.upstreamHeaders)
+
+			eventName := streamPrefix + ".completed"
+			responseFormat = normalizeImagesResponseFormat(responseFormat)
+			for _, img := range results {
+				data := []byte(`{"type":""}`)
+				data, _ = sjson.SetBytes(data, "type", eventName)
+				if responseFormat == "url" {
+					if img.URL != "" {
+						data, _ = sjson.SetBytes(data, "url", img.URL)
+					} else {
+						data, _ = sjson.SetBytes(data, "url", "data:"+mimeTypeFromOutputFormat(img.MimeType)+";base64,"+img.B64JSON)
+					}
+				} else if img.B64JSON != "" {
+					data, _ = sjson.SetBytes(data, "b64_json", img.B64JSON)
+				} else {
+					data, _ = sjson.SetBytes(data, "url", img.URL)
+				}
+				if len(usageRaw) > 0 && json.Valid(usageRaw) {
+					data, _ = sjson.SetRawBytes(data, "usage", usageRaw)
+				}
+				if strings.TrimSpace(eventName) != "" {
+					_, _ = fmt.Fprintf(c.Writer, "event: %s\n", eventName)
+				}
+				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(data))
+				flusher.Flush()
+				streamStarted = true
+			}
+			cliCancel(nil)
+			return
 		}
-		if len(usageRaw) > 0 && json.Valid(usageRaw) {
-			data, _ = sjson.SetRawBytes(data, "usage", usageRaw)
-		}
-		if strings.TrimSpace(eventName) != "" {
-			_, _ = fmt.Fprintf(c.Writer, "event: %s\n", eventName)
-		}
-		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(data))
-		flusher.Flush()
 	}
-	cliCancel(nil)
 }
 
 func (h *OpenAIAPIHandler) collectImagesFromResponses(c *gin.Context, responsesReq []byte, responseFormat string) {

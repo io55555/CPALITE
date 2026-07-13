@@ -389,6 +389,14 @@ func (s *Service) ApplyToAuth(auth *cliproxyauth.Auth) {
 		auth.LastError = nil
 		return
 	}
+	if st.Status == StatusError {
+		auth.Disabled = false
+		if !auth.Unavailable || !auth.NextRetryAfter.After(time.Now()) {
+			auth.Status = cliproxyauth.StatusError
+			auth.StatusMessage = st.StatusMessage
+		}
+		return
+	}
 	auth.Disabled = false
 	auth.Unavailable = false
 	auth.NextRetryAfter = time.Time{}
