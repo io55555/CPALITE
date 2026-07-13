@@ -14,7 +14,6 @@ import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import {
@@ -2055,15 +2054,6 @@ export function MonitoringCenterPage() {
 
   return (
     <div className={styles.page}>
-      {overallLoading && !usage ? (
-        <div className={styles.loadingOverlay} aria-busy="true">
-          <div className={styles.loadingOverlayContent}>
-            <LoadingSpinner size={28} />
-            <span>{t('common.loading')}</span>
-          </div>
-        </div>
-      ) : null}
-
       <div className={styles.headerShell}>
         <div className={styles.pageHeader}>
           <h1 className={styles.pageTitle}>{t('monitoring.title')}</h1>

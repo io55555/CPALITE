@@ -50,12 +50,12 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
   useEffect(() => {
     void loadUsageStats({
       force: true,
-      fullRange: true,
+      fullRange: refreshFullRange,
       staleTimeMs: USAGE_STATS_STALE_TIME_MS,
       timeRange,
       minimumLookbackMs,
     }).catch(() => {});
-  }, [loadUsageStats, minimumLookbackMs, timeRange]);
+  }, [loadUsageStats, minimumLookbackMs, refreshFullRange, timeRange]);
 
   const handleSetModelPrices = useCallback((prices: Record<string, ModelPrice>) => {
     setModelPrices(prices);

@@ -20,7 +20,6 @@ import {
   Tooltip
 } from 'chart.js';
 import { Button } from '@/components/ui/Button';
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { AuthRefreshQueueCountdownCard } from '@/components/credentialCenter/AuthRefreshQueueCountdownCard';
 import { CodexCredentialPoolStatsCard } from '@/components/credentialCenter/CodexCredentialPoolStatsCard';
 import { CodexCredentialQuotaCard } from '@/components/credentialCenter/CodexCredentialQuotaCard';
@@ -212,15 +211,6 @@ export function MonitoringCenterPage() {
 
   return (
     <div className={styles.container}>
-      {loading && !usage && (
-        <div className={styles.loadingOverlay} aria-busy="true">
-          <div className={styles.loadingOverlayContent}>
-            <LoadingSpinner size={28} className={styles.loadingOverlaySpinner} />
-            <span className={styles.loadingOverlayText}>{t('common.loading')}</span>
-          </div>
-        </div>
-      )}
-
       <div className={styles.header}>
         <h1 className={styles.pageTitle}>{t('monitoring_center.title')}</h1>
         <div className={styles.headerActions}>
