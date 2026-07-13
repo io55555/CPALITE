@@ -1314,7 +1314,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerWithOptions(ctx context.Con
 								chunks = retryResult.Chunks
 								continue outer
 							}
-							streamErr = enrichAuthSelectionError(retryErr, providers, normalizedModel)
+							streamErr = enrichBootstrapRetrySelectionError(retryErr, providers, normalizedModel)
 						}
 					}
 
@@ -1445,11 +1445,8 @@ func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowIma
 	parsed := thinking.ParseSuffix(resolvedModelName)
 	baseModel := strings.TrimSpace(parsed.ModelName)
 
-	if strings.EqualFold(routeModelBaseName(baseModel), "gpt-image-2") && !allowImageModel {
-		return nil, "", &interfaces.ErrorMessage{
-			StatusCode: http.StatusServiceUnavailable,
-			Error:      fmt.Errorf("model %s is only supported on /v1/images/generations and /v1/images/edits", routeModelBaseName(baseModel)),
-		}
+	if errMsg := h.validateImageOnlyModel(baseModel, allowImageModel); errMsg != nil {
+		return nil, "", errMsg
 	}
 
 	if h != nil && h.AuthManager != nil && h.AuthManager.HomeEnabled() {
@@ -1464,6 +1461,9 @@ func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowIma
 	// custom model registrations that include thinking suffixes.
 	if len(providers) == 0 && baseModel != resolvedModelName {
 		providers = util.GetProviderName(resolvedModelName)
+	}
+	if len(providers) == 0 && allowImageModel {
+		providers = defaultImageModelProviders(baseModel)
 	}
 
 	if len(providers) == 0 {
@@ -1497,6 +1497,18 @@ func isOpenAIImageOnlyModel(model string) bool {
 		return false
 	}
 }
+
+func defaultImageModelProviders(model string) []string {
+	switch strings.ToLower(strings.TrimSpace(routeModelBaseName(model))) {
+	case "gpt-image-1.5", "gpt-image-2":
+		return []string{"codex"}
+	case "grok-imagine-image", "grok-imagine-image-quality":
+		return []string{"xai"}
+	default:
+		return nil
+	}
+}
+
 func routeModelBaseName(model string) string {
 	model = strings.TrimSpace(model)
 	if idx := strings.LastIndex(model, "/"); idx >= 0 && idx < len(model)-1 {
@@ -1622,11 +1634,8 @@ func (h *BaseAPIHandler) providersForExecution(modelName, originalRequestedModel
 	}
 	parsed := thinking.ParseSuffix(normalizedModel)
 	baseModel := strings.TrimSpace(parsed.ModelName)
-	if strings.EqualFold(routeModelBaseName(baseModel), "gpt-image-2") && !allowImageModel {
-		return nil, "", &interfaces.ErrorMessage{
-			StatusCode: http.StatusServiceUnavailable,
-			Error:      fmt.Errorf("model %s is only supported on /v1/images/generations and /v1/images/edits", routeModelBaseName(baseModel)),
-		}
+	if errMsg := h.validateImageOnlyModel(baseModel, allowImageModel); errMsg != nil {
+		return nil, "", errMsg
 	}
 	return []string{strings.ToLower(strings.TrimSpace(decision.Provider))}, normalizedModel, nil
 }
@@ -2102,6 +2111,45 @@ func enrichAuthSelectionError(err error, providers []string, model string) error
 		Retryable:  authErr.Retryable,
 		HTTPStatus: status,
 	}
+}
+
+func enrichBootstrapRetrySelectionError(err error, providers []string, model string) error {
+	if err == nil {
+		return nil
+	}
+	if isModelCooldownError(err) {
+		providerText := strings.Join(providers, ",")
+		if providerText == "" {
+			providerText = "unknown"
+		}
+		modelText := strings.TrimSpace(model)
+		if modelText == "" {
+			modelText = "unknown"
+		}
+		message := strings.TrimSpace(err.Error())
+		if message == "" {
+			message = "no auth available"
+		}
+		return &coreauth.Error{
+			Code:       "auth_unavailable",
+			Message:    fmt.Sprintf("%s (providers=%s, model=%s)", message, providerText, modelText),
+			Retryable:  true,
+			HTTPStatus: http.StatusServiceUnavailable,
+		}
+	}
+	return enrichAuthSelectionError(err, providers, model)
+}
+
+func isModelCooldownError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var authErr *coreauth.Error
+	if errors.As(err, &authErr) && authErr != nil {
+		return strings.TrimSpace(authErr.Code) == "model_cooldown"
+	}
+	return strings.Contains(strings.ToLower(err.Error()), `"code":"model_cooldown"`) ||
+		strings.Contains(strings.ToLower(err.Error()), "model_cooldown")
 }
 
 // WriteErrorResponse writes an error message to the response writer using the HTTP status embedded in the message.

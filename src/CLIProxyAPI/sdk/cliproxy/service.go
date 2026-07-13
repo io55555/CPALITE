@@ -1858,6 +1858,29 @@ func buildOpenAICompatibilityConfigModels(compat *config.OpenAICompatibility) []
 	return models
 }
 
+func normalizeCompatConfigModalities(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		modality := strings.ToLower(strings.TrimSpace(item))
+		if modality == "" {
+			continue
+		}
+		if _, exists := seen[modality]; exists {
+			continue
+		}
+		seen[modality] = struct{}{}
+		out = append(out, modality)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func buildConfigModels[T modelEntry](models []T, ownedBy, modelType string) []*ModelInfo {
 	if len(models) == 0 {
 		return nil
