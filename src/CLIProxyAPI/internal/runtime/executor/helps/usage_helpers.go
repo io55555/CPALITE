@@ -36,6 +36,7 @@ type UsageReporter struct {
 	source                          string
 	reasoning                       string
 	serviceTier                     string
+	generate                        bool
 	requestedAt                     time.Time
 	once                            sync.Once
 	ttftMu                          sync.RWMutex
@@ -79,6 +80,7 @@ func NewUsageReporter(ctx context.Context, provider, model string, auth *cliprox
 		authType:    resolveUsageAuthType(auth),
 		reasoning:   usage.ReasoningEffortFromContext(ctx),
 		serviceTier: usage.ServiceTierFromContext(ctx),
+		generate:    usage.GenerateFromContext(ctx),
 	}
 	if auth != nil {
 		reporter.authID = auth.ID
@@ -115,7 +117,6 @@ func (r *UsageReporter) SetTranslatedReasoningEffort(payload []byte, format stri
 		return
 	}
 	r.reasoning = thinking.ExtractTranslatedReasoningEffort(payload, format)
-	r.serviceTier = extractServiceTierFromPayload(payload)
 }
 
 func (r *UsageReporter) TrackHTTPClient(client *http.Client) *http.Client {
@@ -346,8 +347,8 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 		AuthType:            r.authType,
 		ReasoningEffort:     r.reasoning,
 		ServiceTier:         r.serviceTier,
-		RequestServiceTier:  r.serviceTier,
 		ResponseServiceTier: strings.TrimSpace(detail.ResponseServiceTier),
+		Generate:            usage.GenerateFlag(r.generate),
 		RequestedAt:         r.requestedAt,
 		Latency:             r.latency(),
 		TTFT:                r.ttftDuration(),
@@ -480,6 +481,9 @@ func (r *UsageReporter) setTTFT(ttft time.Duration) {
 	}
 	if ttft < 0 {
 		ttft = 0
+	}
+	if ttft == 0 {
+		ttft = time.Nanosecond
 	}
 	r.ttftMu.Lock()
 	if r.ttftSet {

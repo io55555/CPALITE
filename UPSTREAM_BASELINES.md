@@ -2,9 +2,9 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: 5b7f2361ee27d195f6514dde08656f6e4773a9a4
-- tag: v7.2.71
-- note: merged with local enhancement-preserving overrides; retained packet capture/filtering, status-rulers, provider enhancements, quota display fixes, and OpenAI-compatible cooldown/candidate-skip behavior
+- commit: 09da52ad509e2c18e7b9540db3b98c2214c280aa
+- tag: v7.2.80
+- note: merged with local enhancement-preserving overrides; retained packet capture/filtering, status-rulers, provider enhancements, quota display fixes, OpenAI-compatible cooldown/candidate-skip behavior, auth-file cooldown views, UA/request logging, and proxy-failure 3-minute cooldown behavior
 
 ## Cli-Proxy-API-Management-Center
 - branch: main

@@ -305,7 +305,7 @@ func setServiceTierMetadata(meta map[string]any, rawJSON []byte) {
 	if meta == nil {
 		return
 	}
-	serviceTier := coreusage.DefaultServiceTier
+	serviceTier := coreusage.AutoServiceTier
 	node := gjson.GetBytes(rawJSON, "service_tier")
 	if node.Exists() {
 		value := strings.TrimSpace(node.String())
@@ -314,6 +314,18 @@ func setServiceTierMetadata(meta map[string]any, rawJSON []byte) {
 		}
 	}
 	meta[coreexecutor.ServiceTierMetadataKey] = serviceTier
+}
+
+func setGenerateMetadata(meta map[string]any, rawJSON []byte) {
+	if meta == nil {
+		return
+	}
+	generate := true
+	node := gjson.GetBytes(rawJSON, "generate")
+	if node.Exists() && node.IsBool() && !node.Bool() {
+		generate = false
+	}
+	meta[coreexecutor.GenerateMetadataKey] = generate
 }
 
 // headersFromContext extracts the original HTTP request headers from the gin context
@@ -695,6 +707,7 @@ func (h *BaseAPIHandler) executeWithAuthManagerWithOptions(ctx context.Context, 
 	addModelExecutionSourceMetadata(reqMeta, execOptions.InternalSource)
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
+	setGenerateMetadata(reqMeta, rawJSON)
 	headers := modelExecutionHeaders(ctx, execOptions.Headers)
 	rawJSON, headers = h.applyPluginBeforeAuthInterceptor(ctx, handlerType, normalizedModel, modelName, rawJSON, headers, false, reqMeta, execOptions)
 	payload := rawJSON
@@ -781,6 +794,7 @@ func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handle
 	addModelExecutionSourceMetadata(reqMeta, execOptions.InternalSource)
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
+	setGenerateMetadata(reqMeta, rawJSON)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
@@ -1117,6 +1131,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerWithOptions(ctx context.Con
 	addModelExecutionSourceMetadata(reqMeta, execOptions.InternalSource)
 	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
+	setGenerateMetadata(reqMeta, rawJSON)
 	headers := modelExecutionHeaders(ctx, execOptions.Headers)
 	rawJSON, headers = h.applyPluginBeforeAuthInterceptor(ctx, handlerType, normalizedModel, modelName, rawJSON, headers, true, reqMeta, execOptions)
 	payload := rawJSON
