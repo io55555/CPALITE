@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand';
-import type { AntigravityQuotaState, ClaudeQuotaState, CodexQuotaState, GeminiCliQuotaState, KimiQuotaState } from '@/types';
+import type { AntigravityQuotaState, ClaudeQuotaState, CodexQuotaState, GeminiCliQuotaState, KimiQuotaState, XaiQuotaState } from '@/types';
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
 
@@ -14,11 +14,13 @@ interface QuotaStoreState {
   codexQuota: Record<string, CodexQuotaState>;
   geminiCliQuota: Record<string, GeminiCliQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
+  xaiQuota: Record<string, XaiQuotaState>;
   setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
   setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void;
   setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;
   setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
+  setXaiQuota: (updater: QuotaUpdater<Record<string, XaiQuotaState>>) => void;
   clearQuotaCache: () => void;
 }
 
@@ -36,6 +38,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
   codexQuota: {},
   geminiCliQuota: {},
   kimiQuota: {},
+  xaiQuota: {},
   setAntigravityQuota: (updater) =>
     set((state) => ({
       antigravityQuota: resolveUpdater(updater, state.antigravityQuota)
@@ -56,6 +59,10 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     set((state) => ({
       kimiQuota: resolveUpdater(updater, state.kimiQuota)
     })),
+  setXaiQuota: (updater) =>
+    set((state) => ({
+      xaiQuota: resolveUpdater(updater, state.xaiQuota)
+    })),
   clearQuotaCache: () =>
     set((state) => ({
       cacheGeneration: state.cacheGeneration + 1,
@@ -63,7 +70,8 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
       claudeQuota: {},
       codexQuota: {},
       geminiCliQuota: {},
-      kimiQuota: {}
+      kimiQuota: {},
+      xaiQuota: {}
     }))
 }));
 

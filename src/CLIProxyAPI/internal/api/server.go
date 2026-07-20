@@ -41,6 +41,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/safemode"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
@@ -62,6 +63,7 @@ const defaultManagementConcurrencyLimit = 16
 const defaultManagementQueueLimit = 16
 
 var corsExposedResponseHeaders = []string{
+	logging.CPATraceIDHeader,
 	"X-CPA-VERSION",
 	"X-CPA-COMMIT",
 	"X-CPA-BUILD-DATE",
@@ -137,17 +139,23 @@ func (p *managementProcessorPool) run(c *gin.Context) {
 }
 
 type serverOptionConfig struct {
-	extraMiddleware      []gin.HandlerFunc
-	engineConfigurator   func(*gin.Engine)
-	routerConfigurator   func(*gin.Engine, *handlers.BaseAPIHandler, *config.Config)
-	requestLoggerFactory func(*config.Config, string) logging.RequestLogger
-	localPassword        string
-	keepAliveEnabled     bool
-	keepAliveTimeout     time.Duration
-	keepAliveOnTimeout   func()
-	postAuthHook         auth.PostAuthHook
-	pluginHost           *pluginhost.Host
+	extraMiddleware       []gin.HandlerFunc
+	engineConfigurator    func(*gin.Engine)
+	routerConfigurator    func(*gin.Engine, *handlers.BaseAPIHandler, *config.Config)
+	requestLoggerFactory  func(*config.Config, string) logging.RequestLogger
+	localPassword         string
+	keepAliveEnabled      bool
+	keepAliveTimeout      time.Duration
+	keepAliveOnTimeout    func()
+	postAuthHook          auth.PostAuthHook
+	pluginHost            *pluginhost.Host
+	exampleAPIKeySafeMode bool
 }
+
+const (
+	exampleAPIKeyManagementPath = "/management.html"
+	exampleAPIKeyManagementURL  = "/management.html?safe-mode=configure"
+)
 
 // ServerOption customises HTTP server construction.
 type ServerOption func(*serverOptionConfig)
@@ -221,6 +229,13 @@ func WithPluginHost(host *pluginhost.Host) ServerOption {
 	}
 }
 
+// WithExampleAPIKeySafeMode blocks proxy API endpoints while template API keys remain configured.
+func WithExampleAPIKeySafeMode() ServerOption {
+	return func(cfg *serverOptionConfig) {
+		cfg.exampleAPIKeySafeMode = true
+	}
+}
+
 // Server represents the main API server.
 // It encapsulates the Gin engine, HTTP server, handlers, and configuration.
 type Server struct {
@@ -290,6 +305,9 @@ type Server struct {
 	keepAliveOnTimeout func()
 	keepAliveHeartbeat chan struct{}
 	keepAliveStop      chan struct{}
+
+	exampleAPIKeySafeModeEnabled bool
+	exampleAPIKeySafeModeActive  atomic.Bool
 }
 
 // NewServer creates and initializes a new API server instance.
@@ -324,6 +342,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Add middleware
 	engine.Use(logging.GinLogrusLogger())
 	engine.Use(logging.GinLogrusRecovery())
+	engine.Use(logging.CPATraceIDMiddleware())
 	engine.Use(managementPool.middleware())
 	for _, mw := range optionState.extraMiddleware {
 		engine.Use(mw)
@@ -358,19 +377,21 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 
 	// Create server instance
 	s := &Server{
-		engine:              engine,
-		handlers:            handlers.NewBaseAPIHandlers(&cfg.SDKConfig, authManager),
-		cfg:                 cfg,
-		accessManager:       accessManager,
-		requestLogger:       requestLogger,
-		loggerToggle:        toggle,
-		configFilePath:      configFilePath,
-		currentPath:         wd,
-		envManagementSecret: envManagementSecret,
-		wsRoutes:            make(map[string]struct{}),
-		pluginHost:          optionState.pluginHost,
+		engine:                       engine,
+		handlers:                     handlers.NewBaseAPIHandlers(&cfg.SDKConfig, authManager),
+		cfg:                          cfg,
+		accessManager:                accessManager,
+		requestLogger:                requestLogger,
+		loggerToggle:                 toggle,
+		configFilePath:               configFilePath,
+		currentPath:                  wd,
+		envManagementSecret:          envManagementSecret,
+		wsRoutes:                     make(map[string]struct{}),
+		pluginHost:                   optionState.pluginHost,
+		exampleAPIKeySafeModeEnabled: optionState.exampleAPIKeySafeMode,
 	}
 	s.wsAuthEnabled.Store(cfg.WebsocketAuth)
+	s.exampleAPIKeySafeModeActive.Store(s.exampleAPIKeySafeModeRequired(cfg))
 	s.handlers.SetPluginHost(optionState.pluginHost)
 	if optionState.pluginHost != nil {
 		optionState.pluginHost.SetModelExecutor(s.handlers)
@@ -415,6 +436,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Home heartbeat gate: when home is enabled, block all endpoints with 503 until the
 	// subscribe-config heartbeat connection is healthy.
 	engine.Use(s.homeHeartbeatMiddleware())
+	engine.Use(s.exampleAPIKeySafeModeMiddleware())
 
 	// Setup routes
 	s.setupRoutes()
@@ -456,6 +478,71 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 
 	return s
+}
+
+func (s *Server) exampleAPIKeySafeModeRequired(cfg *config.Config) bool {
+	return s != nil && s.exampleAPIKeySafeModeEnabled && cfg != nil && safemode.HasExampleAPIKeys(cfg.APIKeys)
+}
+
+func (s *Server) exampleAPIKeySafeModeMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s == nil || !s.exampleAPIKeySafeModeActive.Load() || c == nil || c.Request == nil || c.Request.URL == nil {
+			c.Next()
+			return
+		}
+
+		path := c.Request.URL.Path
+		if path == exampleAPIKeyManagementPath && c.Query("safe-mode") == "configure" {
+			c.Next()
+			return
+		}
+		if (path == "/" || path == exampleAPIKeyManagementPath) && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
+			s.serveExampleAPIKeyWarningPage(c)
+			return
+		}
+		if !isExampleAPIKeySafeModeProxyPath(path) {
+			c.Next()
+			return
+		}
+
+		c.Header("X-CPA-SAFE-MODE", "example-api-key")
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error":   "unsafe_example_api_key",
+			"message": "Proxy API endpoints are disabled because api-keys contains template values. Open /management.html?safe-mode=configure, update api-keys in Management, then retry.",
+		})
+	}
+}
+
+func (s *Server) serveExampleAPIKeyWarningPage(c *gin.Context) {
+	cfg := s.cfg
+	var keys []string
+	if cfg != nil {
+		keys = safemode.ExampleAPIKeys(cfg.APIKeys)
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		c.Abort()
+		return
+	}
+	c.String(http.StatusOK, safemode.ExampleAPIKeyWarningPageHTML(keys, exampleAPIKeyManagementURL))
+	c.Abort()
+}
+
+func isExampleAPIKeySafeModeProxyPath(path string) bool {
+	switch {
+	case path == "/v1" || strings.HasPrefix(path, "/v1/"):
+		return true
+	case path == "/v1beta" || strings.HasPrefix(path, "/v1beta/"):
+		return true
+	case path == "/openai/v1" || strings.HasPrefix(path, "/openai/v1/"):
+		return true
+	case path == "/backend-api/codex" || strings.HasPrefix(path, "/backend-api/codex/"):
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) homeHeartbeatMiddleware() gin.HandlerFunc {
@@ -748,6 +835,7 @@ func (s *Server) codexAlphaSearch(c *gin.Context) {
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+	logging.SetGinCPATraceID(c, selected.EnsureIndex())
 
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
@@ -1901,6 +1989,8 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 	}
 	redisqueue.SetEnabled(s.managementRoutesEnabled.Load() || (cfg != nil && cfg.Home.Enabled))
 
+	exampleAPIKeySafeModeRequired := s.exampleAPIKeySafeModeRequired(cfg)
+	s.exampleAPIKeySafeModeActive.Store(exampleAPIKeySafeModeRequired)
 	s.applyAccessConfig(oldCfg, cfg)
 	s.cfg = cfg
 	s.wsAuthEnabled.Store(cfg.WebsocketAuth)

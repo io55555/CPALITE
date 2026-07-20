@@ -31,6 +31,12 @@ import {
   getQiniuCloudProtocolUrls,
   resolveQiniuCloudBaseUrl,
 } from './qiniuCloud';
+import {
+  KIMI_DISPLAY_NAME,
+  KIMI_PROTOCOL_LABELS,
+  getKimiProtocolUrls,
+  resolveKimiBaseUrl,
+} from './kimi';
 import type {
   ProviderBrand,
   ProviderResource,
@@ -65,7 +71,7 @@ const truncateForId = (value: string | undefined | null): string => {
 };
 
 function providerKeyToResource(
-  brand: 'gemini' | 'codex' | 'claude' | 'claudeApi' | 'vertex',
+  brand: 'gemini' | 'codex' | 'xai' | 'claude' | 'claudeApi' | 'vertex',
   config: GeminiKeyConfig | ProviderKeyConfig,
   index: number
 ): ProviderResource {
@@ -73,7 +79,7 @@ function providerKeyToResource(
   const disabled =
     (config as GeminiKeyConfig).disabled === true || hasDisableAllModelsRule(config.excludedModels);
   const flags: ProviderResource['flags'] = {};
-  if (brand === 'codex') {
+  if (brand === 'codex' || brand === 'xai') {
     flags.websockets = (config as ProviderKeyConfig).websockets === true;
   }
   if (brand === 'claude' || brand === 'claudeApi') {
@@ -121,6 +127,10 @@ export function codexToResource(config: ProviderKeyConfig, index: number): Provi
   return providerKeyToResource('codex', config, index);
 }
 
+export function xaiToResource(config: ProviderKeyConfig, index: number): ProviderResource {
+  return providerKeyToResource('xai', config, index);
+}
+
 export function claudeToResource(config: ProviderKeyConfig, index: number): ProviderResource {
   return providerKeyToResource('claude', config, index);
 }
@@ -138,6 +148,7 @@ export function vertexToResource(config: ProviderKeyConfig, index: number): Prov
 }
 
 export function openaiToResource(config: OpenAIProviderConfig, index: number): ProviderResource {
+  const sourceIndex = config.sourceIndex ?? index;
   const name = (config.name ?? '').trim();
   const firstEntry = config.apiKeyEntries?.[0];
   const previewApiKey = firstEntry?.apiKey ? maskApiKey(firstEntry.apiKey) : null;
@@ -153,11 +164,11 @@ export function openaiToResource(config: OpenAIProviderConfig, index: number): P
         ? proxyUrls[0]
         : `${proxyUrls[0]} (+${proxyUrls.length - 1})`;
   return {
-    id: buildId('openaiCompatibility', index, truncateForId(name) || `#${index}`),
+    id: buildId('openaiCompatibility', sourceIndex, truncateForId(name) || `#${sourceIndex}`),
     brand: 'openaiCompatibility',
-    originalIndex: index,
+    originalIndex: sourceIndex,
     name: name || null,
-    identifier: name || `#${index + 1}`,
+    identifier: name || `#${sourceIndex + 1}`,
     apiKeyPreview: previewApiKey,
     apiKey: null,
     authIndex: config.authIndex ?? null,
@@ -172,7 +183,7 @@ export function openaiToResource(config: OpenAIProviderConfig, index: number): P
     apiKeyEntryCount: config.apiKeyEntries?.length ?? 0,
     disabled: config.disabled === true,
     flags: {},
-    selector: { brand: 'openaiCompatibility', name, index },
+    selector: { brand: 'openaiCompatibility', name, index: sourceIndex },
     raw: config,
   };
 }
@@ -361,7 +372,6 @@ export function qiniuCloudToResource(raw: SponsorProviderRaw): ProviderResource 
     getProtocolUrls: getQiniuCloudProtocolUrls,
   });
 }
-
 export function ampcodeToResource(config?: AmpcodeConfig | null): ProviderResource {
   const safe: AmpcodeConfig = config ?? {};
   const upstreamApiKey = safe.upstreamApiKey ?? '';
@@ -394,4 +404,13 @@ export function ampcodeToResource(config?: AmpcodeConfig | null): ProviderResour
     selector: { brand: 'ampcode' },
     raw: safe,
   };
+}
+
+export function kimiToResource(raw: SponsorProviderRaw): ProviderResource | null {
+  return sponsorRawToResource('kimi', raw, {
+    displayName: KIMI_DISPLAY_NAME,
+    protocolLabels: KIMI_PROTOCOL_LABELS,
+    resolveBaseUrl: resolveKimiBaseUrl,
+    getProtocolUrls: getKimiProtocolUrls,
+  });
 }

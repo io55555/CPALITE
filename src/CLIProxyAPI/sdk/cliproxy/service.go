@@ -33,6 +33,7 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	sdkpluginstore "github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginstore"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -108,8 +109,9 @@ type Service struct {
 	homeLogForwarder *logging.HomeAppLogForwarder
 	pluginHost       *pluginhost.Host
 
-	homePluginSyncMu  sync.Mutex
-	homePluginSyncKey string
+	homePluginSyncMu    sync.Mutex
+	homePluginSyncKey   string
+	homePluginSyncFetch func(context.Context, sdkpluginstore.PluginSyncRequest) (sdkpluginstore.PluginSyncResponse, error)
 }
 
 type executorRegistrationOptions struct {
@@ -657,10 +659,12 @@ func forceHomeRuntimeConfig(cfg *config.Config) {
 	cfg.APIKeys = nil
 	cfg.UsageStatisticsEnabled = true
 	cfg.DisableCooling = true
+	cfg.SaveCooldownStatus = false
 	cfg.WebsocketAuth = false
 	cfg.EnableGeminiCLIEndpoint = false
 	cfg.RemoteManagement.AllowRemote = false
 	cfg.RemoteManagement.DisableControlPanel = true
+	cfg.Plugins.StoreAuth = nil
 }
 
 func (s *Service) registerHomeExecutors() {
@@ -825,19 +829,25 @@ func (s *Service) applyHomeOverlayContext(ctx context.Context, remoteCfg *config
 	merged.Port = baseCfg.Port
 	merged.TLS = baseCfg.TLS
 	merged.Home = baseCfg.Home
+	storeAuth := merged.Plugins.StoreAuth
 	forceHomeRuntimeConfig(&merged)
+	syncCfg := merged
+	syncCfg.Plugins.StoreAuth = storeAuth
 
 	logHomeConfigChanges(baseCfg, &merged)
-	report, syncKey, didSync, errSync := s.syncHomePlugins(ctx, &merged)
-	if didSync && errSync != nil {
+	report, syncKey, didSync, errSync := s.syncHomePlugins(ctx, &syncCfg)
+	if errSync != nil {
 		log.Warnf("failed to sync home plugins: %v", errSync)
 	}
 	s.applyConfigUpdate(&merged)
+	var errLoad error
 	if didSync {
-		errLoad := homeplugins.MarkLoadResults(&report, s.pluginHost)
+		errLoad = homeplugins.MarkLoadResults(&report, s.pluginHost)
 		if errLoad != nil {
 			log.Warnf("failed to load home plugins after config update: %v", errLoad)
 		}
+	}
+	if strings.TrimSpace(report.Task) != "" {
 		s.reportHomePluginStatus(ctx, &merged, report)
 		if errSync == nil && errLoad == nil {
 			s.markHomePluginsSynced(syncKey)
@@ -2080,8 +2090,9 @@ func oauthModelAliasesForAuth(cfg *config.Config, channel string, attributes map
 
 func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*ModelInfo) []*ModelInfo {
 	type aliasEntry struct {
-		alias string
-		fork  bool
+		alias       string
+		displayName string
+		fork        bool
 	}
 
 	forward := make(map[string][]aliasEntry, len(aliases))
@@ -2095,7 +2106,11 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 			continue
 		}
 		key := strings.ToLower(name)
-		forward[key] = append(forward[key], aliasEntry{alias: alias, fork: aliases[i].Fork})
+		forward[key] = append(forward[key], aliasEntry{
+			alias:       alias,
+			displayName: strings.TrimSpace(aliases[i].DisplayName),
+			fork:        aliases[i].Fork,
+		})
 	}
 	if len(forward) == 0 {
 		return models
@@ -2152,6 +2167,9 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 			seen[aliasKey] = struct{}{}
 			clone := *model
 			clone.ID = mappedID
+			if entry.displayName != "" {
+				clone.DisplayName = entry.displayName
+			}
 			if clone.Name != "" {
 				clone.Name = rewriteModelInfoName(clone.Name, id, mappedID)
 			}

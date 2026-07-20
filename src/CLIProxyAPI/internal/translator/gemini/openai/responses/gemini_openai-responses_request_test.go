@@ -160,12 +160,21 @@ func TestConvertOpenAIResponsesRequestToGemini_ReasoningSignatureCompatibility(t
 			}`)
 
 			output := ConvertOpenAIResponsesRequestToGemini("gemini-3.5-flash", input, false)
-			part := gjson.GetBytes(output, "contents.0.parts.0")
-			if got := part.Get("thoughtSignature").String(); got != tt.wantSignature {
-				t.Fatalf("thoughtSignature = %q, want %q. Output: %s", got, tt.wantSignature, output)
+			parts := gjson.GetBytes(output, "contents.0.parts").Array()
+			if len(parts) != 2 {
+				t.Fatalf("parts length = %d, want 2. Output: %s", len(parts), output)
 			}
-			if got := part.Get("text").String(); got != "reasoning summary" {
+			if got := parts[0].Get("thought").Bool(); !got {
+				t.Fatalf("parts[0] should be thought. Output: %s", output)
+			}
+			if got := parts[0].Get("thoughtSignature").String(); got != "" {
+				t.Fatalf("parts[0].thoughtSignature = %q, want empty. Output: %s", got, output)
+			}
+			if got := parts[0].Get("text").String(); got != "reasoning summary" {
 				t.Fatalf("thought text = %q, want reasoning summary. Output: %s", got, output)
+			}
+			if got := parts[1].Get("thoughtSignature").String(); got != tt.wantSignature {
+				t.Fatalf("visible thoughtSignature = %q, want %q. Output: %s", got, tt.wantSignature, output)
 			}
 		})
 	}

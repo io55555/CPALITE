@@ -35,6 +35,7 @@ import {
 import { useModelDiscovery } from './useModelDiscovery';
 import { ModelDiscoveryPanel } from './ModelDiscoveryPanel';
 import styles from './sharedForm.module.scss';
+import { CLAUDE_API_BASE_URL } from '../../claudeApi';
 
 export interface BaseProviderFormHandle {
   submit: () => Promise<void>;
@@ -57,6 +58,10 @@ const emptyApiKeyEntry = (): ApiKeyEntryInput => ({
   proxyUrl: '',
   headersText: '',
 });
+const XAI_API_BASE_URL = 'https://api.x.ai/v1';
+
+const isClaudeLikeBrand = (brand: ProviderBrand): boolean =>
+  brand === 'claude' || brand === 'claudeApi';
 
 type OpenAIKeyEntryDisplayMode = 'original' | 'table' | 'badge';
 
@@ -81,7 +86,8 @@ function buildInitialForm(
     return {
       apiKey: '',
       name: '',
-      baseUrl: '',
+      baseUrl:
+        brand === 'claudeApi' ? CLAUDE_API_BASE_URL : brand === 'xai' ? XAI_API_BASE_URL : '',
       proxyUrl: '',
       prefix: '',
       disabled: false,
@@ -89,12 +95,19 @@ function buildInitialForm(
       models: [emptyModel()],
       headers: [emptyHeader()],
       excludedModelsText: '',
-      websockets: brand === 'codex' ? false : undefined,
-      cloak:
-        brand === 'claude'
-          ? { mode: '', strictMode: false, sensitiveWordsText: '', cacheUserId: false }
+      websockets: brand === 'codex' || brand === 'xai' ? false : undefined,
+      cloak: isClaudeLikeBrand(brand)
+        ? { mode: '', strictMode: false, sensitiveWordsText: '', cacheUserId: false }
+        : undefined,
+      experimentalCchSigning: isClaudeLikeBrand(brand) ? false : undefined,
+      testModel:
+        brand === 'openaiCompatibility' ||
+        brand === 'codex' ||
+        brand === 'xai' ||
+        isClaudeLikeBrand(brand) ||
+        brand === 'gemini'
+          ? ''
           : undefined,
-      testModel: brand === 'openaiCompatibility' || brand === 'claude' ? '' : undefined,
       apiKeyEntries: brand === 'openaiCompatibility' ? [emptyApiKeyEntry()] : undefined,
     };
   }
@@ -157,17 +170,25 @@ function buildInitialForm(
       ? Object.entries(cfg.headers).map(([k, v]) => ({ key: k, value: String(v) }))
       : [emptyHeader()],
     excludedModelsText: excludedList.join('\n'),
-    websockets: brand === 'codex' ? (cfg as ProviderKeyConfig).websockets === true : undefined,
-    cloak:
-      brand === 'claude'
-        ? {
-            mode: (cfg as ProviderKeyConfig).cloak?.mode ?? '',
-            strictMode: (cfg as ProviderKeyConfig).cloak?.strictMode === true,
-            sensitiveWordsText: (cfg as ProviderKeyConfig).cloak?.sensitiveWords?.join('\n') ?? '',
-            cacheUserId: (cfg as ProviderKeyConfig).cloak?.cacheUserId === true,
-          }
+    websockets:
+      brand === 'codex' || brand === 'xai'
+        ? (cfg as ProviderKeyConfig).websockets === true
         : undefined,
-    testModel: brand === 'claude' ? '' : undefined,
+    cloak: isClaudeLikeBrand(brand)
+      ? {
+          mode: (cfg as ProviderKeyConfig).cloak?.mode ?? '',
+          strictMode: (cfg as ProviderKeyConfig).cloak?.strictMode === true,
+          sensitiveWordsText: (cfg as ProviderKeyConfig).cloak?.sensitiveWords?.join('\n') ?? '',
+          cacheUserId: (cfg as ProviderKeyConfig).cloak?.cacheUserId === true,
+        }
+      : undefined,
+    experimentalCchSigning: isClaudeLikeBrand(brand)
+      ? (cfg as ProviderKeyConfig).experimentalCchSigning === true
+      : undefined,
+    testModel:
+      brand === 'codex' || brand === 'xai' || isClaudeLikeBrand(brand) || brand === 'gemini'
+        ? ''
+        : undefined,
   };
 }
 
@@ -465,7 +486,6 @@ export function BaseProviderForm({
         : [emptyApiKeyEntry()],
     [form.apiKeyEntries]
   );
-
   const openaiProviderName = form.name.trim();
 
   const openaiStateFor = (apiKey: string) =>
@@ -495,10 +515,7 @@ export function BaseProviderForm({
     }));
   };
 
-  const updateOpenAIEntry = (
-    idx: number,
-    patch: Partial<ApiKeyEntryInput>
-  ) => {
+  const updateOpenAIEntry = (idx: number, patch: Partial<ApiKeyEntryInput>) => {
     updateField(
       'apiKeyEntries',
       apiKeyEntries.map((it, i) => (i === idx ? { ...it, ...patch } : it))
@@ -514,7 +531,7 @@ export function BaseProviderForm({
 
   return (
     <form id={formId} className={styles.form} onSubmit={handleSubmit} noValidate>
-      {/* 基础字段 */}
+      {/* 鍩虹瀛楁 */}
       <div className={styles.section}>
         {descriptor.supportsName ? (
           <div className={styles.field}>
@@ -559,7 +576,7 @@ export function BaseProviderForm({
               {descriptor.baseUrlRequired ? (
                 <span className={styles.labelHint}>
                   {' '}
-                  · {t('providersPage.form.baseUrlRequiredHint')}
+                  路 {t('providersPage.form.baseUrlRequiredHint')}
                 </span>
               ) : null}
             </label>
@@ -631,10 +648,13 @@ export function BaseProviderForm({
           <div className={styles.field}>
             <label className={styles.label} htmlFor={`${fid}-testModel`}>
               {t('providersPage.form.testModel')}
-              {brand === 'claude' ? (
+              {brand === 'codex' ||
+              brand === 'xai' ||
+              isClaudeLikeBrand(brand) ||
+              brand === 'gemini' ? (
                 <span className={styles.labelHint}>
                   {' '}
-                  · {t('providersPage.form.testModelClaudeHint')}
+                  路 {t('providersPage.form.testModelClaudeHint')}
                 </span>
               ) : null}
             </label>
@@ -707,7 +727,7 @@ export function BaseProviderForm({
         ) : null}
       </div>
 
-      {/* 高级折叠区 */}
+      {/* 楂樼骇鎶樺彔鍖?*/}
       {descriptor.supportsApiKeyEntries && form.apiKeyEntries ? (
         <Collapsible
           label={t('providersPage.form.apiKeyEntriesSection')}
@@ -875,7 +895,7 @@ export function BaseProviderForm({
                           disabled={mutating}
                           onClick={() => setOpenaiKeyEntryDisplayMode('table')}
                         >
-                          编辑
+                          缂栬緫
                         </button>
                         <button
                           type="button"
@@ -974,7 +994,7 @@ export function BaseProviderForm({
                       {t('providersPage.form.headers')}
                       <span className={styles.labelHint}>
                         {' '}
-                        · {t('providersPage.form.headersHint')}
+                        路 {t('providersPage.form.headersHint')}
                       </span>
                     </label>
                     <textarea

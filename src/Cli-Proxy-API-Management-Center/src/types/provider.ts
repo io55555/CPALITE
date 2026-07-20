@@ -96,5 +96,7 @@ export interface OpenAIProviderConfig {
   testModel?: string;
   statusRulers?: OpenAIStatusRuler[];
   authIndex?: string;
+  /** Original index in the backend openai-compatibility array. */
+  sourceIndex?: number;
   [key: string]: unknown;
 }

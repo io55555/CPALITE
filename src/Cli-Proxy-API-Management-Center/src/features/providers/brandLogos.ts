@@ -10,12 +10,17 @@ import apikeyFunLogo from '@/assets/icons/apikey-fun.png';
 import code0Logo from '@/assets/icons/code0.png';
 import fennoAILogo from '@/assets/icons/fenno-ai.png';
 import qiniuCloudLogo from '@/assets/icons/qiniu-cloud.png';
+import xaiLightLogo from '@/assets/icons/grok.svg';
+import xaiDarkLogo from '@/assets/icons/grok-dark.svg';
+import kimiLightLogo from '@/assets/icons/kimi-light.svg';
+import kimiDarkLogo from '@/assets/icons/kimi-dark.svg';
 import type { ProviderBrand } from './types';
 
 export interface ProviderBrandLogo {
   src: string;
   darkSrc?: string;
   transparent?: boolean;
+  themeSurface?: boolean;
   invertOnDark?: boolean;
 }
 
@@ -24,6 +29,7 @@ export const PROVIDER_LOGOS: Record<ProviderBrand, ProviderBrandLogo> = {
   claude: { src: claudeLogo },
   claudeApi: { src: claudeApiLogo },
   codex: { src: codexLogo },
+  xai: { src: xaiLightLogo, darkSrc: xaiDarkLogo, transparent: true },
   vertex: { src: vertexLogo },
   openaiCompatibility: { src: openaiLightLogo, darkSrc: openaiDarkLogo, transparent: true },
   apikeyFun: { src: apikeyFunLogo },
@@ -31,4 +37,10 @@ export const PROVIDER_LOGOS: Record<ProviderBrand, ProviderBrandLogo> = {
   fennoAI: { src: fennoAILogo, transparent: true },
   qiniuCloud: { src: qiniuCloudLogo, transparent: true },
   ampcode: { src: ampLogo },
+  kimi: {
+    src: kimiDarkLogo,
+    darkSrc: kimiLightLogo,
+    transparent: true,
+    themeSurface: true,
+  },
 };
