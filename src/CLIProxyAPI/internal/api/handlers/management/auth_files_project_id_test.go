@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -129,6 +130,63 @@ func TestListAuthFiles_IncludesWebsocketsFromManager(t *testing.T) {
 	entry := firstAuthFileEntry(t, h)
 	if got := entry["websockets"]; got != true {
 		t.Fatalf("expected websockets true, got %#v", got)
+	}
+}
+
+func TestListAuthFiles_IncludesModelCooldownFromManager(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+
+	authDir := t.TempDir()
+	fileName := "codex-user@example.com-pro.json"
+	filePath := filepath.Join(authDir, fileName)
+	if errWrite := os.WriteFile(filePath, []byte(`{"type":"codex","email":"user@example.com"}`), 0o600); errWrite != nil {
+		t.Fatalf("failed to write auth file: %v", errWrite)
+	}
+
+	cooldownUntil := time.Now().Add(3 * time.Hour).UTC().Round(time.Second)
+	manager := coreauth.NewManager(nil, nil, nil)
+	record := &coreauth.Auth{
+		ID:       fileName,
+		FileName: fileName,
+		Provider: "codex",
+		Status:   coreauth.StatusError,
+		Attributes: map[string]string{
+			"path": filePath,
+		},
+		ModelStates: map[string]*coreauth.ModelState{
+			"gpt-5-codex": {
+				Status:         coreauth.StatusError,
+				StatusMessage:  "packet filter matched: 429 cooldown",
+				Unavailable:    true,
+				NextRetryAfter: cooldownUntil,
+				Quota:          coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: cooldownUntil},
+				UpdatedAt:      time.Now().UTC(),
+			},
+		},
+	}
+	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
+		t.Fatalf("failed to register auth record: %v", errRegister)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, manager)
+	h.tokenStore = &memoryAuthStore{}
+
+	entry := firstAuthFileEntry(t, h)
+	if got := entry["cooldown_model"]; got != "gpt-5-codex" {
+		t.Fatalf("expected cooldown_model gpt-5-codex, got %#v", got)
+	}
+	if _, ok := entry["cooldown_until"].(string); !ok {
+		t.Fatalf("expected cooldown_until string, got %#v", entry["cooldown_until"])
+	}
+	if _, ok := entry["next_retry_after"].(string); !ok {
+		t.Fatalf("expected aggregated next_retry_after string, got %#v", entry["next_retry_after"])
+	}
+	modelStates, ok := entry["model_states"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected model_states object, got %#v", entry["model_states"])
+	}
+	if _, ok := modelStates["gpt-5-codex"].(map[string]any); !ok {
+		t.Fatalf("expected gpt-5-codex model state, got %#v", modelStates)
 	}
 }
 

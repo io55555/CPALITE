@@ -95,6 +95,45 @@ func TestApplyPacketFilterActionStateIgnoresOtherAuth(t *testing.T) {
 	}
 }
 
+func TestManagerMarkResult_AppliesPacketFilterCooldownForRequestScopedError(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "auth-1",
+		Provider: "codex",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	ginCtx := packetFilterTestGin{values: map[string]any{
+		packetFilterActionContextKey:          "cooldown",
+		packetFilterTargetContextKey:          "api_key",
+		packetFilterAuthIDContextKey:          "auth-1",
+		packetFilterRuleContextKey:            "codex 429 cooldown",
+		packetFilterCooldownSecondsContextKey: 180,
+	}}
+	ctx := context.WithValue(context.Background(), "gin", ginCtx)
+	m.MarkResult(ctx, Result{
+		AuthID:   "auth-1",
+		Provider: "codex",
+		Model:    "gpt-5-codex",
+		Success:  false,
+		Error:    &Error{Code: requestScopedErrorCode, Message: "request scoped"},
+	})
+
+	updated, ok := m.GetByID("auth-1")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || !updated.NextRetryAfter.After(time.Now()) {
+		t.Fatalf("expected auth cooldown, got unavailable=%v next=%v", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["gpt-5-codex"]
+	if state == nil || !state.Unavailable || !state.NextRetryAfter.After(time.Now()) {
+		t.Fatalf("expected model cooldown, got %+v", state)
+	}
+}
+
 func TestManager_Update_DisabledExistingDoesNotInheritModelStates(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 

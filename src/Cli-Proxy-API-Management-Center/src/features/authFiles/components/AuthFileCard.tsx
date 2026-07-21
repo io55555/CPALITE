@@ -84,9 +84,31 @@ const formatCooldownDuration = (durationMs: number): string => {
 };
 
 export const getAuthFileCooldownUntilMs = (file: AuthFileItem): number | null => {
-  const parsed = parseTimestampMs(file.next_retry_after ?? file.nextRetryAfter);
-  if (!Number.isFinite(parsed)) return null;
-  return parsed;
+  const candidates: unknown[] = [
+    file.cooldown_until,
+    file.cooldownUntil,
+    file.next_retry_after,
+    file.nextRetryAfter,
+  ];
+  const modelStates = file.model_states ?? file.modelStates;
+  if (modelStates && typeof modelStates === 'object') {
+    Object.values(modelStates).forEach((state) => {
+      if (!state || typeof state !== 'object') return;
+      const value = (state as Record<string, unknown>).next_retry_after;
+      candidates.push(value ?? (state as Record<string, unknown>).nextRetryAfter);
+    });
+  }
+
+  let earliest: number | null = null;
+  const nowMs = Date.now();
+  candidates.forEach((value) => {
+    const parsed = parseTimestampMs(value);
+    if (!Number.isFinite(parsed) || parsed <= nowMs) return;
+    if (earliest === null || parsed < earliest) {
+      earliest = parsed;
+    }
+  });
+  return earliest;
 };
 
 export function AuthFileCard(props: AuthFileCardProps) {

@@ -384,6 +384,7 @@ func (m *Manager) MarkQuotaRecovered(ctx context.Context, authID string) {
 	if m.scheduler != nil {
 		m.scheduler.upsertAuth(snapshot)
 	}
+	m.saveCooldownStates(ctx)
 	for _, model := range clearQuotaModels {
 		registry.GetGlobalRegistry().ClearModelQuotaExceeded(snapshot.ID, model)
 		registry.GetGlobalRegistry().ResumeClientModel(snapshot.ID, model)

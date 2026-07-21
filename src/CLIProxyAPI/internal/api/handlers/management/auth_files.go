@@ -473,6 +473,16 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	if !auth.NextRetryAfter.IsZero() {
 		entry["next_retry_after"] = auth.NextRetryAfter
 	}
+	if cooldownUntil, cooldownModel, modelStates := authFileCooldownSummary(auth); !cooldownUntil.IsZero() {
+		entry["cooldown_until"] = cooldownUntil
+		entry["cooldown_model"] = cooldownModel
+		if _, ok := entry["next_retry_after"]; !ok {
+			entry["next_retry_after"] = cooldownUntil
+		}
+		if len(modelStates) > 0 {
+			entry["model_states"] = modelStates
+		}
+	}
 	if path != "" {
 		entry["path"] = path
 		entry["source"] = "file"
@@ -527,6 +537,43 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		entry["websockets"] = websockets
 	}
 	return entry
+}
+
+func authFileCooldownSummary(auth *coreauth.Auth) (time.Time, string, gin.H) {
+	if auth == nil {
+		return time.Time{}, "", nil
+	}
+	now := time.Now()
+	best := auth.NextRetryAfter
+	bestModel := ""
+	if !best.After(now) {
+		best = time.Time{}
+	}
+	modelStates := gin.H{}
+	modelKeys := make([]string, 0, len(auth.ModelStates))
+	for model := range auth.ModelStates {
+		modelKeys = append(modelKeys, model)
+	}
+	sort.Strings(modelKeys)
+	for _, model := range modelKeys {
+		state := auth.ModelStates[model]
+		if state == nil || !state.NextRetryAfter.After(now) {
+			continue
+		}
+		modelStates[model] = gin.H{
+			"status":           state.Status,
+			"status_message":   state.StatusMessage,
+			"unavailable":      state.Unavailable,
+			"next_retry_after": state.NextRetryAfter,
+			"quota":            state.Quota,
+			"updated_at":       state.UpdatedAt,
+		}
+		if best.IsZero() || state.NextRetryAfter.Before(best) {
+			best = state.NextRetryAfter
+			bestModel = model
+		}
+	}
+	return best, bestModel, modelStates
 }
 
 func (h *Handler) PatchAuthFileCooldown(c *gin.Context) {

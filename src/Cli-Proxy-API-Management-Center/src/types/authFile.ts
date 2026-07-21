@@ -30,8 +30,14 @@ export interface AuthFileItem {
   unavailable?: boolean;
   status?: string;
   statusMessage?: string;
+  cooldownUntil?: string | number | null;
+  cooldown_until?: string | number | null;
+  cooldownModel?: string | null;
+  cooldown_model?: string | null;
   nextRetryAfter?: string | number | null;
   next_retry_after?: string | number | null;
+  modelStates?: Record<string, unknown>;
+  model_states?: Record<string, unknown>;
   lastRefresh?: string | number;
   modified?: number;
   success?: unknown;
