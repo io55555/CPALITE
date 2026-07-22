@@ -775,12 +775,6 @@ func (e *GeminiExecutor) publishPacketFilterActions(ctx context.Context, auth *c
 	if len(triggers) == 0 || strings.TrimSpace(apiKey) == "" {
 		return
 	}
-	ginCtx, _ := ctx.Value("gin").(interface {
-		Set(string, any)
-	})
-	if ginCtx == nil {
-		return
-	}
 	for _, trigger := range triggers {
 		action := strings.TrimSpace(trigger.Action)
 		target := strings.TrimSpace(trigger.Target)
@@ -789,11 +783,7 @@ func (e *GeminiExecutor) publishPacketFilterActions(ctx context.Context, auth *c
 		}
 		switch action {
 		case "disable", "cooldown":
-			ginCtx.Set(packetFilterActionContextKey, action)
-			ginCtx.Set(packetFilterTargetContextKey, target)
-			ginCtx.Set(packetFilterCooldownSecondsContextKey, trigger.CooldownSeconds)
-			ginCtx.Set(packetFilterRuleContextKey, strings.TrimSpace(trigger.RuleName))
-			ginCtx.Set(packetFilterAuthIDContextKey, authIDForLog(auth))
+			cliproxyauth.PublishPacketFilterAction(ctx, action, target, trigger.CooldownSeconds, trigger.RuleName, authIDForLog(auth))
 			e.applyConfigPacketFilterAction(auth, apiKey, action)
 			log.Infof("gemini api key packet filter action: action=%s target=%s model=%s auth=%s api_key=%s rule=%s raw_request_bytes=%d raw_response_bytes=%d detail=%s", action, target, model, authIDForLog(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(rawRequest), len(filteredResponse), trigger.Detail)
 			return

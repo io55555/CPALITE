@@ -2805,11 +2805,11 @@ func (e *XAIExecutor) xaiStatusErrWithPacketRules(ctx context.Context, auth *cli
 	}
 	filtered, _, triggers := packetcapture.ApplyRules(ctx, meta, "upstream_response", rawResponse)
 	err := xaiStatusErr(status, body)
-	e.applyXAIUpstreamResponsePacketActions(auth, apiKey, model, filtered, triggers, &err)
+	e.applyXAIUpstreamResponsePacketActions(ctx, auth, apiKey, model, filtered, triggers, &err)
 	return err
 }
 
-func (e *XAIExecutor) applyXAIUpstreamResponsePacketActions(auth *cliproxyauth.Auth, apiKey, model, filteredResponse string, triggers []packetcapture.TriggerRecord, err *statusErr) {
+func (e *XAIExecutor) applyXAIUpstreamResponsePacketActions(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model, filteredResponse string, triggers []packetcapture.TriggerRecord, err *statusErr) {
 	if err == nil || len(triggers) == 0 {
 		return
 	}
@@ -2821,6 +2821,7 @@ func (e *XAIExecutor) applyXAIUpstreamResponsePacketActions(auth *cliproxyauth.A
 		}
 		switch action {
 		case "disable":
+			cliproxyauth.PublishPacketFilterAction(ctx, action, target, trigger.CooldownSeconds, trigger.RuleName, authIDForLog(auth))
 			err.authFault = true
 			log.Infof("xai auth marked auth-fault by packet filter: model=%s auth=%s api_key=%s rule=%s raw_response_bytes=%d detail=%s", model, authIDForLog(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
@@ -2834,6 +2835,7 @@ func (e *XAIExecutor) applyXAIUpstreamResponsePacketActions(auth *cliproxyauth.A
 			}
 			retryAfter := time.Duration(seconds) * time.Second
 			err.retryAfter = &retryAfter
+			cliproxyauth.PublishPacketFilterAction(ctx, action, target, seconds, trigger.RuleName, authIDForLog(auth))
 			log.Infof("xai auth cooled down by packet filter: model=%s auth=%s api_key=%s seconds=%d rule=%s raw_response_bytes=%d detail=%s", model, authIDForLog(auth), util.HideAPIKey(apiKey), seconds, trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
 		}

@@ -1378,15 +1378,16 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		resultModel := m.stateModelForExecution(auth, routeModel, execModel, pooled)
 		execReq := req
 		execReq.Model = execModel
-		streamResult, errStream := executor.ExecuteStream(ctx, auth, execReq, opts)
+		callCtx := contextWithPacketFilterActionState(ctx)
+		streamResult, errStream := executor.ExecuteStream(callCtx, auth, execReq, opts)
 		if errStream != nil {
-			if errCtx := ctx.Err(); errCtx != nil {
+			if errCtx := callCtx.Err(); errCtx != nil {
 				return nil, errCtx
 			}
 			rerr := resultErrorFromError(errStream)
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 			result.RetryAfter = retryAfterFromError(errStream)
-			m.MarkResult(ctx, result)
+			m.MarkResult(callCtx, result)
 			if isRequestInvalidError(errStream) {
 				return nil, errStream
 			}
@@ -1394,9 +1395,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			continue
 		}
 
-		buffered, closed, bootstrapErr := readStreamBootstrap(ctx, streamResult.Chunks)
+		buffered, closed, bootstrapErr := readStreamBootstrap(callCtx, streamResult.Chunks)
 		if bootstrapErr != nil {
-			if errCtx := ctx.Err(); errCtx != nil {
+			if errCtx := callCtx.Err(); errCtx != nil {
 				discardStreamChunks(streamResult.Chunks)
 				return nil, errCtx
 			}
@@ -1404,7 +1405,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				rerr := resultErrorFromError(bootstrapErr)
 				result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 				result.RetryAfter = retryAfterFromError(bootstrapErr)
-				m.MarkResult(ctx, result)
+				m.MarkResult(callCtx, result)
 				discardStreamChunks(streamResult.Chunks)
 				return nil, bootstrapErr
 			}
@@ -1412,7 +1413,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				rerr := resultErrorFromError(bootstrapErr)
 				result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 				result.RetryAfter = retryAfterFromError(bootstrapErr)
-				m.MarkResult(ctx, result)
+				m.MarkResult(callCtx, result)
 				discardStreamChunks(streamResult.Chunks)
 				lastErr = bootstrapErr
 				continue
@@ -1420,7 +1421,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			rerr := resultErrorFromError(bootstrapErr)
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 			result.RetryAfter = retryAfterFromError(bootstrapErr)
-			m.MarkResult(ctx, result)
+			m.MarkResult(callCtx, result)
 			discardStreamChunks(streamResult.Chunks)
 			return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
 		}
@@ -1428,7 +1429,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		if closed && len(buffered) == 0 {
 			emptyErr := &Error{Code: "empty_stream", Message: "upstream stream closed before first payload", Retryable: true}
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: emptyErr}
-			m.MarkResult(ctx, result)
+			m.MarkResult(callCtx, result)
 			if idx < len(execModels)-1 {
 				lastErr = emptyErr
 				continue
@@ -1999,24 +2000,25 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			resultModel := m.stateModelForExecution(auth, routeModel, upstreamModel, pooled)
 			execReq := req
 			execReq.Model = upstreamModel
-			resp, errExec := executor.Execute(execCtx, auth, execReq, opts)
+			callCtx := contextWithPacketFilterActionState(execCtx)
+			resp, errExec := executor.Execute(callCtx, auth, execReq, opts)
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
 			if errExec != nil {
-				if errCtx := execCtx.Err(); errCtx != nil {
+				if errCtx := callCtx.Err(); errCtx != nil {
 					return cliproxyexecutor.Response{}, errCtx
 				}
 				result.Error = resultErrorFromError(errExec)
 				if ra := retryAfterFromError(errExec); ra != nil {
 					result.RetryAfter = ra
 				}
-				m.MarkResult(execCtx, result)
+				m.MarkResult(callCtx, result)
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
 				continue
 			}
-			m.MarkResult(execCtx, result)
+			m.MarkResult(callCtx, result)
 			rewriteForceMappedResponse(&resp, aliasResult)
 			return resp, nil
 		}
@@ -2093,10 +2095,11 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			resultModel := m.stateModelForExecution(auth, routeModel, upstreamModel, pooled)
 			execReq := req
 			execReq.Model = upstreamModel
-			resp, errExec := executor.CountTokens(execCtx, auth, execReq, opts)
+			callCtx := contextWithPacketFilterActionState(execCtx)
+			resp, errExec := executor.CountTokens(callCtx, auth, execReq, opts)
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
 			if errExec != nil {
-				if errCtx := execCtx.Err(); errCtx != nil {
+				if errCtx := callCtx.Err(); errCtx != nil {
 					return cliproxyexecutor.Response{}, errCtx
 				}
 				result.Error = resultErrorFromError(errExec)
@@ -2108,9 +2111,9 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				// the failure for hooks and metrics without suspending a model
 				// that remains usable through the messages endpoint.
 				if isCountTokensEndpointNotFoundError(errExec, execReq.Model) {
-					m.recordAvailabilityNeutralResult(execCtx, result)
+					m.recordAvailabilityNeutralResult(callCtx, result)
 				} else {
-					m.MarkResult(execCtx, result)
+					m.MarkResult(callCtx, result)
 				}
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
@@ -2118,7 +2121,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				authErr = errExec
 				continue
 			}
-			m.MarkResult(execCtx, result)
+			m.MarkResult(callCtx, result)
 			rewriteForceMappedResponse(&resp, aliasResult)
 			return resp, nil
 		}
@@ -3173,6 +3176,9 @@ func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID,
 }
 
 func packetFilterActionFromContext(ctx context.Context) (action, target, authID string, seconds int, ruleName string) {
+	if action, target, authID, seconds, ruleName = packetFilterActionStateFromContext(ctx); action != "" || target != "" {
+		return action, target, authID, seconds, ruleName
+	}
 	ginCtx, _ := ctx.Value("gin").(interface {
 		Get(string) (any, bool)
 	})
@@ -5164,17 +5170,18 @@ func (m *Manager) tryAntigravityCreditsExecute(ctx context.Context, req cliproxy
 			resultModel := m.stateModelForExecution(c.auth, routeModel, upstreamModel, pooled)
 			execReq := req
 			execReq.Model = upstreamModel
-			resp, errExec := c.executor.Execute(creditsCtx, c.auth, execReq, creditsOpts)
+			callCtx := contextWithPacketFilterActionState(creditsCtx)
+			resp, errExec := c.executor.Execute(callCtx, c.auth, execReq, creditsOpts)
 			result := Result{AuthID: c.auth.ID, Provider: c.provider, Model: resultModel, Success: errExec == nil}
 			if errExec != nil {
 				result.Error = resultErrorFromError(errExec)
 				if ra := retryAfterFromError(errExec); ra != nil {
 					result.RetryAfter = ra
 				}
-				m.MarkResult(creditsCtx, result)
+				m.MarkResult(callCtx, result)
 				continue
 			}
-			m.MarkResult(creditsCtx, result)
+			m.MarkResult(callCtx, result)
 			rewriteForceMappedResponse(&resp, aliasResult)
 			return resp, true
 		}

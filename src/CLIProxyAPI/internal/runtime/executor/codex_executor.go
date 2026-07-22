@@ -2285,12 +2285,6 @@ func (e *CodexExecutor) publishPacketFilterActions(ctx context.Context, auth *cl
 	if len(triggers) == 0 {
 		return
 	}
-	ginCtx, _ := ctx.Value("gin").(interface {
-		Set(string, any)
-	})
-	if ginCtx == nil {
-		return
-	}
 	for _, trigger := range triggers {
 		action := strings.TrimSpace(trigger.Action)
 		target := strings.TrimSpace(trigger.Target)
@@ -2299,11 +2293,7 @@ func (e *CodexExecutor) publishPacketFilterActions(ctx context.Context, auth *cl
 		}
 		switch action {
 		case "disable", "cooldown":
-			ginCtx.Set(codexPacketFilterActionContextKey, action)
-			ginCtx.Set(codexPacketFilterTargetContextKey, target)
-			ginCtx.Set(codexPacketFilterCooldownSecondsContextKey, trigger.CooldownSeconds)
-			ginCtx.Set(codexPacketFilterRuleContextKey, strings.TrimSpace(trigger.RuleName))
-			ginCtx.Set(codexPacketFilterAuthIDContextKey, codexAuthIDForPacketFilter(auth))
+			cliproxyauth.PublishPacketFilterAction(ctx, action, target, trigger.CooldownSeconds, trigger.RuleName, codexAuthIDForPacketFilter(auth))
 			log.Infof("codex auth packet filter action: action=%s target=%s model=%s auth=%s api_key=%s rule=%s raw_response_bytes=%d detail=%s", action, target, model, codexAuthIDForPacketFilter(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
 		}

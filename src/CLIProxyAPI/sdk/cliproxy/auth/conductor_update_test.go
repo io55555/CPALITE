@@ -2,8 +2,11 @@ package auth
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
+
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
 type packetFilterTestGin struct {
@@ -13,6 +16,29 @@ type packetFilterTestGin struct {
 func (g packetFilterTestGin) Get(key string) (any, bool) {
 	value, ok := g.values[key]
 	return value, ok
+}
+
+type packetFilterCarrierExecutor struct{}
+
+func (packetFilterCarrierExecutor) Identifier() string { return "codex" }
+
+func (packetFilterCarrierExecutor) Execute(ctx context.Context, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	PublishPacketFilterAction(ctx, "cooldown", "api_key", 86400, "codex 429 cooldown", auth.ID)
+	return cliproxyexecutor.Response{}, &Error{Code: requestScopedErrorCode, Message: "request scoped"}
+}
+
+func (packetFilterCarrierExecutor) ExecuteStream(context.Context, *Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	return nil, &Error{Code: "not_implemented", Message: "not implemented"}
+}
+
+func (packetFilterCarrierExecutor) Refresh(context.Context, *Auth) (*Auth, error) { return nil, nil }
+
+func (packetFilterCarrierExecutor) CountTokens(context.Context, *Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	return cliproxyexecutor.Response{}, &Error{Code: "not_implemented", Message: "not implemented"}
+}
+
+func (packetFilterCarrierExecutor) HttpRequest(context.Context, *Auth, *http.Request) (*http.Response, error) {
+	return nil, &Error{Code: "not_implemented", Message: "not implemented"}
 }
 
 func TestManager_Update_PreservesModelStates(t *testing.T) {
@@ -131,6 +157,69 @@ func TestManagerMarkResult_AppliesPacketFilterCooldownForRequestScopedError(t *t
 	state := updated.ModelStates["gpt-5-codex"]
 	if state == nil || !state.Unavailable || !state.NextRetryAfter.After(time.Now()) {
 		t.Fatalf("expected model cooldown, got %+v", state)
+	}
+}
+
+func TestManagerMarkResult_AppliesPacketFilterCooldownFromContextCarrier(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "auth-1",
+		Provider: "codex",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	ctx := contextWithPacketFilterActionState(context.Background())
+	PublishPacketFilterAction(ctx, "cooldown", "api_key", 86400, "codex 429 cooldown", "auth-1")
+	m.MarkResult(ctx, Result{
+		AuthID:   "auth-1",
+		Provider: "codex",
+		Model:    "gpt-5-codex",
+		Success:  false,
+		Error:    &Error{Code: requestScopedErrorCode, Message: "request scoped"},
+	})
+
+	updated, ok := m.GetByID("auth-1")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown, got unavailable=%v next=%v", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["gpt-5-codex"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown, got %+v", state)
+	}
+}
+
+func TestManagerExecute_AppliesPacketFilterCooldownWithoutGinContext(t *testing.T) {
+	registerSchedulerModels(t, "codex", "gpt-5-codex", "auth-1")
+	m := NewManager(nil, nil, nil)
+	m.RegisterExecutor(packetFilterCarrierExecutor{})
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "auth-1",
+		Provider: "codex",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	_, err := m.Execute(context.Background(), []string{"codex"}, cliproxyexecutor.Request{Model: "gpt-5-codex"}, cliproxyexecutor.Options{})
+	if err == nil {
+		t.Fatal("expected execution error")
+	}
+
+	updated, ok := m.GetByID("auth-1")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown, got unavailable=%v next=%v", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["gpt-5-codex"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown, got %+v", state)
 	}
 }
 
