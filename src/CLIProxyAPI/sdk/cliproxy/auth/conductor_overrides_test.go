@@ -990,6 +990,58 @@ func TestManager_Execute_429WithoutRetryAfterUsesConfiguredCooldownBounds(t *tes
 	}
 }
 
+func TestManager_Execute_XAI429WithoutRetryAfterUsesXAIConfiguredCooldown(t *testing.T) {
+	prev := quotaCooldownDisabled.Load()
+	quotaCooldownDisabled.Store(false)
+	t.Cleanup(func() { quotaCooldownDisabled.Store(prev) })
+
+	m := NewManager(nil, nil, nil)
+	m.SetRetryConfig(1, time.Second, 0)
+	m.SetConfig(&internalconfig.Config{
+		XAIQuotaCooldownBaseSeconds: 86400,
+		XAIQuotaCooldownMaxSeconds:  86400,
+	})
+
+	executor := &authFallbackExecutor{
+		id: "xai",
+		executeErrors: map[string]error{
+			"xai-429": &statusOnlyError{
+				status:  http.StatusTooManyRequests,
+				message: "rate limited",
+			},
+		},
+	}
+	m.RegisterExecutor(executor)
+
+	auth := &Auth{ID: "xai-429", Provider: "xai"}
+	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	model := "grok-4.3"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(auth.ID, "xai", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { reg.UnregisterClient(auth.ID) })
+
+	_, errExecute := m.Execute(context.Background(), []string{"xai"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute == nil {
+		t.Fatal("expected execute error")
+	}
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	state := updated.ModelStates[model]
+	if state == nil {
+		t.Fatalf("expected model state to be present")
+	}
+	remaining := time.Until(state.NextRetryAfter)
+	if remaining < 23*time.Hour || remaining > 24*time.Hour {
+		t.Fatalf("xai 429 cooldown remaining = %v, want about 24h", remaining)
+	}
+}
+
 func TestManager_RequestScopedErrorStopsCredentialFallbackWithoutSuspendingAuth(t *testing.T) {
 	incompleteErr := &requestScopedStatusError{
 		status:  http.StatusRequestTimeout,

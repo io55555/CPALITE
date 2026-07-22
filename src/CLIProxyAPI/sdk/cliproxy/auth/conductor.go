@@ -3047,7 +3047,8 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 								if result.RetryAfter != nil {
 									next = now.Add(*result.RetryAfter)
 								} else {
-									cooldown, nextLevel := m.nextQuotaCooldown(backoffLevel, disableCooling)
+									baseCooldown, maxCooldown := m.quotaCooldownBoundsForAuth(auth)
+									cooldown, nextLevel := nextQuotaCooldown(backoffLevel, disableCooling, baseCooldown, maxCooldown)
 									if cooldown > 0 {
 										next = now.Add(cooldown)
 									}
@@ -3083,7 +3084,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					updateAggregatedAvailability(auth, now)
 				}
 			} else {
-				baseCooldown, maxCooldown := m.quotaCooldownBounds()
+				baseCooldown, maxCooldown := m.quotaCooldownBoundsForAuth(auth)
 				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown(), baseCooldown, maxCooldown)
 			}
 			applyPacketFilterActionState(ctx, auth, result.AuthID, result.Model, now)
@@ -3629,10 +3630,14 @@ func (m *Manager) quotaCooldownBounds() (time.Duration, time.Duration) {
 	if m != nil {
 		cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
 		if cfg != nil {
-			if cfg.QuotaCooldownBaseSeconds > 0 {
+			if cfg.CodexQuotaCooldownBaseSeconds > 0 {
+				base = time.Duration(cfg.CodexQuotaCooldownBaseSeconds) * time.Second
+			} else if cfg.QuotaCooldownBaseSeconds > 0 {
 				base = time.Duration(cfg.QuotaCooldownBaseSeconds) * time.Second
 			}
-			if cfg.QuotaCooldownMaxSeconds > 0 {
+			if cfg.CodexQuotaCooldownMaxSeconds > 0 {
+				maxCooldown = time.Duration(cfg.CodexQuotaCooldownMaxSeconds) * time.Second
+			} else if cfg.QuotaCooldownMaxSeconds > 0 {
 				maxCooldown = time.Duration(cfg.QuotaCooldownMaxSeconds) * time.Second
 			}
 		}
@@ -3642,6 +3647,29 @@ func (m *Manager) quotaCooldownBounds() (time.Duration, time.Duration) {
 	}
 	if maxCooldown <= 0 {
 		maxCooldown = defaultQuotaBackoffMax
+	}
+	if maxCooldown < base {
+		maxCooldown = base
+	}
+	return base, maxCooldown
+}
+
+func (m *Manager) quotaCooldownBoundsForAuth(auth *Auth) (time.Duration, time.Duration) {
+	if auth == nil || !strings.EqualFold(strings.TrimSpace(auth.Provider), "xai") {
+		return m.quotaCooldownBounds()
+	}
+	base := 24 * time.Hour
+	maxCooldown := 24 * time.Hour
+	if m != nil {
+		cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+		if cfg != nil {
+			if cfg.XAIQuotaCooldownBaseSeconds > 0 {
+				base = time.Duration(cfg.XAIQuotaCooldownBaseSeconds) * time.Second
+			}
+			if cfg.XAIQuotaCooldownMaxSeconds > 0 {
+				maxCooldown = time.Duration(cfg.XAIQuotaCooldownMaxSeconds) * time.Second
+			}
+		}
 	}
 	if maxCooldown < base {
 		maxCooldown = base

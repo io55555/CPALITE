@@ -534,6 +534,8 @@
     "plan_label": "Plan",
     "plan_supergrok": "SuperGrok",
     "plan_supergrok_heavy": "SuperGrok Heavy",
+    "plan_paid": "Paid",
+    "paid_health": "Paid xAI API is reachable. Billing quota is not exposed by this endpoint.",
     "pay_as_you_go_label": "Pay as you go",
     "pay_as_you_go_enabled": "Enabled, cap {{cap}}",
     "pay_as_you_go_disabled": "Disabled"

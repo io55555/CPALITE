@@ -95,13 +95,21 @@ max-retry-interval: 30
 # When true, disable auth/model cooldown scheduling globally (prevents blackout windows after failure states).
 disable-cooling: false
 
-# Initial cooldown in seconds after a credential/model receives HTTP 429 without a provider Retry-After.
-# Applies to quota/rate-limit cooldowns for auth files, including Codex auth files. Default: 600 seconds (10 minutes).
-quota-cooldown-base-seconds: 600
+# Initial cooldown in seconds after a Codex credential/model receives HTTP 429 without a provider Retry-After.
+# Default: 600 seconds (10 minutes). Legacy alias: quota-cooldown-base-seconds.
+codex-quota-cooldown-base-seconds: 600
 
-# Maximum progressive cooldown in seconds for repeated HTTP 429 quota/rate-limit failures.
-# Default: 43200 seconds (12 hours).
-quota-cooldown-max-seconds: 43200
+# Maximum progressive cooldown in seconds for repeated Codex HTTP 429 quota/rate-limit failures.
+# Default: 43200 seconds (12 hours). Legacy alias: quota-cooldown-max-seconds.
+codex-quota-cooldown-max-seconds: 43200
+
+# Initial cooldown in seconds after an xAI credential/model receives HTTP 429 without a provider Retry-After.
+# Default: 86400 seconds (24 hours).
+xai-quota-cooldown-base-seconds: 86400
+
+# Maximum progressive cooldown in seconds for repeated xAI HTTP 429 quota/rate-limit failures.
+# Default: 86400 seconds (24 hours).
+xai-quota-cooldown-max-seconds: 86400
 
 # How long to cool down a credential/model after its per-key proxy connection fails.
 # This protects fill-first routing from repeatedly selecting the same key when its proxy is down.

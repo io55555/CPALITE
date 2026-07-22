@@ -32,6 +32,9 @@ const BUILTIN_PROVIDER_SUGGESTIONS = [
   'Vertex',
   'AIStudio',
   'iFlow',
+  'xai',
+  'xai-api-key',
+  'xai-auth-file',
 ];
 
 const packetOptions = [

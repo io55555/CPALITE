@@ -92,12 +92,22 @@ type Config struct {
 	// 0 keeps the legacy default cooldown. Negative values disable these cooldowns.
 	TransientErrorCooldownSeconds int `yaml:"transient-error-cooldown-seconds" json:"transient-error-cooldown-seconds"`
 
-	// QuotaCooldownBaseSeconds controls the initial cooldown after a 429 quota/rate-limit response.
-	// Default: 600 seconds.
+	// QuotaCooldownBaseSeconds is the legacy alias for CodexQuotaCooldownBaseSeconds.
 	QuotaCooldownBaseSeconds int `yaml:"quota-cooldown-base-seconds" json:"quota-cooldown-base-seconds"`
-	// QuotaCooldownMaxSeconds caps progressive 429 quota/rate-limit cooldown.
-	// Default: 43200 seconds.
+	// QuotaCooldownMaxSeconds is the legacy alias for CodexQuotaCooldownMaxSeconds.
 	QuotaCooldownMaxSeconds int `yaml:"quota-cooldown-max-seconds" json:"quota-cooldown-max-seconds"`
+	// CodexQuotaCooldownBaseSeconds controls the initial Codex cooldown after a 429 without Retry-After.
+	// Default: 600 seconds.
+	CodexQuotaCooldownBaseSeconds int `yaml:"codex-quota-cooldown-base-seconds" json:"codex-quota-cooldown-base-seconds"`
+	// CodexQuotaCooldownMaxSeconds caps progressive Codex 429 quota/rate-limit cooldown.
+	// Default: 43200 seconds.
+	CodexQuotaCooldownMaxSeconds int `yaml:"codex-quota-cooldown-max-seconds" json:"codex-quota-cooldown-max-seconds"`
+	// XAIQuotaCooldownBaseSeconds controls the initial xAI cooldown after a 429 without Retry-After.
+	// Default: 86400 seconds.
+	XAIQuotaCooldownBaseSeconds int `yaml:"xai-quota-cooldown-base-seconds" json:"xai-quota-cooldown-base-seconds"`
+	// XAIQuotaCooldownMaxSeconds caps progressive xAI 429 quota/rate-limit cooldown.
+	// Default: 86400 seconds.
+	XAIQuotaCooldownMaxSeconds int `yaml:"xai-quota-cooldown-max-seconds" json:"xai-quota-cooldown-max-seconds"`
 
 	// ProxyFailureCooldownSeconds controls how long an auth/model is cooled down after a per-key proxy connection failure.
 	// Default: 180 seconds.
@@ -928,8 +938,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.DisableCooling = false
 	cfg.SaveCooldownStatus = false
 	cfg.TransientErrorCooldownSeconds = 0
-	cfg.QuotaCooldownBaseSeconds = 600
-	cfg.QuotaCooldownMaxSeconds = 43200
+	cfg.CodexQuotaCooldownBaseSeconds = 600
+	cfg.CodexQuotaCooldownMaxSeconds = 43200
+	cfg.XAIQuotaCooldownBaseSeconds = 86400
+	cfg.XAIQuotaCooldownMaxSeconds = 86400
 	cfg.ProxyFailureCooldownSeconds = 180
 	cfg.ProxyFailureMaxCooldownSeconds = 600
 	cfg.DisableImageGeneration = DisableImageGenerationOff
@@ -1006,15 +1018,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.MaxRetryCredentials == 0 {
 		cfg.MaxRetryCredentials = 10
 	}
-	if cfg.QuotaCooldownBaseSeconds <= 0 {
-		cfg.QuotaCooldownBaseSeconds = 600
-	}
-	if cfg.QuotaCooldownMaxSeconds <= 0 {
-		cfg.QuotaCooldownMaxSeconds = 43200
-	}
-	if cfg.QuotaCooldownMaxSeconds < cfg.QuotaCooldownBaseSeconds {
-		cfg.QuotaCooldownMaxSeconds = cfg.QuotaCooldownBaseSeconds
-	}
+	normalizeProviderQuotaCooldowns(&cfg)
 	if cfg.ProxyFailureCooldownSeconds <= 0 {
 		cfg.ProxyFailureCooldownSeconds = 180
 	}
@@ -1083,6 +1087,41 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Return the populated configuration struct.
 	return &cfg, nil
+}
+
+func normalizeProviderQuotaCooldowns(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.CodexQuotaCooldownBaseSeconds <= 0 {
+		if cfg.QuotaCooldownBaseSeconds > 0 {
+			cfg.CodexQuotaCooldownBaseSeconds = cfg.QuotaCooldownBaseSeconds
+		} else {
+			cfg.CodexQuotaCooldownBaseSeconds = 600
+		}
+	}
+	if cfg.CodexQuotaCooldownMaxSeconds <= 0 {
+		if cfg.QuotaCooldownMaxSeconds > 0 {
+			cfg.CodexQuotaCooldownMaxSeconds = cfg.QuotaCooldownMaxSeconds
+		} else {
+			cfg.CodexQuotaCooldownMaxSeconds = 43200
+		}
+	}
+	if cfg.CodexQuotaCooldownMaxSeconds < cfg.CodexQuotaCooldownBaseSeconds {
+		cfg.CodexQuotaCooldownMaxSeconds = cfg.CodexQuotaCooldownBaseSeconds
+	}
+	cfg.QuotaCooldownBaseSeconds = cfg.CodexQuotaCooldownBaseSeconds
+	cfg.QuotaCooldownMaxSeconds = cfg.CodexQuotaCooldownMaxSeconds
+
+	if cfg.XAIQuotaCooldownBaseSeconds <= 0 {
+		cfg.XAIQuotaCooldownBaseSeconds = 86400
+	}
+	if cfg.XAIQuotaCooldownMaxSeconds <= 0 {
+		cfg.XAIQuotaCooldownMaxSeconds = 86400
+	}
+	if cfg.XAIQuotaCooldownMaxSeconds < cfg.XAIQuotaCooldownBaseSeconds {
+		cfg.XAIQuotaCooldownMaxSeconds = cfg.XAIQuotaCooldownBaseSeconds
+	}
 }
 
 // NormalizePluginsConfig applies default plugin configuration values.

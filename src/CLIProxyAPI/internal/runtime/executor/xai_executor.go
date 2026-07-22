@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/signature"
@@ -177,7 +179,7 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		return resp, xaiStatusErr(httpResp.StatusCode, data)
+		return resp, e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, httpResp.StatusCode, httpResp.Header.Clone(), data)
 	}
 
 	data, err := io.ReadAll(httpResp.Body)
@@ -282,7 +284,7 @@ func (e *XAIExecutor) executeCompactRequest(ctx context.Context, auth *cliproxya
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		err = xaiStatusErr(httpResp.StatusCode, data)
+		err = e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, httpResp.StatusCode, httpResp.Header.Clone(), data)
 		return nil, nil, nil, err
 	}
 
@@ -533,7 +535,7 @@ func (e *XAIExecutor) executeImages(ctx context.Context, auth *cliproxyauth.Auth
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		err = xaiStatusErr(httpResp.StatusCode, data)
+		err = e.xaiStatusErrWithPacketRules(ctx, auth, token, gjson.GetBytes(payload, "model").String(), httpResp.StatusCode, httpResp.Header.Clone(), data)
 		return resp, err
 	}
 
@@ -602,7 +604,7 @@ func (e *XAIExecutor) executeVideos(ctx context.Context, auth *cliproxyauth.Auth
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		return resp, xaiStatusErr(httpResp.StatusCode, data)
+		return resp, e.xaiStatusErrWithPacketRules(ctx, auth, token, gjson.GetBytes(payload, "model").String(), httpResp.StatusCode, httpResp.Header.Clone(), data)
 	}
 
 	return cliproxyexecutor.Response{Payload: data, Headers: httpResp.Header.Clone()}, nil
@@ -656,7 +658,7 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		return nil, xaiStatusErr(httpResp.StatusCode, data)
+		return nil, e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, httpResp.StatusCode, httpResp.Header.Clone(), data)
 	}
 
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -669,13 +671,14 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 		}()
 		scanner := bufio.NewScanner(httpResp.Body)
 		scanner.Buffer(nil, 52_428_800)
+		claudeInputTokens := helps.NewClaudeInputTokenState(prepared.from, prepared.to, prepared.responseFormat, prepared.originalPayload)
 		var param any
 		outputItemsByIndex := make(map[int64][]byte)
 		var outputItemsFallback [][]byte
 		responseFilter := newXAIInternalXSearchResponseFilter(prepared.filterInternalXSearch, prepared.clientDeclaredTools)
 		var pendingEventLine []byte
 		emitTranslatedLine := func(translatedLine []byte) bool {
-			chunks := sdktranslator.TranslateStream(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param)
+			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param, claudeInputTokens)
 			for i := range chunks {
 				select {
 				case out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}:
@@ -1031,6 +1034,19 @@ func xaiUsingAPI(auth *cliproxyauth.Auth) bool {
 		return !strings.EqualFold(raw, "oauth")
 	}
 	return !strings.EqualFold(xaiMetadataString(auth.Metadata, "auth_kind"), "oauth")
+}
+
+func xaiPacketCaptureSource(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return "xai"
+	}
+	if cliproxyauth.IsConfigAPIKeyAuth(auth) {
+		return "xai-api-key"
+	}
+	if auth.AuthKind() == cliproxyauth.AuthKindOAuth || auth.AuthSourceKind() != cliproxyauth.AuthSourceConfig {
+		return "xai-auth-file"
+	}
+	return "xai"
 }
 
 // xaiChatBaseURL returns the base URL for non-image/video xAI HTTP chat requests.
@@ -2770,6 +2786,77 @@ func xaiPatchCompletedOutput(eventData []byte, outputItemsByIndex map[int64][]by
 
 	patched, _ := sjson.SetRawBytes(eventData, "response.output", outputArray)
 	return patched
+}
+
+func (e *XAIExecutor) xaiStatusErrWithPacketRules(ctx context.Context, auth *cliproxyauth.Auth, apiKey, model string, status int, headers http.Header, body []byte) statusErr {
+	rawResponse := formatXAIUpstreamResponse(status, headers, body)
+	meta := packetcapture.Record{
+		ID:            logging.GetRequestID(ctx),
+		RequestID:     logging.GetRequestID(ctx),
+		Provider:      e.Identifier(),
+		ProviderGroup: "xai",
+		Source:        xaiPacketCaptureSource(auth),
+		Model:         strings.TrimSpace(model),
+		APIKey:        util.HideAPIKey(apiKey),
+	}
+	if auth != nil {
+		meta.AuthType, meta.AuthLabel = auth.AccountInfo()
+		meta.AuthIndex = auth.EnsureIndex()
+	}
+	filtered, _, triggers := packetcapture.ApplyRules(ctx, meta, "upstream_response", rawResponse)
+	err := xaiStatusErr(status, body)
+	e.applyXAIUpstreamResponsePacketActions(auth, apiKey, model, filtered, triggers, &err)
+	return err
+}
+
+func (e *XAIExecutor) applyXAIUpstreamResponsePacketActions(auth *cliproxyauth.Auth, apiKey, model, filteredResponse string, triggers []packetcapture.TriggerRecord, err *statusErr) {
+	if err == nil || len(triggers) == 0 {
+		return
+	}
+	for _, trigger := range triggers {
+		action := strings.TrimSpace(trigger.Action)
+		target := strings.TrimSpace(trigger.Target)
+		if target != "api_key" && target != "auth" {
+			continue
+		}
+		switch action {
+		case "disable":
+			err.authFault = true
+			log.Infof("xai auth marked auth-fault by packet filter: model=%s auth=%s api_key=%s rule=%s raw_response_bytes=%d detail=%s", model, authIDForLog(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(filteredResponse), trigger.Detail)
+			return
+		case "cooldown":
+			seconds := trigger.CooldownSeconds
+			if seconds <= 0 && e != nil && e.cfg != nil && e.cfg.XAIQuotaCooldownBaseSeconds > 0 {
+				seconds = e.cfg.XAIQuotaCooldownBaseSeconds
+			}
+			if seconds <= 0 {
+				seconds = int((24 * time.Hour) / time.Second)
+			}
+			retryAfter := time.Duration(seconds) * time.Second
+			err.retryAfter = &retryAfter
+			log.Infof("xai auth cooled down by packet filter: model=%s auth=%s api_key=%s seconds=%d rule=%s raw_response_bytes=%d detail=%s", model, authIDForLog(auth), util.HideAPIKey(apiKey), seconds, trigger.RuleName, len(filteredResponse), trigger.Detail)
+			return
+		}
+	}
+}
+
+func formatXAIUpstreamResponse(status int, headers http.Header, body []byte) string {
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "HTTP/2 %d %s\n", status, http.StatusText(status))
+	for key, values := range headers {
+		for _, value := range values {
+			b.WriteString(key)
+			b.WriteString(": ")
+			b.WriteString(value)
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteByte('\n')
+	b.Write(body)
+	return b.String()
 }
 
 // xaiFreeUsageExhaustedCooldown is the free-tier rolling window advertised by

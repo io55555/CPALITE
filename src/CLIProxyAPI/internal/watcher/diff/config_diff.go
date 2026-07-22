@@ -57,6 +57,18 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.QuotaCooldownMaxSeconds != newCfg.QuotaCooldownMaxSeconds {
 		changes = append(changes, fmt.Sprintf("quota-cooldown-max-seconds: %d -> %d", oldCfg.QuotaCooldownMaxSeconds, newCfg.QuotaCooldownMaxSeconds))
 	}
+	if oldCfg.CodexQuotaCooldownBaseSeconds != newCfg.CodexQuotaCooldownBaseSeconds {
+		changes = append(changes, fmt.Sprintf("codex-quota-cooldown-base-seconds: %d -> %d", oldCfg.CodexQuotaCooldownBaseSeconds, newCfg.CodexQuotaCooldownBaseSeconds))
+	}
+	if oldCfg.CodexQuotaCooldownMaxSeconds != newCfg.CodexQuotaCooldownMaxSeconds {
+		changes = append(changes, fmt.Sprintf("codex-quota-cooldown-max-seconds: %d -> %d", oldCfg.CodexQuotaCooldownMaxSeconds, newCfg.CodexQuotaCooldownMaxSeconds))
+	}
+	if oldCfg.XAIQuotaCooldownBaseSeconds != newCfg.XAIQuotaCooldownBaseSeconds {
+		changes = append(changes, fmt.Sprintf("xai-quota-cooldown-base-seconds: %d -> %d", oldCfg.XAIQuotaCooldownBaseSeconds, newCfg.XAIQuotaCooldownBaseSeconds))
+	}
+	if oldCfg.XAIQuotaCooldownMaxSeconds != newCfg.XAIQuotaCooldownMaxSeconds {
+		changes = append(changes, fmt.Sprintf("xai-quota-cooldown-max-seconds: %d -> %d", oldCfg.XAIQuotaCooldownMaxSeconds, newCfg.XAIQuotaCooldownMaxSeconds))
+	}
 	if oldCfg.DisableClaudeCloakMode != newCfg.DisableClaudeCloakMode {
 		changes = append(changes, fmt.Sprintf("disable-claude-cloak-mode: %t -> %t", oldCfg.DisableClaudeCloakMode, newCfg.DisableClaudeCloakMode))
 	}

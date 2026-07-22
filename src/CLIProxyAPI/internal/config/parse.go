@@ -74,15 +74,7 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	if cfg.MaxRetryCredentials <= 0 {
 		cfg.MaxRetryCredentials = 10
 	}
-	if cfg.QuotaCooldownBaseSeconds <= 0 {
-		cfg.QuotaCooldownBaseSeconds = 600
-	}
-	if cfg.QuotaCooldownMaxSeconds <= 0 {
-		cfg.QuotaCooldownMaxSeconds = 43200
-	}
-	if cfg.QuotaCooldownMaxSeconds < cfg.QuotaCooldownBaseSeconds {
-		cfg.QuotaCooldownMaxSeconds = cfg.QuotaCooldownBaseSeconds
-	}
+	normalizeProviderQuotaCooldowns(&cfg)
 	if cfg.ProxyFailureCooldownSeconds <= 0 {
 		cfg.ProxyFailureCooldownSeconds = 180
 	}

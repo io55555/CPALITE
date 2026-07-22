@@ -20,6 +20,7 @@ import (
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai"
 	internalcache "github.com/router-for-me/CLIProxyAPI/v7/internal/cache"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/translator"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -212,6 +213,129 @@ func TestXAIExecutorExecuteShapesResponsesRequest(t *testing.T) {
 	}
 	if !foundEncryptedReasoningInclude {
 		t.Fatalf("xai request must preserve reasoning.encrypted_content include: %s", string(gotBody))
+	}
+}
+
+func TestXAIExecutorPacketFilterCooldownUsesRuleSeconds(t *testing.T) {
+	dir := t.TempDir()
+	if err := packetcapture.InitDefaultInLogDir(dir); err != nil {
+		t.Fatalf("InitDefaultInLogDir: %v", err)
+	}
+	t.Cleanup(func() { _ = packetcapture.CloseDefault() })
+	store := packetcapture.DefaultStore()
+	if store == nil {
+		t.Fatal("expected packet capture store")
+	}
+	if _, err := store.UpsertRule(context.Background(), packetcapture.Rule{
+		Name:            "xai 429 cooldown",
+		Enabled:         true,
+		RecordHistory:   true,
+		Priority:        100,
+		Provider:        "xai",
+		Packet:          "upstream_response",
+		Part:            "status",
+		Operator:        "num_eq",
+		ValueNumber:     429,
+		Action:          "cooldown",
+		Target:          "api_key",
+		CooldownSeconds: 86400,
+	}); err != nil {
+		t.Fatalf("UpsertRule: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer server.Close()
+
+	exec := NewXAIExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{
+		ID:       "xai-auth",
+		Provider: "xai",
+		Attributes: map[string]string{
+			"base_url":  server.URL,
+			"auth_kind": "oauth",
+		},
+		Metadata: map[string]any{"access_token": "xai-token"},
+	}
+
+	_, err := exec.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "grok-4.3",
+		Payload: []byte(`{"model":"grok-4.3","input":"hello"}`),
+	}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse})
+	if err == nil {
+		t.Fatal("expected 429 error")
+	}
+	retryAfter, ok := err.(interface{ RetryAfter() *time.Duration })
+	if !ok || retryAfter.RetryAfter() == nil {
+		t.Fatalf("error does not expose retry-after: %T %v", err, err)
+	}
+	if got := *retryAfter.RetryAfter(); got != 24*time.Hour {
+		t.Fatalf("retry-after = %v, want 24h", got)
+	}
+	triggers, err := store.ListTriggers(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListTriggers: %v", err)
+	}
+	if len(triggers) != 1 || triggers[0].Action != "cooldown" || triggers[0].CooldownSeconds != 86400 {
+		t.Fatalf("triggers = %+v, want one 86400s cooldown", triggers)
+	}
+}
+
+func TestXAIPacketCaptureSourceDistinguishesAccountKind(t *testing.T) {
+	tests := []struct {
+		name string
+		auth *cliproxyauth.Auth
+		want string
+	}{
+		{
+			name: "config api key",
+			auth: &cliproxyauth.Auth{
+				Provider: "xai",
+				Attributes: map[string]string{
+					"auth_kind": "apikey",
+					"source":    "config:xai[token]",
+					"api_key":   "xai-key",
+				},
+			},
+			want: "xai-api-key",
+		},
+		{
+			name: "oauth auth file",
+			auth: &cliproxyauth.Auth{
+				Provider: "xai",
+				Attributes: map[string]string{
+					"auth_kind": "oauth",
+					"path":      "xai.json",
+				},
+			},
+			want: "xai-auth-file",
+		},
+		{
+			name: "api key auth file",
+			auth: &cliproxyauth.Auth{
+				Provider: "xai",
+				FileName: "xai-apikey.json",
+				Attributes: map[string]string{
+					"auth_kind": "apikey",
+					"api_key":   "xai-key",
+				},
+			},
+			want: "xai-auth-file",
+		},
+		{
+			name: "nil fallback",
+			auth: nil,
+			want: "xai",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := xaiPacketCaptureSource(tt.auth); got != tt.want {
+				t.Fatalf("xaiPacketCaptureSource() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

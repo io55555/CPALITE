@@ -190,6 +190,68 @@ func TestListAuthFiles_IncludesModelCooldownFromManager(t *testing.T) {
 	}
 }
 
+func TestListAuthFiles_IncludesXAICooldownFromManager(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+
+	authDir := t.TempDir()
+	fileName := "xai-user.json"
+	filePath := filepath.Join(authDir, fileName)
+	if errWrite := os.WriteFile(filePath, []byte(`{"type":"xai","auth_kind":"oauth","access_token":"token","refresh_token":"refresh"}`), 0o600); errWrite != nil {
+		t.Fatalf("failed to write auth file: %v", errWrite)
+	}
+
+	cooldownUntil := time.Now().Add(24 * time.Hour).UTC().Round(time.Second)
+	manager := coreauth.NewManager(nil, nil, nil)
+	record := &coreauth.Auth{
+		ID:       fileName,
+		FileName: fileName,
+		Provider: "xai",
+		Status:   coreauth.StatusError,
+		Attributes: map[string]string{
+			"auth_kind": "oauth",
+			"path":      filePath,
+		},
+		Metadata: map[string]any{
+			"type":          "xai",
+			"access_token":  "token",
+			"refresh_token": "refresh",
+		},
+		ModelStates: map[string]*coreauth.ModelState{
+			"grok-4": {
+				Status:         coreauth.StatusError,
+				StatusMessage:  "packet filter matched: 429 cooldown",
+				Unavailable:    true,
+				NextRetryAfter: cooldownUntil,
+				Quota:          coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: cooldownUntil},
+				UpdatedAt:      time.Now().UTC(),
+			},
+		},
+	}
+	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
+		t.Fatalf("failed to register auth record: %v", errRegister)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, manager)
+	h.tokenStore = &memoryAuthStore{}
+
+	entry := firstAuthFileEntry(t, h)
+	if got := entry["type"]; got != "xai" {
+		t.Fatalf("expected type xai, got %#v", got)
+	}
+	if got := entry["provider"]; got != "xai" {
+		t.Fatalf("expected provider xai, got %#v", got)
+	}
+	if got := entry["account_type"]; got != "oauth" {
+		t.Fatalf("expected account_type oauth, got %#v", got)
+	}
+	if got := entry["cooldown_model"]; got != "grok-4" {
+		t.Fatalf("expected cooldown_model grok-4, got %#v", got)
+	}
+	if _, ok := entry["cooldown_until"].(string); !ok {
+		t.Fatalf("expected cooldown_until string, got %#v", entry["cooldown_until"])
+	}
+}
+
 func TestListAuthFilesFromDisk_IncludesWebsockets(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 

@@ -528,6 +528,8 @@
     "plan_label": "方案",
     "plan_supergrok": "SuperGrok",
     "plan_supergrok_heavy": "SuperGrok Heavy",
+    "plan_paid": "付費",
+    "paid_health": "付費 xAI API 可存取。該介面不返回帳單額度明細。",
     "pay_as_you_go_label": "按量付費",
     "pay_as_you_go_enabled": "已啟用，封頂 {{cap}}",
     "pay_as_you_go_disabled": "未啟用"
