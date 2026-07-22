@@ -94,6 +94,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 	source TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '',
 	user_token TEXT NOT NULL DEFAULT '',
+	auth_id TEXT NOT NULL DEFAULT '',
 	auth_label TEXT NOT NULL DEFAULT '',
 	auth_type TEXT NOT NULL DEFAULT '',
 	auth_index TEXT NOT NULL DEFAULT '',
@@ -147,15 +148,26 @@ func (s *Store) initSchema(ctx context.Context) error {
 	action TEXT NOT NULL,
 	target TEXT NOT NULL DEFAULT '',
 	account TEXT NOT NULL DEFAULT '',
+	auth_id TEXT NOT NULL DEFAULT '',
+	auth_index TEXT NOT NULL DEFAULT '',
+	provider TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL DEFAULT '',
+	model TEXT NOT NULL DEFAULT '',
 	packet TEXT NOT NULL DEFAULT '',
 	packet_name TEXT NOT NULL DEFAULT '',
 	detail TEXT NOT NULL DEFAULT '',
 	cooldown_seconds INTEGER NOT NULL DEFAULT 0
 )`,
 		`ALTER TABLE trigger_records ADD COLUMN account TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN auth_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN auth_index TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN provider TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN model TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN packet TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN packet_name TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN cooldown_seconds INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE packet_records ADD COLUMN auth_id TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_trigger_records_timestamp ON trigger_records(timestamp)`,
 	}
 	for _, statement := range statements {
@@ -253,9 +265,9 @@ func (s *Store) flush(ctx context.Context) {
 		return
 	}
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO packet_records (
-id,timestamp,request_id,provider,source,model,user_token,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,
+id,timestamp,request_id,provider,source,model,user_token,auth_id,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,
 upstream_status_code,failed,total_bytes,client_request,upstream_request,upstream_response,client_response,summary
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		s.restore(pending)
@@ -264,7 +276,7 @@ upstream_status_code,failed,total_bytes,client_request,upstream_request,upstream
 	for _, record := range pending {
 		if _, err := stmt.ExecContext(ctx,
 			record.ID, record.Timestamp.UTC().Format(timestampLayout), record.RequestID, record.Provider, record.Source, record.Model,
-			record.UserToken, record.AuthLabel, record.AuthType, record.AuthIndex, record.APIKey, record.ClientUA, record.Endpoint,
+			record.UserToken, record.AuthID, record.AuthLabel, record.AuthType, record.AuthIndex, record.APIKey, record.ClientUA, record.Endpoint,
 			record.UpstreamStatusCode, boolInt(record.Failed), record.TotalBytes,
 			record.Packets.ClientRequest, record.Packets.UpstreamRequest, record.Packets.UpstreamResponse, record.Packets.ClientResponse, record.Summary,
 		); err != nil {
@@ -298,7 +310,7 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) ([]RecordSummary, 
 	if limit > maxLimit {
 		limit = maxLimit
 	}
-	query := `SELECT id,timestamp,request_id,provider,source,model,user_token,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,upstream_status_code,failed,total_bytes,summary FROM packet_records`
+	query := `SELECT id,timestamp,request_id,provider,source,model,user_token,auth_id,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,upstream_status_code,failed,total_bytes,summary FROM packet_records`
 	where, args := buildRecordWhere(opts)
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -315,7 +327,7 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) ([]RecordSummary, 
 		var item RecordSummary
 		var ts string
 		var failed int
-		if err := rows.Scan(&item.ID, &ts, &item.RequestID, &item.Provider, &item.Source, &item.Model, &item.UserToken, &item.AuthLabel, &item.AuthType, &item.AuthIndex, &item.APIKey, &item.ClientUA, &item.Endpoint, &item.UpstreamStatusCode, &failed, &item.TotalBytes, &item.Summary); err != nil {
+		if err := rows.Scan(&item.ID, &ts, &item.RequestID, &item.Provider, &item.Source, &item.Model, &item.UserToken, &item.AuthID, &item.AuthLabel, &item.AuthType, &item.AuthIndex, &item.APIKey, &item.ClientUA, &item.Endpoint, &item.UpstreamStatusCode, &failed, &item.TotalBytes, &item.Summary); err != nil {
 			return nil, err
 		}
 		item.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
@@ -359,10 +371,10 @@ func (s *Store) Get(ctx context.Context, id string) (Record, bool, error) {
 		return record, false, nil
 	}
 	s.flush(ctx)
-	row := s.db.QueryRowContext(ctx, `SELECT id,timestamp,request_id,provider,source,model,user_token,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,upstream_status_code,failed,total_bytes,client_request,upstream_request,upstream_response,client_response,summary FROM packet_records WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id,timestamp,request_id,provider,source,model,user_token,auth_id,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,upstream_status_code,failed,total_bytes,client_request,upstream_request,upstream_response,client_response,summary FROM packet_records WHERE id=?`, id)
 	var ts string
 	var failed int
-	err := row.Scan(&record.ID, &ts, &record.RequestID, &record.Provider, &record.Source, &record.Model, &record.UserToken, &record.AuthLabel, &record.AuthType, &record.AuthIndex, &record.APIKey, &record.ClientUA, &record.Endpoint, &record.UpstreamStatusCode, &failed, &record.TotalBytes, &record.Packets.ClientRequest, &record.Packets.UpstreamRequest, &record.Packets.UpstreamResponse, &record.Packets.ClientResponse, &record.Summary)
+	err := row.Scan(&record.ID, &ts, &record.RequestID, &record.Provider, &record.Source, &record.Model, &record.UserToken, &record.AuthID, &record.AuthLabel, &record.AuthType, &record.AuthIndex, &record.APIKey, &record.ClientUA, &record.Endpoint, &record.UpstreamStatusCode, &failed, &record.TotalBytes, &record.Packets.ClientRequest, &record.Packets.UpstreamRequest, &record.Packets.UpstreamResponse, &record.Packets.ClientResponse, &record.Summary)
 	if err == sql.ErrNoRows {
 		return record, false, nil
 	}
@@ -380,10 +392,10 @@ func (s *Store) GetByRequestID(ctx context.Context, requestID string) (Record, b
 		return record, false, nil
 	}
 	s.flush(ctx)
-	row := s.db.QueryRowContext(ctx, `SELECT id,timestamp,request_id,provider,source,model,user_token,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,upstream_status_code,failed,total_bytes,client_request,upstream_request,upstream_response,client_response,summary FROM packet_records WHERE request_id=? ORDER BY timestamp DESC, id DESC LIMIT 1`, requestID)
+	row := s.db.QueryRowContext(ctx, `SELECT id,timestamp,request_id,provider,source,model,user_token,auth_id,auth_label,auth_type,auth_index,api_key,client_ua,endpoint,upstream_status_code,failed,total_bytes,client_request,upstream_request,upstream_response,client_response,summary FROM packet_records WHERE request_id=? ORDER BY timestamp DESC, id DESC LIMIT 1`, requestID)
 	var ts string
 	var failed int
-	err := row.Scan(&record.ID, &ts, &record.RequestID, &record.Provider, &record.Source, &record.Model, &record.UserToken, &record.AuthLabel, &record.AuthType, &record.AuthIndex, &record.APIKey, &record.ClientUA, &record.Endpoint, &record.UpstreamStatusCode, &failed, &record.TotalBytes, &record.Packets.ClientRequest, &record.Packets.UpstreamRequest, &record.Packets.UpstreamResponse, &record.Packets.ClientResponse, &record.Summary)
+	err := row.Scan(&record.ID, &ts, &record.RequestID, &record.Provider, &record.Source, &record.Model, &record.UserToken, &record.AuthID, &record.AuthLabel, &record.AuthType, &record.AuthIndex, &record.APIKey, &record.ClientUA, &record.Endpoint, &record.UpstreamStatusCode, &failed, &record.TotalBytes, &record.Packets.ClientRequest, &record.Packets.UpstreamRequest, &record.Packets.UpstreamResponse, &record.Packets.ClientResponse, &record.Summary)
 	if err == sql.ErrNoRows {
 		return record, false, nil
 	}
@@ -573,7 +585,7 @@ func (s *Store) InsertTrigger(ctx context.Context, trigger TriggerRecord) error 
 		trigger.Timestamp = time.Now().UTC()
 	}
 	trigger.Packet = truncate(trigger.Packet)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO trigger_records(id,rule_id,rule_name,record_id,timestamp,action,target,account,packet,packet_name,detail,cooldown_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, trigger.ID, trigger.RuleID, trigger.RuleName, trigger.RecordID, trigger.Timestamp.Format(timestampLayout), trigger.Action, trigger.Target, trigger.Account, trigger.Packet, trigger.PacketName, trigger.Detail, trigger.CooldownSeconds)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO trigger_records(id,rule_id,rule_name,record_id,timestamp,action,target,account,auth_id,auth_index,provider,source,model,packet,packet_name,detail,cooldown_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, trigger.ID, trigger.RuleID, trigger.RuleName, trigger.RecordID, trigger.Timestamp.Format(timestampLayout), trigger.Action, trigger.Target, trigger.Account, trigger.AuthID, trigger.AuthIndex, trigger.Provider, trigger.Source, trigger.Model, trigger.Packet, trigger.PacketName, trigger.Detail, trigger.CooldownSeconds)
 	return err
 }
 
@@ -584,7 +596,7 @@ func (s *Store) ListTriggers(ctx context.Context, limit int) ([]TriggerRecord, e
 	if limit > maxLimit {
 		limit = maxLimit
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,rule_id,rule_name,record_id,timestamp,action,target,account,packet,packet_name,detail,cooldown_seconds FROM trigger_records ORDER BY timestamp DESC, id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,rule_id,rule_name,record_id,timestamp,action,target,account,auth_id,auth_index,provider,source,model,packet,packet_name,detail,cooldown_seconds FROM trigger_records ORDER BY timestamp DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -593,7 +605,7 @@ func (s *Store) ListTriggers(ctx context.Context, limit int) ([]TriggerRecord, e
 	for rows.Next() {
 		var item TriggerRecord
 		var ts string
-		if err := rows.Scan(&item.ID, &item.RuleID, &item.RuleName, &item.RecordID, &ts, &item.Action, &item.Target, &item.Account, &item.Packet, &item.PacketName, &item.Detail, &item.CooldownSeconds); err != nil {
+		if err := rows.Scan(&item.ID, &item.RuleID, &item.RuleName, &item.RecordID, &ts, &item.Action, &item.Target, &item.Account, &item.AuthID, &item.AuthIndex, &item.Provider, &item.Source, &item.Model, &item.Packet, &item.PacketName, &item.Detail, &item.CooldownSeconds); err != nil {
 			return nil, err
 		}
 		item.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)

@@ -176,7 +176,8 @@ func captureFromUsageRecord(ctx context.Context, record coreusage.Record, allowQ
 		UserToken:          strings.TrimSpace(record.APIKey),
 		AuthType:           strings.TrimSpace(record.AuthType),
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),
-		APIKey:             strings.TrimSpace(record.AuthID),
+		AuthID:             strings.TrimSpace(record.AuthID),
+		APIKey:             strings.TrimSpace(record.APIKey),
 		Endpoint:           internallogging.GetEndpoint(ctx),
 		UpstreamStatusCode: statusFromPacket(packets.UpstreamResponse, record.Fail.StatusCode),
 		Failed:             record.Failed,
@@ -212,14 +213,13 @@ func applyCaptureRulesToPackets(ctx context.Context, rec Record, usageRecord cor
 		if strings.TrimSpace(item.value) == "" {
 			continue
 		}
-		filtered, _, triggers := ApplyRules(ctx, rec, item.name, item.value)
+		filtered, _, _ := ApplyRules(ctx, rec, item.name, item.value)
 		item.set(filtered)
-		publishActionEvents(ctx, rec, usageRecord, triggers)
 	}
 	return packets
 }
 
-func publishActionEvents(ctx context.Context, rec Record, usageRecord coreusage.Record, triggers []TriggerRecord) {
+func publishActionEvents(ctx context.Context, rec Record, triggers []TriggerRecord) {
 	if len(triggers) == 0 {
 		return
 	}
@@ -238,10 +238,10 @@ func publishActionEvents(ctx context.Context, rec Record, usageRecord coreusage.
 		handler(ctx, ActionEvent{
 			Record:          rec,
 			Trigger:         trigger,
-			AuthID:          strings.TrimSpace(usageRecord.AuthID),
-			AuthIndex:       strings.TrimSpace(usageRecord.AuthIndex),
-			Provider:        strings.TrimSpace(firstNonEmptyString(usageRecord.Provider, rec.Provider)),
-			Model:           strings.TrimSpace(firstNonEmptyString(usageRecord.Model, rec.Model)),
+			AuthID:          strings.TrimSpace(firstNonEmptyString(trigger.AuthID, rec.AuthID)),
+			AuthIndex:       strings.TrimSpace(firstNonEmptyString(trigger.AuthIndex, rec.AuthIndex)),
+			Provider:        strings.TrimSpace(firstNonEmptyString(trigger.Provider, rec.Provider)),
+			Model:           strings.TrimSpace(firstNonEmptyString(trigger.Model, rec.Model)),
 			Action:          action,
 			Target:          target,
 			CooldownSeconds: trigger.CooldownSeconds,
@@ -550,6 +550,11 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 				Action:          actionRule.Action,
 				Target:          actionRule.Target,
 				Account:         triggerAccount(meta),
+				AuthID:          strings.TrimSpace(meta.AuthID),
+				AuthIndex:       strings.TrimSpace(meta.AuthIndex),
+				Provider:        strings.TrimSpace(meta.Provider),
+				Source:          strings.TrimSpace(meta.Source),
+				Model:           strings.TrimSpace(meta.Model),
 				Packet:          current,
 				PacketName:      packetName,
 				Detail:          detail,
@@ -559,6 +564,7 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 			if rule.RecordHistory {
 				_ = store.InsertTrigger(context.Background(), trigger)
 			}
+			publishActionEvents(ctx, meta, []TriggerRecord{trigger})
 			switch strings.TrimSpace(actionRule.Action) {
 			case "block":
 				return current, &httpError{status: http.StatusForbidden, message: "请求被抓包/过滤规则拦截: " + rule.Name}, triggers
@@ -575,9 +581,6 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 }
 
 func triggerAccount(meta Record) string {
-	if value := strings.TrimSpace(meta.APIKey); value != "" {
-		return value
-	}
 	if value := strings.TrimSpace(meta.AuthLabel); value != "" {
 		if meta.AuthIndex != "" {
 			return value + " (" + meta.AuthIndex + ")"
@@ -585,6 +588,12 @@ func triggerAccount(meta Record) string {
 		return value
 	}
 	if value := strings.TrimSpace(meta.AuthIndex); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(meta.AuthID); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(meta.APIKey); value != "" {
 		return value
 	}
 	return strings.TrimSpace(meta.UserToken)

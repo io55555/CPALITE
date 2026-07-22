@@ -423,6 +423,27 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / 1024).toFixed(1)} KB`;
 };
 
+const triggerIdentity = (item: PacketTrigger) =>
+  [
+    item.provider || '',
+    item.source && item.source !== item.provider ? item.source : '',
+    item.model || '',
+    item.auth_index ? `idx:${item.auth_index}` : '',
+    item.auth_id ? `id:${item.auth_id}` : '',
+    item.account && item.account !== item.auth_index && item.account !== item.auth_id ? item.account : '',
+  ]
+    .filter(Boolean)
+    .join(' / ') || '-';
+
+const triggerCooldown = (item: PacketTrigger) => {
+  const seconds = Number(item.cooldown_seconds || 0);
+  if (!seconds) return '';
+  if (seconds % 86400 === 0) return `${seconds / 86400}d`;
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+};
+
 const parseCooldownSeconds = (value: string) => {
   const raw = value.trim().toLowerCase();
   const match = raw.match(/^(\d+)\s*([shd])?$/);
@@ -1001,8 +1022,8 @@ export function PacketCapturePage() {
               <span>{formatTime(item.timestamp)}</span>
               <strong>{item.rule_name}</strong>
               <span>{item.action}</span>
-              <span>{item.target || '-'}</span>
-              <span>{item.account || '-'}</span>
+              <span>{[item.target || '-', triggerCooldown(item)].filter(Boolean).join(' / ')}</span>
+              <span>{triggerIdentity(item)}</span>
               <span>{item.detail}</span>
               <Button size="sm" variant="secondary" onClick={() => void showTriggerDetail(item)}>详情</Button>
               <button

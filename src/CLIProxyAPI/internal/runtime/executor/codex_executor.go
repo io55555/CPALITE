@@ -2274,7 +2274,8 @@ func (e *CodexExecutor) applyUpstreamResponsePacketFilters(ctx context.Context, 
 		APIKey:        util.HideAPIKey(apiKey),
 	}
 	if auth != nil {
-		meta.AuthType, meta.AuthLabel = auth.AccountInfo()
+		meta.AuthID = strings.TrimSpace(auth.ID)
+		meta.AuthType, meta.AuthLabel = packetCaptureAuthIdentity(auth)
 		meta.AuthIndex = auth.EnsureIndex()
 	}
 	filtered, _, triggers := packetcapture.ApplyRules(ctx, meta, "upstream_response", rawResponse)

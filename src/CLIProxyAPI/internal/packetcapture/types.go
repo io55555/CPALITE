@@ -18,6 +18,7 @@ type Record struct {
 	Source             string    `json:"source,omitempty"`
 	Model              string    `json:"model"`
 	UserToken          string    `json:"user_token,omitempty"`
+	AuthID             string    `json:"auth_id,omitempty"`
 	AuthLabel          string    `json:"auth_label,omitempty"`
 	AuthType           string    `json:"auth_type,omitempty"`
 	AuthIndex          string    `json:"auth_index,omitempty"`
@@ -39,6 +40,7 @@ type RecordSummary struct {
 	Source             string    `json:"source,omitempty"`
 	Model              string    `json:"model"`
 	UserToken          string    `json:"user_token,omitempty"`
+	AuthID             string    `json:"auth_id,omitempty"`
 	AuthLabel          string    `json:"auth_label,omitempty"`
 	AuthType           string    `json:"auth_type,omitempty"`
 	AuthIndex          string    `json:"auth_index,omitempty"`
@@ -127,6 +129,11 @@ type TriggerRecord struct {
 	Action          string    `json:"action"`
 	Target          string    `json:"target,omitempty"`
 	Account         string    `json:"account,omitempty"`
+	AuthID          string    `json:"auth_id,omitempty"`
+	AuthIndex       string    `json:"auth_index,omitempty"`
+	Provider        string    `json:"provider,omitempty"`
+	Source          string    `json:"source,omitempty"`
+	Model           string    `json:"model,omitempty"`
 	Packet          string    `json:"packet,omitempty"`
 	PacketName      string    `json:"packet_name,omitempty"`
 	Detail          string    `json:"detail,omitempty"`
