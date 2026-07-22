@@ -2989,7 +2989,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		} else {
 			if result.Model != "" {
-				if !isRequestScopedResultError(result.Error) {
+				if shouldApplyCredentialFailureState(result.Error) {
 					disableCooling := quotaCooldownDisabledForAuth(auth)
 					state := ensureModelState(auth, result.Model)
 					state.Unavailable = true
@@ -3181,7 +3181,7 @@ func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID,
 	if action == "" || (target != "api_key" && target != "auth") {
 		return
 	}
-	if actionAuthID != "" && resultAuthID != "" && actionAuthID != resultAuthID {
+	if actionAuthID != "" && resultAuthID != "" && actionAuthID != resultAuthID && strings.TrimSpace(auth.Index) != actionAuthID {
 		return
 	}
 	message := "packet filter matched"
@@ -3758,6 +3758,21 @@ func isRequestScopedResultError(err *Error) bool {
 	return err != nil && (err.IsRequestScoped() || isRequestScopedNotFoundResultError(err))
 }
 
+func shouldApplyCredentialFailureState(err *Error) bool {
+	if err == nil {
+		return true
+	}
+	if !isRequestScopedResultError(err) {
+		return true
+	}
+	switch statusCodeFromResult(err) {
+	case http.StatusUnauthorized, http.StatusTooManyRequests:
+		return true
+	default:
+		return false
+	}
+}
+
 func isCountTokensEndpointNotFoundError(err error, requestedModel string) bool {
 	if err == nil || statusCodeFromError(err) != http.StatusNotFound {
 		return false
@@ -4000,7 +4015,7 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 	if auth == nil {
 		return
 	}
-	if isRequestScopedResultError(resultErr) {
+	if !shouldApplyCredentialFailureState(resultErr) {
 		return
 	}
 	disableCooling := quotaCooldownDisabledForAuth(auth)

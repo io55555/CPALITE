@@ -26,6 +26,39 @@ import (
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
 
+func TestNewServerInjectsCooldownConfigIntoAuthManager(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mgr := auth.NewManager(nil, nil, nil)
+	cfg := &proxyconfig.Config{
+		CodexQuotaCooldownBaseSeconds: 86400,
+		CodexQuotaCooldownMaxSeconds:  604800,
+	}
+	NewServer(cfg, mgr, sdkaccess.NewManager(), filepath.Join(t.TempDir(), "config.yaml"))
+
+	if _, err := mgr.Register(context.Background(), &auth.Auth{
+		ID:       "codex-auth",
+		Provider: "codex",
+		Status:   auth.StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+	mgr.MarkResult(context.Background(), auth.Result{
+		AuthID:   "codex-auth",
+		Provider: "codex",
+		Model:    "gpt-5-codex",
+		Success:  false,
+		Error:    &auth.Error{Code: "request_scoped", Message: "wrapped 429", HTTPStatus: http.StatusTooManyRequests},
+	})
+
+	updated, ok := mgr.GetByID("codex-auth")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("cooldown = unavailable:%v next:%v, want injected 24h config", updated.Unavailable, updated.NextRetryAfter)
+	}
+}
+
 type codexSearchCaptureExecutor struct {
 	request *http.Request
 	body    []byte

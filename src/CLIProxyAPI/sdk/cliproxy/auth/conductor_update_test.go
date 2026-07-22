@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
@@ -121,6 +122,22 @@ func TestApplyPacketFilterActionStateIgnoresOtherAuth(t *testing.T) {
 	}
 }
 
+func TestApplyPacketFilterActionStateMatchesAuthIndex(t *testing.T) {
+	ctx := contextWithPacketFilterActionState(context.Background())
+	PublishPacketFilterAction(ctx, "cooldown", "api_key", 86400, "xai 429 cooldown", "xai-index-1")
+	auth := &Auth{ID: "auth-1", Index: "xai-index-1", Provider: "xai"}
+
+	applyPacketFilterActionState(ctx, auth, "auth-1", "grok-4", time.Now())
+
+	if !auth.Unavailable || time.Until(auth.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown by index, got unavailable=%v next=%v", auth.Unavailable, auth.NextRetryAfter)
+	}
+	state := auth.ModelStates["grok-4"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown by index, got %+v", state)
+	}
+}
+
 func TestManagerMarkResult_AppliesPacketFilterCooldownForRequestScopedError(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 	if _, err := m.Register(context.Background(), &Auth{
@@ -157,6 +174,52 @@ func TestManagerMarkResult_AppliesPacketFilterCooldownForRequestScopedError(t *t
 	state := updated.ModelStates["gpt-5-codex"]
 	if state == nil || !state.Unavailable || !state.NextRetryAfter.After(time.Now()) {
 		t.Fatalf("expected model cooldown, got %+v", state)
+	}
+}
+
+func TestManagerMarkResult_RequestScoped429UsesProviderCooldownConfig(t *testing.T) {
+	now := time.Now()
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{
+		CodexQuotaCooldownBaseSeconds: 86400,
+		CodexQuotaCooldownMaxSeconds:  604800,
+		XAIQuotaCooldownBaseSeconds:   86400,
+		XAIQuotaCooldownMaxSeconds:    86400,
+	})
+	for _, auth := range []*Auth{
+		{ID: "codex-auth", Provider: "codex", Status: StatusActive},
+		{ID: "xai-auth", Provider: "xai", Status: StatusActive},
+	} {
+		if _, err := m.Register(context.Background(), auth); err != nil {
+			t.Fatalf("register %s: %v", auth.ID, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		authID string
+		model  string
+	}{
+		{authID: "codex-auth", model: "gpt-5-codex"},
+		{authID: "xai-auth", model: "grok-4"},
+	} {
+		m.MarkResult(context.Background(), Result{
+			AuthID:   tc.authID,
+			Provider: tc.authID[:len(tc.authID)-5],
+			Model:    tc.model,
+			Success:  false,
+			Error:    &Error{Code: requestScopedErrorCode, Message: "429 wrapped as request scoped", HTTPStatus: http.StatusTooManyRequests},
+		})
+		updated, ok := m.GetByID(tc.authID)
+		if !ok || updated == nil {
+			t.Fatalf("expected auth %s to be present", tc.authID)
+		}
+		if !updated.Unavailable || updated.NextRetryAfter.Before(now.Add(23*time.Hour)) {
+			t.Fatalf("%s cooldown = unavailable:%v next:%v, want about 24h", tc.authID, updated.Unavailable, updated.NextRetryAfter)
+		}
+		state := updated.ModelStates[tc.model]
+		if state == nil || !state.Unavailable || state.NextRetryAfter.Before(now.Add(23*time.Hour)) {
+			t.Fatalf("%s model state = %+v, want about 24h cooldown", tc.authID, state)
+		}
 	}
 }
 
