@@ -132,3 +132,16 @@ type TriggerRecord struct {
 	Detail          string    `json:"detail,omitempty"`
 	CooldownSeconds int       `json:"cooldown_seconds,omitempty"`
 }
+
+type ActionEvent struct {
+	Record          Record
+	Trigger         TriggerRecord
+	AuthID          string
+	AuthIndex       string
+	Provider        string
+	Model           string
+	Action          string
+	Target          string
+	CooldownSeconds int
+	RuleName        string
+}

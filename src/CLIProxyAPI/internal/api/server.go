@@ -398,6 +398,12 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		optionState.pluginHost.SetAuthManager(authManager)
 	}
 	s.configurePacketCaptureRulesProvider()
+	packetcapture.SetDefaultActionHandler(func(ctx context.Context, event packetcapture.ActionEvent) {
+		if authManager == nil {
+			return
+		}
+		authManager.ApplyPacketFilterAction(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName)
+	})
 	// Save initial YAML snapshot
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
 	s.applyAccessConfig(nil, cfg)

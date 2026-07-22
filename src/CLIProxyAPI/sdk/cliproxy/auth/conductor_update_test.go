@@ -223,6 +223,39 @@ func TestManagerExecute_AppliesPacketFilterCooldownWithoutGinContext(t *testing.
 	}
 }
 
+func TestManagerApplyPacketFilterAction_ResolvesAuthByIndex(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	registered, err := m.Register(context.Background(), &Auth{
+		ID:       "auth-1",
+		Index:    "xai-auth-file-1",
+		Provider: "xai",
+		Status:   StatusActive,
+	})
+	if err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+	if registered.Index != "xai-auth-file-1" {
+		t.Fatalf("registered index = %q, want xai-auth-file-1", registered.Index)
+	}
+
+	ok := m.ApplyPacketFilterAction(context.Background(), "", "xai-auth-file-1", "xai", "grok-4", "cooldown", "api_key", 86400, "xai 429 cooldown")
+	if !ok {
+		t.Fatal("expected packet filter action to apply")
+	}
+
+	updated, ok := m.GetByID("auth-1")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown, got unavailable=%v next=%v", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown, got %+v", state)
+	}
+}
+
 func TestManager_Update_DisabledExistingDoesNotInheritModelStates(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 

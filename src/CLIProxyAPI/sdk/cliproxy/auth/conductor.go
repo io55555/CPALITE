@@ -3124,6 +3124,55 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	logAuthStateTransition(ctx, beforeSnapshot, authSnapshot)
 }
 
+// ApplyPacketFilterAction applies an action emitted by the packet-capture
+// history path to the matching auth record.
+func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string) bool {
+	if m == nil {
+		return false
+	}
+	action = strings.TrimSpace(action)
+	target = strings.TrimSpace(target)
+	if action == "" || (target != "api_key" && target != "auth") {
+		return false
+	}
+	resolvedAuthID := strings.TrimSpace(authID)
+	authIndex = strings.TrimSpace(authIndex)
+	m.mu.RLock()
+	if resolvedAuthID != "" {
+		if auth, ok := m.auths[resolvedAuthID]; !ok || auth == nil {
+			resolvedAuthID = ""
+		}
+	}
+	if resolvedAuthID == "" && authIndex != "" {
+		for _, auth := range m.auths {
+			if auth != nil && strings.TrimSpace(auth.Index) == authIndex {
+				resolvedAuthID = auth.ID
+				break
+			}
+		}
+	}
+	m.mu.RUnlock()
+	if resolvedAuthID == "" {
+		return false
+	}
+
+	actionCtx := contextWithPacketFilterActionState(ctx)
+	PublishPacketFilterAction(actionCtx, action, target, seconds, ruleName, resolvedAuthID)
+	m.MarkResult(actionCtx, Result{
+		AuthID:   resolvedAuthID,
+		Provider: strings.TrimSpace(provider),
+		Model:    strings.TrimSpace(model),
+		Success:  false,
+		Error: &Error{
+			Code:       requestScopedErrorCode,
+			Message:    "packet filter matched",
+			Retryable:  true,
+			HTTPStatus: http.StatusTooManyRequests,
+		},
+	})
+	return true
+}
+
 func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID, model string, now time.Time) {
 	if auth == nil {
 		return

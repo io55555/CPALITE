@@ -96,6 +96,72 @@ func TestCaptureFromUsageRecordStoresUnmarkedRawPackets(t *testing.T) {
 	}
 }
 
+func TestCaptureFromUsageRecordPublishesCooldownAction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	if err := InitDefaultInLogDir(t.TempDir()); err != nil {
+		t.Fatalf("InitDefaultInLogDir: %v", err)
+	}
+	defer CloseDefault()
+	if err := DefaultStore().SetEnabled(context.Background(), true); err != nil {
+		t.Fatalf("SetEnabled: %v", err)
+	}
+
+	previousRulesProvider := defaultRulesProvider
+	SetDefaultRulesProvider(func(context.Context) ([]Rule, error) {
+		return []Rule{{
+			ID:              "rule-xai-429",
+			Name:            "xai 429 cooldown",
+			Enabled:         true,
+			RecordHistory:   true,
+			Provider:        "xai-auth-file",
+			Packet:          "upstream_response",
+			Part:            "status",
+			Operator:        "num_eq",
+			ValueNumber:     429,
+			Action:          "cooldown",
+			Target:          "api_key",
+			CooldownSeconds: 86400,
+		}}, nil
+	})
+	defer SetDefaultRulesProvider(previousRulesProvider)
+
+	var events []ActionEvent
+	SetDefaultActionHandler(func(_ context.Context, event ActionEvent) {
+		events = append(events, event)
+	})
+	defer SetDefaultActionHandler(nil)
+
+	CaptureFromUsageRecord(context.Background(), coreusage.Record{
+		Provider:    "xai",
+		Source:      "xai-auth-file",
+		Model:       "grok-4",
+		AuthID:      "auth-xai-1",
+		AuthIndex:   "xai-index-1",
+		RequestedAt: time.Now(),
+		RawRequest:  "POST /v1/chat/completions HTTP/1.1\n\n{}",
+		RawResponse: "HTTP/2 429 Too Many Requests\nContent-Type: application/json\n\n{\"error\":\"rate limit\"}",
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("action events len = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.AuthID != "auth-xai-1" || event.AuthIndex != "xai-index-1" || event.Provider != "xai" || event.Model != "grok-4" {
+		t.Fatalf("event identity = %+v, want xai auth identity", event)
+	}
+	if event.Action != "cooldown" || event.Target != "api_key" || event.CooldownSeconds != 86400 {
+		t.Fatalf("event action = %+v, want 86400s cooldown", event)
+	}
+
+	triggers, err := DefaultStore().ListTriggers(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListTriggers: %v", err)
+	}
+	if len(triggers) != 1 || triggers[0].RuleID != "rule-xai-429" {
+		t.Fatalf("triggers = %+v, want rule-xai-429", triggers)
+	}
+}
+
 func TestRulesWildcardRandomAndOriginalReplacement(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
 	if err != nil {

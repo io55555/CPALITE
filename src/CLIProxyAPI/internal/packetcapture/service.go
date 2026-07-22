@@ -34,6 +34,7 @@ var (
 	defaultMu            sync.RWMutex
 	defaultService       *Service
 	defaultRulesProvider func(context.Context) ([]Rule, error)
+	defaultActionHandler func(context.Context, ActionEvent)
 )
 
 func InitDefaultInLogDir(logDir string) error {
@@ -70,11 +71,18 @@ func SetDefaultRulesProvider(provider func(context.Context) ([]Rule, error)) {
 	defaultMu.Unlock()
 }
 
+func SetDefaultActionHandler(handler func(context.Context, ActionEvent)) {
+	defaultMu.Lock()
+	defaultActionHandler = handler
+	defaultMu.Unlock()
+}
+
 func CloseDefault() error {
 	defaultMu.Lock()
 	previous := defaultService
 	defaultService = nil
 	defaultRulesProvider = nil
+	defaultActionHandler = nil
 	defaultMu.Unlock()
 	if previous == nil || previous.store == nil {
 		return nil
@@ -183,9 +191,63 @@ func captureFromUsageRecord(ctx context.Context, record coreusage.Record, allowQ
 	if rec.Timestamp.IsZero() {
 		rec.Timestamp = nowUTC()
 	}
+	rec.Packets = applyCaptureRulesToPackets(ctx, rec, record)
 	rec.TotalBytes = packetBytes(rec.Packets)
 	rec.Summary = buildSummary(rec)
 	_ = store.Insert(context.Background(), rec)
+}
+
+func applyCaptureRulesToPackets(ctx context.Context, rec Record, usageRecord coreusage.Record) PacketSet {
+	packets := rec.Packets
+	for _, item := range []struct {
+		name  string
+		value string
+		set   func(string)
+	}{
+		{name: "client_request", value: packets.ClientRequest, set: func(value string) { packets.ClientRequest = value }},
+		{name: "upstream_request", value: packets.UpstreamRequest, set: func(value string) { packets.UpstreamRequest = value }},
+		{name: "upstream_response", value: packets.UpstreamResponse, set: func(value string) { packets.UpstreamResponse = value }},
+		{name: "client_response", value: packets.ClientResponse, set: func(value string) { packets.ClientResponse = value }},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			continue
+		}
+		filtered, _, triggers := ApplyRules(ctx, rec, item.name, item.value)
+		item.set(filtered)
+		publishActionEvents(ctx, rec, usageRecord, triggers)
+	}
+	return packets
+}
+
+func publishActionEvents(ctx context.Context, rec Record, usageRecord coreusage.Record, triggers []TriggerRecord) {
+	if len(triggers) == 0 {
+		return
+	}
+	defaultMu.RLock()
+	handler := defaultActionHandler
+	defaultMu.RUnlock()
+	if handler == nil {
+		return
+	}
+	for _, trigger := range triggers {
+		action := strings.TrimSpace(trigger.Action)
+		target := strings.TrimSpace(trigger.Target)
+		if action == "" || (target != "api_key" && target != "auth") {
+			continue
+		}
+		handler(ctx, ActionEvent{
+			Record:          rec,
+			Trigger:         trigger,
+			AuthID:          strings.TrimSpace(usageRecord.AuthID),
+			AuthIndex:       strings.TrimSpace(usageRecord.AuthIndex),
+			Provider:        strings.TrimSpace(firstNonEmptyString(usageRecord.Provider, rec.Provider)),
+			Model:           strings.TrimSpace(firstNonEmptyString(usageRecord.Model, rec.Model)),
+			Action:          action,
+			Target:          target,
+			CooldownSeconds: trigger.CooldownSeconds,
+			RuleName:        strings.TrimSpace(trigger.RuleName),
+		})
+	}
 }
 
 func ginValueString(c *gin.Context, key string) string {
