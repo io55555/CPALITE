@@ -468,6 +468,39 @@ func TestManagerMarkResult_SuccessDoesNotClearFuturePacketCooldown(t *testing.T)
 	}
 }
 
+func TestManagerWrapStreamResult_AppliesRetryAfterFromChunkError(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "xai-auth",
+		Provider: "xai",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	retryAfter := 24 * time.Hour
+	chunks := make(chan cliproxyexecutor.StreamChunk, 2)
+	chunks <- cliproxyexecutor.StreamChunk{Payload: []byte("data: {}\n\n")}
+	chunks <- cliproxyexecutor.StreamChunk{Err: &retryAfterStatusError{status: http.StatusTooManyRequests, message: "free usage exhausted", retryAfter: retryAfter}}
+	close(chunks)
+
+	result := m.wrapStreamResult(context.Background(), &Auth{ID: "xai-auth", Provider: "xai"}, "xai", "grok-4.5-build-free", nil, nil, chunks, OAuthModelAliasResult{})
+	for range result.Chunks {
+	}
+
+	updated, ok := m.GetByID("xai-auth")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown from stream chunk retryAfter, got unavailable=%v next=%v", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown from stream chunk retryAfter, got %+v", state)
+	}
+}
+
 func TestManagerMarkResult_AppliesPacketFilterCooldownFromContextCarrier(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 	if _, err := m.Register(context.Background(), &Auth{
