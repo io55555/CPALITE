@@ -423,17 +423,30 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / 1024).toFixed(1)} KB`;
 };
 
-const triggerIdentity = (item: PacketTrigger) =>
-  [
+const triggerIdentity = (item: PacketTrigger) => {
+  const providerParts = [
     item.provider || '',
     item.source && item.source !== item.provider ? item.source : '',
     item.model || '',
-    item.auth_index ? `idx:${item.auth_index}` : '',
-    item.auth_id ? `id:${item.auth_id}` : '',
-    item.account && item.account !== item.auth_index && item.account !== item.auth_id ? item.account : '',
-  ]
-    .filter(Boolean)
-    .join(' / ') || '-';
+  ].filter(Boolean);
+  const authType = String(item.auth_type || '').trim().toLowerCase().replace(/_/g, '-');
+  const account = String(item.account || '').trim();
+  const authLabel = String(item.auth_label || '').trim();
+  const apiKey = String(item.api_key || '').trim();
+  const authIndex = String(item.auth_index || '').trim();
+  const authID = String(item.auth_id || '').trim();
+  const credential =
+    authType === 'api-key'
+      ? ['apikey', apiKey || account || authIndex || authID].filter(Boolean).join(' ')
+      : ['认证文件', authLabel || account || authIndex || authID, account && account !== authLabel ? account : '']
+          .filter(Boolean)
+          .join(' ');
+
+  return {
+    primary: providerParts.join(' / ') || '-',
+    secondary: credential || '-',
+  };
+};
 
 const triggerCooldown = (item: PacketTrigger) => {
   const seconds = Number(item.cooldown_seconds || 0);
@@ -1023,8 +1036,10 @@ export function PacketCapturePage() {
               <strong>{item.rule_name}</strong>
               <span>{item.action}</span>
               <span>{[item.target || '-', triggerCooldown(item)].filter(Boolean).join(' / ')}</span>
-              <span>{triggerIdentity(item)}</span>
-              <span>{item.detail}</span>
+              <span className={styles.triggerIdentity}>
+                <span>{triggerIdentity(item).primary}</span>
+                <span>{triggerIdentity(item).secondary}</span>
+              </span>
               <Button size="sm" variant="secondary" onClick={() => void showTriggerDetail(item)}>详情</Button>
               <button
                 type="button"

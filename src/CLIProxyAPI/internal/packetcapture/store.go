@@ -149,7 +149,10 @@ func (s *Store) initSchema(ctx context.Context) error {
 	target TEXT NOT NULL DEFAULT '',
 	account TEXT NOT NULL DEFAULT '',
 	auth_id TEXT NOT NULL DEFAULT '',
+	auth_label TEXT NOT NULL DEFAULT '',
+	auth_type TEXT NOT NULL DEFAULT '',
 	auth_index TEXT NOT NULL DEFAULT '',
+	api_key TEXT NOT NULL DEFAULT '',
 	provider TEXT NOT NULL DEFAULT '',
 	source TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '',
@@ -160,7 +163,10 @@ func (s *Store) initSchema(ctx context.Context) error {
 )`,
 		`ALTER TABLE trigger_records ADD COLUMN account TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN auth_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN auth_label TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN auth_type TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN auth_index TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE trigger_records ADD COLUMN api_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN provider TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE trigger_records ADD COLUMN model TEXT NOT NULL DEFAULT ''`,
@@ -585,7 +591,7 @@ func (s *Store) InsertTrigger(ctx context.Context, trigger TriggerRecord) error 
 		trigger.Timestamp = time.Now().UTC()
 	}
 	trigger.Packet = truncate(trigger.Packet)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO trigger_records(id,rule_id,rule_name,record_id,timestamp,action,target,account,auth_id,auth_index,provider,source,model,packet,packet_name,detail,cooldown_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, trigger.ID, trigger.RuleID, trigger.RuleName, trigger.RecordID, trigger.Timestamp.Format(timestampLayout), trigger.Action, trigger.Target, trigger.Account, trigger.AuthID, trigger.AuthIndex, trigger.Provider, trigger.Source, trigger.Model, trigger.Packet, trigger.PacketName, trigger.Detail, trigger.CooldownSeconds)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO trigger_records(id,rule_id,rule_name,record_id,timestamp,action,target,account,auth_id,auth_label,auth_type,auth_index,api_key,provider,source,model,packet,packet_name,detail,cooldown_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, trigger.ID, trigger.RuleID, trigger.RuleName, trigger.RecordID, trigger.Timestamp.Format(timestampLayout), trigger.Action, trigger.Target, trigger.Account, trigger.AuthID, trigger.AuthLabel, trigger.AuthType, trigger.AuthIndex, trigger.APIKey, trigger.Provider, trigger.Source, trigger.Model, trigger.Packet, trigger.PacketName, trigger.Detail, trigger.CooldownSeconds)
 	return err
 }
 
@@ -596,7 +602,7 @@ func (s *Store) ListTriggers(ctx context.Context, limit int) ([]TriggerRecord, e
 	if limit > maxLimit {
 		limit = maxLimit
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,rule_id,rule_name,record_id,timestamp,action,target,account,auth_id,auth_index,provider,source,model,packet,packet_name,detail,cooldown_seconds FROM trigger_records ORDER BY timestamp DESC, id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,rule_id,rule_name,record_id,timestamp,action,target,account,auth_id,auth_label,auth_type,auth_index,api_key,provider,source,model,packet,packet_name,detail,cooldown_seconds FROM trigger_records ORDER BY timestamp DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +611,7 @@ func (s *Store) ListTriggers(ctx context.Context, limit int) ([]TriggerRecord, e
 	for rows.Next() {
 		var item TriggerRecord
 		var ts string
-		if err := rows.Scan(&item.ID, &item.RuleID, &item.RuleName, &item.RecordID, &ts, &item.Action, &item.Target, &item.Account, &item.AuthID, &item.AuthIndex, &item.Provider, &item.Source, &item.Model, &item.Packet, &item.PacketName, &item.Detail, &item.CooldownSeconds); err != nil {
+		if err := rows.Scan(&item.ID, &item.RuleID, &item.RuleName, &item.RecordID, &ts, &item.Action, &item.Target, &item.Account, &item.AuthID, &item.AuthLabel, &item.AuthType, &item.AuthIndex, &item.APIKey, &item.Provider, &item.Source, &item.Model, &item.Packet, &item.PacketName, &item.Detail, &item.CooldownSeconds); err != nil {
 			return nil, err
 		}
 		item.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)

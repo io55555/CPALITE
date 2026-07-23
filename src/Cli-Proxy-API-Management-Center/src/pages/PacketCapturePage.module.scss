@@ -260,7 +260,7 @@
   grid-template-columns: auto minmax(90px, max-content) minmax(90px, max-content) minmax(
       100px,
       max-content
-    ) minmax(0, 1fr) auto auto;
+    ) minmax(90px, max-content) minmax(0, 1fr) auto auto;
   justify-content: stretch;
 }
 
@@ -276,6 +276,20 @@
   overflow: visible;
   text-overflow: clip;
   white-space: normal;
+}
+
+.triggerIdentity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.triggerIdentity > span {
+  margin-top: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .pagination {

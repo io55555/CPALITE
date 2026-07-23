@@ -102,6 +102,17 @@ const normalizePersistedStatusFilterMode = (value: unknown): AuthFilesStatusFilt
   return isAuthFilesStatusFilterMode(value) ? value : null;
 };
 
+const authFileProviderMatchesFilter = (provider: string, filter: string): boolean => {
+  const providerKey = normalizeProviderKey(provider);
+  const filterKey = normalizeProviderKey(filter);
+  if (filterKey === 'all') return true;
+  if (providerKey === filterKey) return true;
+  return (
+    (filterKey === 'xai' && (providerKey === 'xai-auth-file' || providerKey === 'xai-api-key')) ||
+    (filterKey === 'codex' && (providerKey === 'codex-auth-file' || providerKey === 'codex-api-key'))
+  );
+};
+
 type AuthFilesPageContentProps = {
   cooldownView?: boolean;
 };
@@ -520,7 +531,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
 
     return filesMatchingStatusFilters.filter((item) => {
       const type = normalizeProviderKey(String(item.type ?? item.provider ?? ''));
-      const matchType = normalizedFilter === 'all' || type === normalizedFilter;
+      const matchType = authFileProviderMatchesFilter(type, normalizedFilter);
       const matchSearch =
         !normalizedSearch ||
         [item.name, item.type, item.provider].some((value) => {

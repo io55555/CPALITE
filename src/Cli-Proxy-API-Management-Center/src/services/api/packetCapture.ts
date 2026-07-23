@@ -99,7 +99,10 @@ export interface PacketTrigger {
   target?: string;
   account?: string;
   auth_id?: string;
+  auth_label?: string;
+  auth_type?: string;
   auth_index?: string;
+  api_key?: string;
   provider?: string;
   source?: string;
   model?: string;

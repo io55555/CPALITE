@@ -130,7 +130,10 @@ type TriggerRecord struct {
 	Target          string    `json:"target,omitempty"`
 	Account         string    `json:"account,omitempty"`
 	AuthID          string    `json:"auth_id,omitempty"`
+	AuthLabel       string    `json:"auth_label,omitempty"`
+	AuthType        string    `json:"auth_type,omitempty"`
 	AuthIndex       string    `json:"auth_index,omitempty"`
+	APIKey          string    `json:"api_key,omitempty"`
 	Provider        string    `json:"provider,omitempty"`
 	Source          string    `json:"source,omitempty"`
 	Model           string    `json:"model,omitempty"`
@@ -144,7 +147,10 @@ type ActionEvent struct {
 	Record          Record
 	Trigger         TriggerRecord
 	AuthID          string
+	AuthLabel       string
+	AuthType        string
 	AuthIndex       string
+	APIKey          string
 	Provider        string
 	Model           string
 	Action          string

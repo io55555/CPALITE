@@ -136,6 +136,8 @@ func TestCaptureFromUsageRecordPublishesCooldownAction(t *testing.T) {
 		Source:      "xai-auth-file",
 		Model:       "grok-4",
 		AuthID:      "auth-xai-1",
+		AuthType:    "auth_file",
+		APIKey:      "xai-key",
 		AuthIndex:   "xai-index-1",
 		RequestedAt: time.Now(),
 		RawRequest:  "POST /v1/chat/completions HTTP/1.1\n\n{}",
@@ -149,6 +151,9 @@ func TestCaptureFromUsageRecordPublishesCooldownAction(t *testing.T) {
 	if event.AuthID != "auth-xai-1" || event.AuthIndex != "xai-index-1" || event.Provider != "xai" || event.Model != "grok-4" {
 		t.Fatalf("event identity = %+v, want xai auth identity", event)
 	}
+	if event.AuthType != "auth_file" || event.APIKey != "xai-key" {
+		t.Fatalf("event auth detail = %+v, want auth_file and api key", event)
+	}
 	if event.Action != "cooldown" || event.Target != "api_key" || event.CooldownSeconds != 86400 {
 		t.Fatalf("event action = %+v, want 86400s cooldown", event)
 	}
@@ -159,6 +164,9 @@ func TestCaptureFromUsageRecordPublishesCooldownAction(t *testing.T) {
 	}
 	if len(triggers) != 1 || triggers[0].RuleID != "rule-xai-429" {
 		t.Fatalf("triggers = %+v, want rule-xai-429", triggers)
+	}
+	if triggers[0].AuthType != "auth_file" || triggers[0].APIKey != "xai-key" {
+		t.Fatalf("trigger auth detail = %+v, want auth_file and api key", triggers[0])
 	}
 }
 
@@ -339,6 +347,8 @@ func TestTriggerRecordsIncludeAccountAndLookupByRequestID(t *testing.T) {
 		Action:   "disable",
 		Target:   "api_key",
 		Account:  "AIza...EHkY",
+		AuthType: "api_key",
+		APIKey:   "AIza...EHkY",
 	}); err != nil {
 		t.Fatalf("InsertTrigger: %v", err)
 	}
@@ -346,7 +356,7 @@ func TestTriggerRecordsIncludeAccountAndLookupByRequestID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
-	if len(triggers) != 1 || triggers[0].Account != "AIza...EHkY" {
+	if len(triggers) != 1 || triggers[0].Account != "AIza...EHkY" || triggers[0].AuthType != "api_key" || triggers[0].APIKey != "AIza...EHkY" {
 		t.Fatalf("triggers = %+v, want account", triggers)
 	}
 
