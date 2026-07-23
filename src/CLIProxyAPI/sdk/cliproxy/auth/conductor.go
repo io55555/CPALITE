@@ -2974,16 +2974,21 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		if result.Success {
 			if result.Model != "" {
 				state := ensureModelState(auth, result.Model)
-				resetModelState(state, now)
-				updateAggregatedAvailability(auth, now)
-				if !hasModelError(auth, now) {
-					auth.LastError = nil
-					auth.StatusMessage = ""
-					auth.Status = StatusActive
+				if authKeepsFutureQuotaCooldown(auth, state, now) {
+					auth.UpdatedAt = now
+					updateAggregatedAvailability(auth, now)
+				} else {
+					resetModelState(state, now)
+					updateAggregatedAvailability(auth, now)
+					if !hasModelError(auth, now) {
+						auth.LastError = nil
+						auth.StatusMessage = ""
+						auth.Status = StatusActive
+					}
+					auth.UpdatedAt = now
+					shouldResumeModel = true
+					clearModelQuota = true
 				}
-				auth.UpdatedAt = now
-				shouldResumeModel = true
-				clearModelQuota = true
 			} else {
 				clearAuthStateOnSuccess(auth, now)
 			}
@@ -3373,6 +3378,26 @@ func resetModelState(state *ModelState, now time.Time) {
 	state.LastError = nil
 	state.Quota = QuotaState{}
 	state.UpdatedAt = now
+}
+
+func authKeepsFutureQuotaCooldown(auth *Auth, state *ModelState, now time.Time) bool {
+	if auth == nil {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	if provider != "codex" && provider != "xai" {
+		return false
+	}
+	if state == nil {
+		return false
+	}
+	if !state.NextRetryAfter.After(now) {
+		return false
+	}
+	if state.Quota.Exceeded && strings.EqualFold(strings.TrimSpace(state.Quota.Reason), "quota") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(state.StatusMessage)), "packet filter matched")
 }
 
 func modelStateIsClean(state *ModelState) bool {
