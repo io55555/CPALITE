@@ -589,11 +589,26 @@ func statusFromPacket(packet string, fallback int) int {
 	if fallback > 0 {
 		return fallback
 	}
-	line, _, _ := strings.Cut(strings.TrimSpace(packet), "\n")
+	trimmed := strings.TrimSpace(packet)
+	line, rest, _ := strings.Cut(trimmed, "\n")
 	parts := strings.Fields(line)
 	if len(parts) >= 2 && strings.HasPrefix(parts[0], "HTTP/") {
 		if code, err := strconv.Atoi(parts[1]); err == nil {
 			return code
+		}
+	}
+	// Websocket timeline / log style: Status: 429
+	for _, candidate := range []string{line, rest, trimmed} {
+		for _, row := range strings.Split(candidate, "\n") {
+			row = strings.TrimSpace(row)
+			if strings.HasPrefix(strings.ToLower(row), "status:") {
+				fields := strings.Fields(row)
+				if len(fields) >= 2 {
+					if code, err := strconv.Atoi(fields[len(fields)-1]); err == nil && code > 0 {
+						return code
+					}
+				}
+			}
 		}
 	}
 	return 0

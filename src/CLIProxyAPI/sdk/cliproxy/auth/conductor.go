@@ -1445,7 +1445,8 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			close(closedCh)
 			remaining = closedCh
 		}
-		return m.wrapStreamResult(ctx, auth.Clone(), provider, resultModel, streamResult.Headers, buffered, remaining, aliasResult), nil
+		// (comment normalized)
+		return m.wrapStreamResult(callCtx, auth.Clone(), provider, resultModel, streamResult.Headers, buffered, remaining, aliasResult), nil
 	}
 	if lastErr == nil {
 		lastErr = &Error{Code: "auth_not_found", Message: "no upstream model available"}
@@ -1683,6 +1684,21 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		if !existing.Disabled && existing.Status != StatusDisabled && !auth.Disabled && auth.Status != StatusDisabled {
 			if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
 				auth.ModelStates = existing.ModelStates
+			}
+			// (comment normalized)
+			now := time.Now()
+			if existing.NextRetryAfter.After(now) && (auth.NextRetryAfter.IsZero() || existing.NextRetryAfter.After(auth.NextRetryAfter)) {
+				auth.NextRetryAfter = existing.NextRetryAfter
+				auth.Unavailable = true
+				if auth.Status == StatusActive || auth.Status == "" {
+					auth.Status = existing.Status
+				}
+				if strings.TrimSpace(auth.StatusMessage) == "" {
+					auth.StatusMessage = existing.StatusMessage
+				}
+				if existing.Quota.Exceeded {
+					auth.Quota = existing.Quota
+				}
 			}
 		}
 	} else if _, removed := m.removedAuthIDs[auth.ID]; removed {
@@ -2995,6 +3011,8 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 				clearAuthStateOnSuccess(auth, now)
 			}
 		} else {
+			// (comment normalized)
+			packetCooldownSnap := capturePacketFilterCooldownSnapshot(auth, result.Model, now)
 			if result.Model != "" {
 				if shouldApplyCredentialFailureStateForResult(result) {
 					disableCooling := quotaCooldownDisabledForAuth(auth)
@@ -3096,10 +3114,14 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					auth.UpdatedAt = now
 					updateAggregatedAvailability(auth, now)
 				}
+				// (comment normalized)
+				restorePacketFilterCooldownSnapshot(auth, result.Model, packetCooldownSnap, now)
 			} else {
 				baseCooldown, maxCooldown := m.quotaCooldownBoundsForAuth(auth)
 				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown(), baseCooldown, maxCooldown)
+				restorePacketFilterCooldownSnapshot(auth, "", packetCooldownSnap, now)
 			}
+			// (comment normalized)
 			applyPacketFilterActionState(ctx, auth, result.AuthID, result.Model, now)
 		}
 
@@ -3249,7 +3271,7 @@ func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID,
 		return
 	}
 	if actionAuthID != "" {
-		matchesResultAuth := resultAuthID != "" && actionAuthID == resultAuthID
+		matchesResultAuth := resultAuthID != "" && strings.EqualFold(strings.TrimSpace(actionAuthID), strings.TrimSpace(resultAuthID))
 		if !matchesResultAuth && !packetFilterIdentityMatchesAuth(auth, actionAuthID) {
 			return
 		}
@@ -3282,17 +3304,88 @@ func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID,
 		auth.Status = StatusError
 		auth.StatusMessage = message
 		auth.NextRetryAfter = next
+		auth.Quota.Exceeded = true
+		auth.Quota.Reason = "quota"
+		auth.Quota.NextRecoverAt = next
 		if model != "" {
 			state := ensureModelState(auth, model)
 			state.Status = StatusError
 			state.Unavailable = true
 			state.StatusMessage = message
 			state.NextRetryAfter = next
+			state.Quota = QuotaState{
+				Exceeded:      true,
+				Reason:        "quota",
+				NextRecoverAt: next,
+				BackoffLevel:  state.Quota.BackoffLevel,
+			}
 			state.UpdatedAt = now
 		}
 		log.Infof("auth packet filter cooldown applied: auth=%s index=%s provider=%s model=%s seconds=%d until=%s rule=%s", strings.TrimSpace(auth.ID), strings.TrimSpace(auth.Index), strings.TrimSpace(auth.Provider), strings.TrimSpace(model), seconds, next.UTC().Format(time.RFC3339), ruleName)
 	}
 	auth.UpdatedAt = now
+}
+
+// (comment normalized)
+func isPacketFilterCooldownMessage(message string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(message)), "packet filter matched")
+}
+
+type packetFilterCooldownSnapshot struct {
+	message string
+	next    time.Time
+	valid   bool
+}
+
+func capturePacketFilterCooldownSnapshot(auth *Auth, model string, now time.Time) packetFilterCooldownSnapshot {
+	if auth == nil {
+		return packetFilterCooldownSnapshot{}
+	}
+	if model != "" {
+		if state := auth.ModelStates[model]; state != nil && isPacketFilterCooldownMessage(state.StatusMessage) && state.NextRetryAfter.After(now) {
+			return packetFilterCooldownSnapshot{message: state.StatusMessage, next: state.NextRetryAfter, valid: true}
+		}
+	}
+	if isPacketFilterCooldownMessage(auth.StatusMessage) && auth.NextRetryAfter.After(now) {
+		return packetFilterCooldownSnapshot{message: auth.StatusMessage, next: auth.NextRetryAfter, valid: true}
+	}
+	return packetFilterCooldownSnapshot{}
+}
+
+func restorePacketFilterCooldownSnapshot(auth *Auth, model string, snap packetFilterCooldownSnapshot, now time.Time) {
+	if auth == nil || !snap.valid || !snap.next.After(now) {
+		return
+	}
+	auth.Unavailable = true
+	if auth.Status != StatusDisabled {
+		auth.Status = StatusError
+	}
+	auth.StatusMessage = snap.message
+	auth.NextRetryAfter = snap.next
+	auth.Quota.Exceeded = true
+	if strings.TrimSpace(auth.Quota.Reason) == "" {
+		auth.Quota.Reason = "quota"
+	}
+	auth.Quota.NextRecoverAt = snap.next
+	if model != "" {
+		state := ensureModelState(auth, model)
+		state.Status = StatusError
+		state.Unavailable = true
+		state.StatusMessage = snap.message
+		state.NextRetryAfter = snap.next
+		state.Quota = QuotaState{
+			Exceeded:      true,
+			Reason:        "quota",
+			NextRecoverAt: snap.next,
+			BackoffLevel:  state.Quota.BackoffLevel,
+		}
+		state.UpdatedAt = now
+	}
+}
+
+// (comment normalized)
+func preserveFuturePacketFilterCooldown(auth *Auth, model string, now time.Time) {
+	restorePacketFilterCooldownSnapshot(auth, model, capturePacketFilterCooldownSnapshot(auth, model, now), now)
 }
 
 func packetFilterActionFromContext(ctx context.Context) (action, target, authID string, seconds int, ruleName string) {
@@ -5951,7 +6044,7 @@ func debugLogAuthSelection(entry *log.Entry, auth *Auth, provider string, model 
 	switch accountType {
 	case "api_key":
 		if isOpenAICompatAPIKeyAuth(auth) {
-			entry.Debugf("[2/6][%s][api_key=%s auth=%s]CPA选择apikey或凭证账号(账号名 或 key)", provider, accountInfo, auth.ID)
+			entry.Debugf("[2/6][%s][api_key=%s auth=%s]CPA选择apikey或凭证账?账号??key)", provider, accountInfo, auth.ID)
 			entry.Debugf("selected OpenAI compatible key | provider=%s model=%s auth=%s api_key=%s%s", provider, model, auth.ID, accountInfo, suffix)
 			return
 		}

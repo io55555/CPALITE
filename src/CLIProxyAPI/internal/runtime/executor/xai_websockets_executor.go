@@ -479,7 +479,8 @@ func (e *XAIWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *cliprox
 			if sess != nil {
 				sess.reqMu.Unlock()
 			}
-			return nil, statusErr{code: respHS.StatusCode, msg: string(bodyErr)}
+			// (comment normalized)
+			return nil, e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, respHS.StatusCode, respHS.Header.Clone(), bodyErr)
 		}
 		helps.RecordAPIWebsocketError(ctx, e.cfg, "dial", errDial)
 		if sess != nil {
@@ -627,14 +628,23 @@ func (e *XAIWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *cliprox
 			helps.AppendAPIWebsocketResponse(ctx, e.cfg, payload)
 
 			if wsErr, ok := parseXAIWebsocketError(payload); ok {
-				terminateReason = "upstream_error"
-				terminateErr = wsErr
-				helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", wsErr)
-				reporter.PublishFailure(ctx, wsErr)
-				if sess != nil {
-					e.invalidateUpstreamConnWithoutDisconnectNotify(sess, conn, "upstream_error", wsErr)
+				status := statusCodeFromError(wsErr)
+				if status <= 0 {
+					status = xaiInferQuotaStatusFromPayload(payload)
 				}
-				_ = send(cliproxyexecutor.StreamChunk{Err: wsErr})
+				if status <= 0 {
+					status = http.StatusInternalServerError
+				}
+				// (comment normalized)
+				streamErr := e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, status, http.Header{}, payload)
+				terminateReason = "upstream_error"
+				terminateErr = streamErr
+				helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", streamErr)
+				reporter.PublishFailure(ctx, streamErr)
+				if sess != nil {
+					e.invalidateUpstreamConnWithoutDisconnectNotify(sess, conn, "upstream_error", streamErr)
+				}
+				_ = send(cliproxyexecutor.StreamChunk{Err: streamErr})
 				return
 			}
 
@@ -861,11 +871,46 @@ func xaiBareWebsocketErrorStatus(payload []byte) int {
 			return status
 		}
 	}
+	if status := xaiInferQuotaStatusFromPayload(payload); status > 0 {
+		return status
+	}
 	message := strings.TrimSpace(gjson.GetBytes(payload, "error.message").String())
 	if strings.Contains(message, `"code":"400"`) || strings.Contains(message, "Request validation error") {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
+}
+
+// (comment normalized)
+func xaiInferQuotaStatusFromPayload(payload []byte) int {
+	if len(payload) == 0 {
+		return 0
+	}
+	text := strings.ToLower(string(payload))
+	if strings.Contains(text, "free-usage-exhausted") ||
+		strings.Contains(text, "included free usage") ||
+		strings.Contains(text, "usage exhausted") ||
+		strings.Contains(text, "too many requests") ||
+		strings.Contains(text, "rate limit") ||
+		strings.Contains(text, `"status":429`) ||
+		strings.Contains(text, `"status_code":429`) ||
+		strings.Contains(text, "429") {
+		return http.StatusTooManyRequests
+	}
+	return 0
+}
+
+func statusCodeFromError(err error) int {
+	if err == nil {
+		return 0
+	}
+	type statusCoder interface {
+		StatusCode() int
+	}
+	if sc, ok := err.(statusCoder); ok && sc != nil {
+		return sc.StatusCode()
+	}
+	return 0
 }
 
 func (e *XAIWebsocketsExecutor) prepareResponsesWebsocketRequest(ctx context.Context, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*xaiPreparedRequest, error) {

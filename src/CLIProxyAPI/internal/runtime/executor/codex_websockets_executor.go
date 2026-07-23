@@ -337,7 +337,8 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 			return e.CodexExecutor.Execute(ctx, auth, req, opts)
 		}
 		if respHS != nil && respHS.StatusCode > 0 {
-			return resp, statusErr{code: respHS.StatusCode, msg: string(bodyErr)}
+			e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, respHS.StatusCode, respHS.Header.Clone(), bodyErr)
+			return resp, newCodexStatusErr(respHS.StatusCode, bodyErr)
 		}
 		helps.RecordAPIWebsocketError(ctx, e.cfg, "dial", errDial)
 		return resp, errDial
@@ -439,16 +440,31 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 		helps.AppendAPIWebsocketResponse(ctx, e.cfg, payload)
 
 		if wsErr, ok := parseCodexWebsocketError(payload); ok {
+			status := statusCodeFromError(wsErr)
+			if status <= 0 {
+				status = http.StatusInternalServerError
+			}
+			body := []byte(wsErr.Error())
+			headers := http.Header{}
+			if withHeaders, okHeaders := wsErr.(interface{ Headers() http.Header }); okHeaders {
+				headers = withHeaders.Headers()
+			}
+			e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, status, headers, body)
+			statusErrOut := newCodexStatusErr(status, body)
+			if ra := retryAfterFromError(wsErr); ra != nil && statusErrOut.retryAfter == nil {
+				statusErrOut.retryAfter = ra
+			}
 			if sess != nil {
-				e.invalidateUpstreamConn(sess, conn, "upstream_error", wsErr)
+				e.invalidateUpstreamConn(sess, conn, "upstream_error", statusErrOut)
 			}
 			if errClearReplay := clearCodexReasoningReplayOnWebsocketError(ctx, replayScope, payload); errClearReplay != nil {
 				return resp, errClearReplay
 			}
-			helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", wsErr)
-			return resp, wsErr
+			helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", statusErrOut)
+			return resp, statusErrOut
 		}
 		if streamErr, terminalBody, ok := codexTerminalFailureErr(payload); ok {
+			e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, streamErr.StatusCode(), http.Header{}, terminalBody)
 			if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
 				return resp, errClearReplay
 			}
@@ -582,7 +598,9 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 			return e.CodexExecutor.ExecuteStream(ctx, auth, req, opts)
 		}
 		if respHS != nil && respHS.StatusCode > 0 {
-			return nil, statusErr{code: respHS.StatusCode, msg: string(bodyErr)}
+			// (comment normalized)
+			e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, respHS.StatusCode, respHS.Header.Clone(), bodyErr)
+			return nil, newCodexStatusErr(respHS.StatusCode, bodyErr)
 		}
 		helps.RecordAPIWebsocketError(ctx, e.cfg, "dial", errDial)
 		if sess != nil {
@@ -727,10 +745,25 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 			helps.AppendAPIWebsocketResponse(ctx, e.cfg, payload)
 
 			if wsErr, ok := parseCodexWebsocketError(payload); ok {
+				status := statusCodeFromError(wsErr)
+				if status <= 0 {
+					status = http.StatusInternalServerError
+				}
+				body := []byte(wsErr.Error())
+				headers := http.Header{}
+				if withHeaders, okHeaders := wsErr.(interface{ Headers() http.Header }); okHeaders {
+					headers = withHeaders.Headers()
+				}
+				e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, status, headers, body)
+				streamErr := newCodexStatusErr(status, body)
+				// (comment normalized)
+				if ra := retryAfterFromError(wsErr); ra != nil && streamErr.retryAfter == nil {
+					streamErr.retryAfter = ra
+				}
 				terminateReason = "upstream_error"
-				terminateErr = wsErr
+				terminateErr = streamErr
 				if sess != nil {
-					e.invalidateUpstreamConn(sess, conn, "upstream_error", wsErr)
+					e.invalidateUpstreamConn(sess, conn, "upstream_error", streamErr)
 				}
 				if errClearReplay := clearCodexReasoningReplayOnWebsocketError(ctx, replayScope, payload); errClearReplay != nil {
 					terminateErr = errClearReplay
@@ -739,12 +772,13 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 					_ = send(cliproxyexecutor.StreamChunk{Err: errClearReplay})
 					return
 				}
-				helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", wsErr)
-				reporter.PublishFailure(ctx, wsErr)
-				_ = send(cliproxyexecutor.StreamChunk{Err: wsErr})
+				helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", streamErr)
+				reporter.PublishFailure(ctx, streamErr)
+				_ = send(cliproxyexecutor.StreamChunk{Err: streamErr})
 				return
 			}
 			if streamErr, terminalBody, ok := codexTerminalFailureErr(payload); ok {
+				e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, streamErr.StatusCode(), http.Header{}, terminalBody)
 				terminateReason = "upstream_error"
 				terminateErr = streamErr
 				if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
@@ -1934,4 +1968,17 @@ func codexWebsocketsEnabled(auth *cliproxyauth.Auth) bool {
 	default:
 	}
 	return false
+}
+
+func retryAfterFromError(err error) *time.Duration {
+	if err == nil {
+		return nil
+	}
+	type retryAfterProvider interface {
+		RetryAfter() *time.Duration
+	}
+	if rap, ok := err.(retryAfterProvider); ok && rap != nil {
+		return rap.RetryAfter()
+	}
+	return nil
 }

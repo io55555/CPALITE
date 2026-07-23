@@ -2295,9 +2295,21 @@ func (e *CodexExecutor) publishPacketFilterActions(ctx context.Context, auth *cl
 			continue
 		}
 		switch action {
-		case "disable", "cooldown":
+		case "disable":
 			cliproxyauth.PublishPacketFilterAction(ctx, action, target, trigger.CooldownSeconds, trigger.RuleName, codexAuthIDForPacketFilter(auth))
 			log.Infof("codex auth packet filter action: action=%s target=%s model=%s auth=%s api_key=%s rule=%s raw_response_bytes=%d detail=%s", action, target, model, codexAuthIDForPacketFilter(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(filteredResponse), trigger.Detail)
+			return
+		case "cooldown":
+			seconds := trigger.CooldownSeconds
+			if seconds <= 0 && e != nil && e.cfg != nil && e.cfg.CodexQuotaCooldownBaseSeconds > 0 {
+				seconds = e.cfg.CodexQuotaCooldownBaseSeconds
+			}
+			if seconds <= 0 {
+				seconds = 300
+			}
+			// (comment normalized)
+			cliproxyauth.PublishPacketFilterAction(ctx, action, target, seconds, trigger.RuleName, codexAuthIDForPacketFilter(auth))
+			log.Infof("codex auth cooled down by packet filter: model=%s auth=%s api_key=%s seconds=%d rule=%s raw_response_bytes=%d detail=%s", model, codexAuthIDForPacketFilter(auth), util.HideAPIKey(apiKey), seconds, trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
 		}
 	}

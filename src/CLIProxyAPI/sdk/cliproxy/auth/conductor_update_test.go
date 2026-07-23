@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -788,3 +789,56 @@ func TestManager_Update_ActiveInheritsModelStates(t *testing.T) {
 		t.Fatalf("expected BackoffLevel to be %d, got %d", backoffLevel, state.Quota.BackoffLevel)
 	}
 }
+
+func TestManagerMarkResult_SubsequentFailureKeepsPacketFilterCooldown(t *testing.T) {
+	now := time.Now()
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{
+		XAIQuotaCooldownBaseSeconds: 60,
+		XAIQuotaCooldownMaxSeconds:  60,
+	})
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "xai-0x3345@gmail.com.json",
+		Index:    "1c83b46dcf2fc438",
+		Provider: "xai",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	ctx := contextWithPacketFilterActionState(context.Background())
+	PublishPacketFilterAction(ctx, "cooldown", "api_key", 86400, "[xai] 429 cooldown 24h", "xai-0x3345@gmail.com.json")
+	m.MarkResult(ctx, Result{
+		AuthID:   "xai-0x3345@gmail.com.json",
+		Provider: "xai",
+		Model:    "grok-4.5-build-free",
+		Success:  false,
+		Error:    &Error{Message: "429 quota", HTTPStatus: http.StatusTooManyRequests},
+	})
+
+	// Later failure without packet action must not clear/shorten packet cooldown.
+	m.MarkResult(context.Background(), Result{
+		AuthID:   "xai-0x3345@gmail.com.json",
+		Provider: "xai",
+		Model:    "grok-4.5-build-free",
+		Success:  false,
+		Error:    &Error{Message: "transient", HTTPStatus: http.StatusBadGateway},
+	})
+
+	updated, ok := m.GetByID("xai-0x3345@gmail.com.json")
+	if !ok || updated == nil {
+		t.Fatal("expected auth present")
+	}
+	lower := now.Add(23 * time.Hour)
+	if !updated.NextRetryAfter.After(lower) {
+		t.Fatalf("auth cooldown = %v, want packet-rule ~24h retained after later 502", updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.NextRetryAfter.After(lower) {
+		t.Fatalf("model cooldown = %+v, want packet-rule ~24h retained", state)
+	}
+	if !strings.Contains(strings.ToLower(state.StatusMessage), "packet filter matched") {
+		t.Fatalf("status message = %q, want packet filter matched", state.StatusMessage)
+	}
+}
+
