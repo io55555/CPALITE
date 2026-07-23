@@ -326,8 +326,22 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 		if !existing.Disabled && existing.Status != coreauth.StatusDisabled && !auth.Disabled && auth.Status != coreauth.StatusDisabled {
 			auth.LastRefreshedAt = existing.LastRefreshedAt
 			auth.NextRefreshAfter = existing.NextRefreshAfter
+			// 磁盘热加载常丢失运行时冷却字段，先从现有运行态回填，再交给 Update 合并
 			if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
 				auth.ModelStates = existing.ModelStates
+			}
+			if auth.NextRetryAfter.IsZero() && existing.NextRetryAfter.After(time.Now()) {
+				auth.NextRetryAfter = existing.NextRetryAfter
+				auth.Unavailable = existing.Unavailable
+				if auth.Status == coreauth.StatusActive || auth.Status == "" {
+					auth.Status = existing.Status
+				}
+				if strings.TrimSpace(auth.StatusMessage) == "" {
+					auth.StatusMessage = existing.StatusMessage
+				}
+				if existing.Quota.Exceeded {
+					auth.Quota = existing.Quota
+				}
 			}
 		}
 		op = "update"

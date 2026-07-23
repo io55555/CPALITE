@@ -398,11 +398,16 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		optionState.pluginHost.SetAuthManager(authManager)
 	}
 	s.configurePacketCaptureRulesProvider()
+	// 通过 s.handlers 动态取 Manager，避免闭包持有过期指针
 	packetcapture.SetDefaultActionHandler(func(ctx context.Context, event packetcapture.ActionEvent) {
-		if authManager == nil {
+		mgr := authManager
+		if s != nil && s.handlers != nil && s.handlers.AuthManager != nil {
+			mgr = s.handlers.AuthManager
+		}
+		if mgr == nil {
 			return
 		}
-		authManager.ApplyPacketFilterAction(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName, event.Account, event.AuthLabel, event.APIKey)
+		mgr.ApplyPacketFilterAction(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName, event.Account, event.AuthLabel, event.APIKey)
 	})
 	// Save initial YAML snapshot
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)

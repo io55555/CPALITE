@@ -532,10 +532,13 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 			if baseModel == "" {
 				baseModel = strings.TrimSpace(modelKey)
 			}
+			// 保留仍在冷却中的模型状态（抓包规则/配额配置），避免热重载把冷却清掉
+			if shouldPreserveModelCooldownState(state, now) {
+				continue
+			}
 			if _, supportedModel := supported[baseModel]; !supportedModel {
-				// Drop state for models that disappeared from the current registry
-				// snapshot. Keeping them around leaks stale errors into auth-level
-				// status, management output, and websocket fallback checks.
+				// Drop expired/non-cooldown state for models that disappeared from
+				// the current registry snapshot. Keep active cooldown rows (incl. "*").
 				delete(auth.ModelStates, modelKey)
 				changed = true
 				continue
@@ -546,6 +549,7 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 			if modelStateIsClean(state) {
 				continue
 			}
+			// 仅重置已过期的瞬时错误状态，不碰未来冷却
 			resetModelState(state, now)
 			changed = true
 		}
@@ -554,7 +558,8 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 		}
 		if changed {
 			updateAggregatedAvailability(auth, now)
-			if !hasModelError(auth, now) {
+			// 顶层冷却未到期时不要把账号打回 active
+			if !hasModelError(auth, now) && !authKeepsTopLevelCooldown(auth, now) {
 				auth.LastError = nil
 				auth.StatusMessage = ""
 				auth.Status = StatusActive
@@ -569,6 +574,9 @@ func (m *Manager) ReconcileRegistryModelStates(ctx context.Context, authID strin
 	if persistSnapshot != nil {
 		if errPersist := m.persist(ctx, persistSnapshot); errPersist != nil {
 			logEntryWithRequestID(ctx).WithField("auth_id", persistSnapshot.ID).Warnf("failed to persist auth changes during model state reconciliation: %v", errPersist)
+		}
+		if snapshot != nil && cooldownStateChanged(nil, snapshot, now) {
+			_ = m.saveCooldownStates(ctx)
 		}
 	}
 
@@ -3600,6 +3608,44 @@ func authKeepsFutureQuotaCooldown(auth *Auth, state *ModelState, now time.Time) 
 		return true
 	}
 	return strings.Contains(strings.ToLower(strings.TrimSpace(state.StatusMessage)), "packet filter matched")
+}
+
+func shouldPreserveModelCooldownState(state *ModelState, now time.Time) bool {
+	if state == nil {
+		return false
+	}
+	if state.Status == StatusDisabled {
+		return true
+	}
+	// 仅保留未到期的冷却/禁用；过期脏状态仍允许被 reconcile 清掉
+	if state.NextRetryAfter.After(now) {
+		return true
+	}
+	if state.Quota.NextRecoverAt.After(now) {
+		return true
+	}
+	return false
+}
+
+func authKeepsTopLevelCooldown(auth *Auth, now time.Time) bool {
+	if auth == nil {
+		return false
+	}
+	if auth.NextRetryAfter.After(now) {
+		return true
+	}
+	if auth.Quota.Exceeded && auth.Quota.NextRecoverAt.After(now) {
+		return true
+	}
+	if isPacketFilterCooldownMessage(auth.StatusMessage) && auth.NextRetryAfter.After(now) {
+		return true
+	}
+	for _, state := range auth.ModelStates {
+		if shouldPreserveModelCooldownState(state, now) {
+			return true
+		}
+	}
+	return false
 }
 
 func modelStateIsClean(state *ModelState) bool {

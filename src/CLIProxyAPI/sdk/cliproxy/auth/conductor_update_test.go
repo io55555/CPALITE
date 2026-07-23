@@ -885,3 +885,73 @@ func TestManagerMarkResult_InfersXAIFreeUsageExhaustedAs429Cooldown(t *testing.T
 	}
 }
 
+
+func TestManagerReconcileRegistryModelStates_PreservesActivePacketCooldown(t *testing.T) {
+	t.Parallel()
+	m := NewManager(nil, nil, nil)
+	now := time.Now()
+	until := now.Add(24 * time.Hour)
+	auth := &Auth{
+		ID:             "xai-20260722-001916-0.x.33.3.4@googlemail.com.json",
+		FileName:       "xai-20260722-001916-0.x.33.3.4@googlemail.com.json",
+		Provider:       "xai",
+		Status:         StatusError,
+		Unavailable:    true,
+		StatusMessage:  "packet filter matched: [运营商到CPA]xai响应码429冷却24h",
+		NextRetryAfter: until,
+		Quota: QuotaState{
+			Exceeded:      true,
+			Reason:        "quota",
+			NextRecoverAt: until,
+		},
+		ModelStates: map[string]*ModelState{
+			"grok-4.5-build-free": {
+				Status:         StatusError,
+				Unavailable:    true,
+				StatusMessage:  "packet filter matched: [运营商到CPA]xai响应码429冷却24h",
+				NextRetryAfter: until,
+				Quota: QuotaState{
+					Exceeded:      true,
+					Reason:        "quota",
+					NextRecoverAt: until,
+				},
+			},
+			"*": {
+				Status:         StatusError,
+				Unavailable:    true,
+				StatusMessage:  "packet filter matched: [运营商到CPA]xai响应码429冷却24h",
+				NextRetryAfter: until,
+				Quota: QuotaState{
+					Exceeded:      true,
+					Reason:        "quota",
+					NextRecoverAt: until,
+				},
+			},
+		},
+	}
+	if _, err := m.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// 模拟模型热重载后的 reconcile：不应清掉未到期冷却
+	m.ReconcileRegistryModelStates(context.Background(), auth.ID)
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatal("auth missing after reconcile")
+	}
+	if updated.Status != StatusError {
+		t.Fatalf("status=%s want error", updated.Status)
+	}
+	if !updated.NextRetryAfter.After(now.Add(23 * time.Hour)) {
+		t.Fatalf("top-level cooldown wiped: %v", updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.NextRetryAfter.After(now.Add(23*time.Hour)) {
+		t.Fatalf("model cooldown wiped: %+v", state)
+	}
+	star := updated.ModelStates["*"]
+	if star == nil || !star.NextRetryAfter.After(now.Add(23*time.Hour)) {
+		t.Fatalf("star cooldown wiped: %+v", star)
+	}
+}

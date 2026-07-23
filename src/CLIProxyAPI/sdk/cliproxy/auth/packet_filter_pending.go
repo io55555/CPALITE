@@ -55,7 +55,8 @@ func registerPendingPacketCooldown(authID, authIndex, provider, model, action st
 		pendingPacketKey("index", item.authIndex),
 	}
 	for _, identity := range item.idents {
-		keys = append(keys, pendingPacketKey("ident", identity))
+		// id/ident 双写，兼容按文件名/邮箱/账号解析
+		keys = append(keys, pendingPacketKey("id", identity), pendingPacketKey("ident", identity))
 	}
 	for _, key := range keys {
 		if key == "" || strings.HasSuffix(key, "|") {
@@ -89,10 +90,14 @@ func consumePendingPacketCooldown(auth *Auth) (pendingPacketCooldown, bool) {
 	candidates := []string{
 		pendingPacketKey("id", auth.ID),
 		pendingPacketKey("id", auth.FileName),
+		pendingPacketKey("id", auth.Label),
 		pendingPacketKey("index", auth.Index),
+		pendingPacketKey("ident", auth.ID),
+		pendingPacketKey("ident", auth.FileName),
+		pendingPacketKey("ident", auth.Label),
 	}
 	if _, account := auth.AccountInfo(); account != "" {
-		candidates = append(candidates, pendingPacketKey("ident", account))
+		candidates = append(candidates, pendingPacketKey("id", account), pendingPacketKey("ident", account))
 	}
 	now := time.Now()
 	for _, key := range candidates {

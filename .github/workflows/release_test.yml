@@ -112,3 +112,22 @@ jobs:
             ${{ env.BACKEND_DIR }}/dist/*.tar.gz
             ${{ env.BACKEND_DIR }}/dist/*.zip
             ${{ env.BACKEND_DIR }}/dist/checksums.txt
+
+      - name: Keep only latest 10 releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 保留最近 10 个 release（按创建时间倒序），删除更旧的 release 及其 tag
+          mapfile -t releases < <(gh release list --limit 200 --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[].tagName')
+          total="${#releases[@]}"
+          echo "Found ${total} releases"
+          if (( total <= 10 )); then
+            echo "No pruning needed (limit 10)"
+            exit 0
+          fi
+          for (( i=10; i<total; i++ )); do
+            tag="${releases[$i]}"
+            echo "Deleting old release: ${tag}"
+            gh release delete "${tag}" --yes --cleanup-tag || true
+          done
