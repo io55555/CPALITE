@@ -284,6 +284,92 @@ func TestManagerMarkResult_RetryAfterAppliesWhenStatusMissing(t *testing.T) {
 	}
 }
 
+func TestManagerMarkResult_Config429CooldownForCodexAndXAI(t *testing.T) {
+	now := time.Now()
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{
+		CodexQuotaCooldownBaseSeconds: 86400,
+		CodexQuotaCooldownMaxSeconds:  604800,
+		XAIQuotaCooldownBaseSeconds:   86400,
+		XAIQuotaCooldownMaxSeconds:    86400,
+	})
+
+	cases := []struct {
+		authID   string
+		provider string
+		model    string
+	}{
+		{authID: "codex-auth", provider: "codex", model: "gpt-5-codex"},
+		{authID: "xai-auth", provider: "xai", model: "grok-4.5-build-free"},
+	}
+	for _, tc := range cases {
+		if _, err := m.Register(context.Background(), &Auth{
+			ID:       tc.authID,
+			Provider: tc.provider,
+			Status:   StatusActive,
+		}); err != nil {
+			t.Fatalf("register %s: %v", tc.authID, err)
+		}
+		m.MarkResult(context.Background(), Result{
+			AuthID:   tc.authID,
+			Provider: tc.provider,
+			Model:    tc.model,
+			Success:  false,
+			Error:    &Error{Message: "429 quota", HTTPStatus: http.StatusTooManyRequests},
+		})
+
+		updated, ok := m.GetByID(tc.authID)
+		if !ok || updated == nil {
+			t.Fatalf("expected auth %s to be present", tc.authID)
+		}
+		state := updated.ModelStates[tc.model]
+		if state == nil || state.NextRetryAfter.Before(now.Add(23*time.Hour)) {
+			t.Fatalf("%s model cooldown = %+v, want config 24h", tc.authID, state)
+		}
+	}
+}
+
+func TestManagerMarkResult_PacketFilterCooldownOverridesConfig429(t *testing.T) {
+	now := time.Now()
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{
+		XAIQuotaCooldownBaseSeconds: 86400,
+		XAIQuotaCooldownMaxSeconds:  86400,
+	})
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "xai-auth",
+		Index:    "110968f2f64ea783",
+		Provider: "xai",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	ctx := contextWithPacketFilterActionState(context.Background())
+	PublishPacketFilterAction(ctx, "cooldown", "api_key", 7200, "[运营商到CPA]xai响应码429冷却2h", "110968f2f64ea783")
+	m.MarkResult(ctx, Result{
+		AuthID:   "xai-auth",
+		Provider: "xai",
+		Model:    "grok-4.5-build-free",
+		Success:  false,
+		Error:    &Error{Message: "429 quota", HTTPStatus: http.StatusTooManyRequests},
+	})
+
+	updated, ok := m.GetByID("xai-auth")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	lower := now.Add(110 * time.Minute)
+	upper := now.Add(130 * time.Minute)
+	if updated.NextRetryAfter.Before(lower) || updated.NextRetryAfter.After(upper) {
+		t.Fatalf("auth cooldown = %v, want packet-rule 2h overriding config 24h", updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || state.NextRetryAfter.Before(lower) || state.NextRetryAfter.After(upper) {
+		t.Fatalf("model cooldown = %+v, want packet-rule 2h overriding config 24h", state)
+	}
+}
+
 func TestManagerMarkResult_AppliesPacketFilterCooldownFromContextCarrier(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 	if _, err := m.Register(context.Background(), &Auth{

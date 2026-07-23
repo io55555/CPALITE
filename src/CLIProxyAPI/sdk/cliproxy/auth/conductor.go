@@ -3283,6 +3283,7 @@ func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID,
 			state.NextRetryAfter = next
 			state.UpdatedAt = now
 		}
+		log.Infof("auth packet filter cooldown applied: auth=%s index=%s provider=%s model=%s seconds=%d until=%s rule=%s", strings.TrimSpace(auth.ID), strings.TrimSpace(auth.Index), strings.TrimSpace(auth.Provider), strings.TrimSpace(model), seconds, next.UTC().Format(time.RFC3339), ruleName)
 	}
 	auth.UpdatedAt = now
 }
@@ -4107,6 +4108,9 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		return
 	}
 	statusCode := statusCodeFromResult(resultErr)
+	if statusCode == 0 && retryAfter != nil && *retryAfter > 0 {
+		statusCode = http.StatusTooManyRequests
+	}
 	switch statusCode {
 	case 401:
 		auth.StatusMessage = "unauthorized"
