@@ -1718,6 +1718,23 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 					auth.Quota = existing.Quota
 				}
 			}
+			// 仅模型级冷却时也回填顶层字段，避免 List 后 status 仍是 active 且无 model_states 可见性丢失
+			if authKeepsTopLevelCooldown(auth, now) {
+				updateAggregatedAvailability(auth, now)
+				if auth.Status == StatusActive || auth.Status == "" {
+					if existing.Status != StatusActive && existing.Status != "" {
+						auth.Status = existing.Status
+					} else {
+						auth.Status = StatusError
+					}
+				}
+				if strings.TrimSpace(auth.StatusMessage) == "" {
+					auth.StatusMessage = existing.StatusMessage
+				}
+				if auth.StatusMessage == "" {
+					auth.StatusMessage = "cooldown"
+				}
+			}
 		}
 	} else if _, removed := m.removedAuthIDs[auth.ID]; removed {
 		m.mu.Unlock()

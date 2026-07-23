@@ -182,7 +182,11 @@ func ruleForAction(rule Rule, action Action) Rule {
 	next.Replacement = action.Replacement
 	next.ReplaceLimit = action.ReplaceLimit
 	next.Target = firstNonEmptyString(action.Target, rule.Target)
-	next.CooldownSeconds = action.CooldownSeconds
+	if action.CooldownSeconds > 0 {
+		next.CooldownSeconds = action.CooldownSeconds
+	} else {
+		next.CooldownSeconds = rule.CooldownSeconds
+	}
 	return next
 }
 

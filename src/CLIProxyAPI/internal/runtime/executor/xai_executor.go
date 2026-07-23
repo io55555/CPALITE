@@ -2832,6 +2832,7 @@ func (e *XAIExecutor) applyXAIUpstreamResponsePacketActions(ctx context.Context,
 		switch action {
 		case "disable":
 			cliproxyauth.PublishPacketFilterAction(ctx, action, target, trigger.CooldownSeconds, trigger.RuleName, authIDForLog(auth))
+			applyXAIPacketFilterToManager(ctx, auth, model, action, target, trigger.CooldownSeconds, trigger.RuleName)
 			err.authFault = true
 			log.Infof("xai auth marked auth-fault by packet filter: model=%s auth=%s api_key=%s rule=%s raw_response_bytes=%d detail=%s", model, authIDForLog(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
@@ -2846,6 +2847,8 @@ func (e *XAIExecutor) applyXAIUpstreamResponsePacketActions(ctx context.Context,
 			retryAfter := time.Duration(seconds) * time.Second
 			err.retryAfter = &retryAfter
 			cliproxyauth.PublishPacketFilterAction(ctx, action, target, seconds, trigger.RuleName, authIDForLog(auth))
+			// 直接写入 Manager，避免仅依赖 MarkResult/context 时序导致冷却页空白
+			applyXAIPacketFilterToManager(ctx, auth, model, action, target, seconds, trigger.RuleName)
 			log.Infof("xai auth cooled down by packet filter: model=%s auth=%s api_key=%s seconds=%d rule=%s raw_response_bytes=%d detail=%s", model, authIDForLog(auth), util.HideAPIKey(apiKey), seconds, trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
 		}
@@ -2932,3 +2935,24 @@ func xaiStreamEventFailureStatus(eventData []byte) (int, bool) {
 	}
 	return 0, false
 }
+
+func applyXAIPacketFilterToManager(ctx context.Context, auth *cliproxyauth.Auth, model, action, target string, seconds int, ruleName string) {
+	if auth == nil {
+		return
+	}
+	idents := make([]string, 0, 4)
+	if v := strings.TrimSpace(auth.FileName); v != "" {
+		idents = append(idents, v)
+	}
+	if v := strings.TrimSpace(auth.Label); v != "" {
+		idents = append(idents, v)
+	}
+	if _, account := auth.AccountInfo(); strings.TrimSpace(account) != "" {
+		idents = append(idents, account)
+	}
+	ok := cliproxyauth.ApplyPacketFilterActionNow(ctx, auth.ID, auth.EnsureIndex(), auth.Provider, model, action, target, seconds, ruleName, idents...)
+	if !ok {
+		log.Warnf("xai packet filter action not applied to manager yet: auth=%s action=%s model=%s rule=%s", authIDForLog(auth), action, model, ruleName)
+	}
+}
+

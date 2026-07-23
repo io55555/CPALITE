@@ -1043,6 +1043,9 @@ func (s *Service) Run(ctx context.Context) error {
 		if errLoad := s.coreManager.Load(ctx); errLoad != nil {
 			log.Warnf("failed to load auth store: %v", errLoad)
 		}
+		if errRestore := s.coreManager.RestoreCooldownStates(ctx); errRestore != nil {
+			log.Warnf("failed to restore cooldown states: %v", errRestore)
+		}
 	}
 
 	if !homeEnabled {

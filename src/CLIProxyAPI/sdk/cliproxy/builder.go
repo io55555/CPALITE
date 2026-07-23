@@ -4,6 +4,7 @@
 package cliproxy
 
 import (
+	"path/filepath"
 	"fmt"
 	"strings"
 	"time"
@@ -256,6 +257,14 @@ func (b *Builder) Build() (*Service, error) {
 	coreManager.SetRoundTripperProvider(newDefaultRoundTripperProvider())
 	coreManager.SetConfig(b.cfg)
 	coreManager.SetOAuthModelAlias(b.cfg.OAuthModelAlias)
+	// 始终挂载独立冷却状态存储（.cds），避免热重载/重启丢失 xAI/Codex 冷却
+	if b.cfg != nil {
+		authDir := strings.TrimSpace(b.cfg.AuthDir)
+		if authDir != "" {
+			cdsDir := filepath.Join(authDir, ".cooldown-states")
+			coreManager.SetCooldownStateStore(coreauth.NewFileCooldownStateStoreWithAuthDir(cdsDir, authDir))
+		}
+	}
 	if b.pluginHost != nil {
 		coreManager.SetPluginScheduler(b.pluginHost)
 	}

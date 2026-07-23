@@ -2297,6 +2297,7 @@ func (e *CodexExecutor) publishPacketFilterActions(ctx context.Context, auth *cl
 		switch action {
 		case "disable":
 			cliproxyauth.PublishPacketFilterAction(ctx, action, target, trigger.CooldownSeconds, trigger.RuleName, codexAuthIDForPacketFilter(auth))
+			applyCodexPacketFilterToManager(ctx, auth, model, action, target, trigger.CooldownSeconds, trigger.RuleName)
 			log.Infof("codex auth packet filter action: action=%s target=%s model=%s auth=%s api_key=%s rule=%s raw_response_bytes=%d detail=%s", action, target, model, codexAuthIDForPacketFilter(auth), util.HideAPIKey(apiKey), trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
 		case "cooldown":
@@ -2307,8 +2308,8 @@ func (e *CodexExecutor) publishPacketFilterActions(ctx context.Context, auth *cl
 			if seconds <= 0 {
 				seconds = 300
 			}
-			// (comment normalized)
 			cliproxyauth.PublishPacketFilterAction(ctx, action, target, seconds, trigger.RuleName, codexAuthIDForPacketFilter(auth))
+			applyCodexPacketFilterToManager(ctx, auth, model, action, target, seconds, trigger.RuleName)
 			log.Infof("codex auth cooled down by packet filter: model=%s auth=%s api_key=%s seconds=%d rule=%s raw_response_bytes=%d detail=%s", model, codexAuthIDForPacketFilter(auth), util.HideAPIKey(apiKey), seconds, trigger.RuleName, len(filteredResponse), trigger.Detail)
 			return
 		}
@@ -2395,3 +2396,24 @@ func (e *CodexExecutor) resolveCodexConfig(auth *cliproxyauth.Auth) *config.Code
 	}
 	return nil
 }
+
+func applyCodexPacketFilterToManager(ctx context.Context, auth *cliproxyauth.Auth, model, action, target string, seconds int, ruleName string) {
+	if auth == nil {
+		return
+	}
+	idents := make([]string, 0, 4)
+	if v := strings.TrimSpace(auth.FileName); v != "" {
+		idents = append(idents, v)
+	}
+	if v := strings.TrimSpace(auth.Label); v != "" {
+		idents = append(idents, v)
+	}
+	if _, account := auth.AccountInfo(); strings.TrimSpace(account) != "" {
+		idents = append(idents, account)
+	}
+	ok := cliproxyauth.ApplyPacketFilterActionNow(ctx, codexAuthIDForPacketFilter(auth), auth.EnsureIndex(), auth.Provider, model, action, target, seconds, ruleName, idents...)
+	if !ok {
+		log.Warnf("codex packet filter action not applied to manager yet: auth=%s action=%s model=%s rule=%s", codexAuthIDForPacketFilter(auth), action, model, ruleName)
+	}
+}
+

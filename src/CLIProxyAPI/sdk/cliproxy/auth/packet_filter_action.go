@@ -3,7 +3,36 @@ package auth
 import (
 	"context"
 	"strings"
+	"sync"
 )
+
+// packetFilterApplier 由 API Server 注入，让 executor 在规则命中时直接改 Manager 状态
+// （不依赖 gin context / MarkResult 时序）。
+var (
+	packetFilterApplierMu sync.RWMutex
+	packetFilterApplier   func(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string, identities ...string) bool
+)
+
+// SetPacketFilterApplier registers the runtime applier used by executors.
+func SetPacketFilterApplier(fn func(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string, identities ...string) bool) {
+	packetFilterApplierMu.Lock()
+	packetFilterApplier = fn
+	packetFilterApplierMu.Unlock()
+}
+
+// ApplyPacketFilterActionNow applies a packet-filter action immediately via the registered manager.
+func ApplyPacketFilterActionNow(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string, identities ...string) bool {
+	packetFilterApplierMu.RLock()
+	fn := packetFilterApplier
+	packetFilterApplierMu.RUnlock()
+	if fn == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return fn(ctx, authID, authIndex, provider, model, action, target, seconds, ruleName, identities...)
+}
 
 type packetFilterActionState struct {
 	action  string

@@ -398,16 +398,20 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		optionState.pluginHost.SetAuthManager(authManager)
 	}
 	s.configurePacketCaptureRulesProvider()
-	// 通过 s.handlers 动态取 Manager，避免闭包持有过期指针
-	packetcapture.SetDefaultActionHandler(func(ctx context.Context, event packetcapture.ActionEvent) {
+	// 动态取 Manager：抓包 handler + executor 直调共用同一写入口
+	applyPacket := func(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string, identities ...string) bool {
 		mgr := authManager
 		if s != nil && s.handlers != nil && s.handlers.AuthManager != nil {
 			mgr = s.handlers.AuthManager
 		}
 		if mgr == nil {
-			return
+			return false
 		}
-		mgr.ApplyPacketFilterAction(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName, event.Account, event.AuthLabel, event.APIKey)
+		return mgr.ApplyPacketFilterAction(ctx, authID, authIndex, provider, model, action, target, seconds, ruleName, identities...)
+	}
+	auth.SetPacketFilterApplier(applyPacket)
+	packetcapture.SetDefaultActionHandler(func(ctx context.Context, event packetcapture.ActionEvent) {
+		_ = applyPacket(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName, event.Account, event.AuthLabel, event.APIKey)
 	})
 	// Save initial YAML snapshot
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
