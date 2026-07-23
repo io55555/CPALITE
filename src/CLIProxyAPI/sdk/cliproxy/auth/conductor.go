@@ -1682,11 +1682,21 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		auth.Failed = existing.Failed
 		auth.recentRequests = existing.recentRequests
 		if !existing.Disabled && existing.Status != StatusDisabled && !auth.Disabled && auth.Status != StatusDisabled {
-			if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
-				auth.ModelStates = existing.ModelStates
-			}
-			// (comment normalized)
 			now := time.Now()
+			if len(existing.ModelStates) > 0 {
+				if auth.ModelStates == nil {
+					auth.ModelStates = make(map[string]*ModelState, len(existing.ModelStates))
+				}
+				for model, state := range existing.ModelStates {
+					if state == nil || !state.NextRetryAfter.After(now) {
+						continue
+					}
+					cur := auth.ModelStates[model]
+					if cur == nil || !cur.NextRetryAfter.After(now) || state.NextRetryAfter.After(cur.NextRetryAfter) {
+						auth.ModelStates[model] = state.Clone()
+					}
+				}
+			}
 			if existing.NextRetryAfter.After(now) && (auth.NextRetryAfter.IsZero() || existing.NextRetryAfter.After(auth.NextRetryAfter)) {
 				auth.NextRetryAfter = existing.NextRetryAfter
 				auth.Unavailable = true
@@ -3011,8 +3021,16 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 				clearAuthStateOnSuccess(auth, now)
 			}
 		} else {
-			// (comment normalized)
+			// 失败路径：配置冷却后，再由抓包规则覆盖（规则优先）
 			packetCooldownSnap := capturePacketFilterCooldownSnapshot(auth, result.Model, now)
+			if pending, ok := consumePendingPacketCooldown(auth); ok {
+				pendingModel := strings.TrimSpace(pending.model)
+				if pendingModel == "" {
+					pendingModel = result.Model
+				}
+				forceApplyPacketFilterAction(auth, pending.action, pendingModel, pending.seconds, pending.ruleName, now)
+				packetCooldownSnap = capturePacketFilterCooldownSnapshot(auth, firstNonEmptyModel(pendingModel, result.Model), now)
+			}
 			if result.Model != "" {
 				if shouldApplyCredentialFailureStateForResult(result) {
 					disableCooling := quotaCooldownDisabledForAuth(auth)
@@ -3030,6 +3048,12 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					statusCode := statusCodeFromResult(result.Error)
 					if statusCode == 0 && result.RetryAfter != nil && *result.RetryAfter > 0 {
 						statusCode = http.StatusTooManyRequests
+					}
+					if statusCode == 0 && result.Error != nil {
+						if inferred := inferHTTPStatusFromErrorMessage(result.Error.Message); inferred > 0 {
+							statusCode = inferred
+							result.Error.HTTPStatus = inferred
+						}
 					}
 					if isProxyFailureResultError(result.Error) {
 						next := now.Add(m.proxyFailureCooldown())
@@ -3114,15 +3138,18 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					auth.UpdatedAt = now
 					updateAggregatedAvailability(auth, now)
 				}
-				// (comment normalized)
+				// 保留已生效的抓包冷却（避免配置路径缩短/清掉）
 				restorePacketFilterCooldownSnapshot(auth, result.Model, packetCooldownSnap, now)
 			} else {
-				baseCooldown, maxCooldown := m.quotaCooldownBoundsForAuth(auth)
-				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown(), baseCooldown, maxCooldown)
+				if shouldApplyCredentialFailureStateForResult(result) {
+					baseCooldown, maxCooldown := m.quotaCooldownBoundsForAuth(auth)
+					applyAuthFailureState(auth, result.Error, result.RetryAfter, now, m.proxyFailureCooldown(), baseCooldown, maxCooldown)
+				}
 				restorePacketFilterCooldownSnapshot(auth, "", packetCooldownSnap, now)
 			}
-			// (comment normalized)
+			// 抓包规则最后写入，覆盖配置项冷却秒数
 			applyPacketFilterActionState(ctx, auth, result.AuthID, result.Model, now)
+			updateAggregatedAvailability(auth, now)
 		}
 
 		applyOpenAICompatPersistedState(auth, now)
@@ -3158,6 +3185,8 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 // ApplyPacketFilterAction applies an action emitted by the packet-capture
 // history path to the matching auth record.
+// Mutates auth state directly so cooldown is visible even when MarkResult would
+// treat a failure as request-scoped-only.
 func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string, identities ...string) bool {
 	if m == nil {
 		return false
@@ -3167,71 +3196,169 @@ func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex
 	if action == "" || (target != "api_key" && target != "auth") {
 		return false
 	}
-	resolvedAuthID := strings.TrimSpace(authID)
+	model = strings.TrimSpace(model)
+	ruleName = strings.TrimSpace(ruleName)
+	if seconds <= 0 {
+		seconds = 300
+	}
+
+	resolvedAuthID := m.resolvePacketFilterAuthID(authID, authIndex, provider, identities...)
+	if resolvedAuthID == "" {
+		registerPendingPacketCooldown(authID, authIndex, provider, model, action, seconds, ruleName, identities...)
+		log.Warnf("packet filter action deferred: unresolved auth id=%q index=%q provider=%q model=%q action=%q identities=%v", authID, authIndex, provider, model, action, identities)
+		return false
+	}
+
+	now := time.Now()
+	var authSnapshot *Auth
+	saveCooldownState := false
+	m.mu.Lock()
+	auth := m.auths[resolvedAuthID]
+	if auth == nil {
+		m.mu.Unlock()
+		registerPendingPacketCooldown(authID, authIndex, provider, model, action, seconds, ruleName, identities...)
+		log.Warnf("packet filter action deferred: auth disappeared id=%q", resolvedAuthID)
+		return false
+	}
+	before := auth.Clone()
+	auth.recordRecentRequest(now, false)
+	auth.Failed++
+	forceApplyPacketFilterAction(auth, action, model, seconds, ruleName, now)
+	updateAggregatedAvailability(auth, now)
+	auth.UpdatedAt = now
+	authSnapshot = auth.Clone()
+	saveCooldownState = cooldownStateChanged(before, authSnapshot, now)
+	m.mu.Unlock()
+
+	clearPendingPacketCooldownForAuth(authSnapshot)
+	m.queuePersist(ctx, authSnapshot)
+	if saveCooldownState {
+		_ = m.saveCooldownStates(ctx)
+	}
+	if m.scheduler != nil {
+		m.scheduler.upsertAuth(authSnapshot)
+	}
+	if action == "cooldown" && model != "" && model != "*" {
+		registry.GetGlobalRegistry().SetModelQuotaExceeded(resolvedAuthID, model)
+		registry.GetGlobalRegistry().SuspendClientModel(resolvedAuthID, model, "quota")
+	}
+	log.Infof("packet filter action applied: auth=%s index=%s provider=%s model=%s action=%s seconds=%d rule=%s until=%s",
+		resolvedAuthID, strings.TrimSpace(authSnapshot.Index), strings.TrimSpace(authSnapshot.Provider), model, action, seconds, ruleName, authSnapshot.NextRetryAfter.UTC().Format(time.RFC3339))
+	return true
+}
+
+func (m *Manager) resolvePacketFilterAuthID(authID, authIndex, provider string, identities ...string) string {
+	if m == nil {
+		return ""
+	}
+	authID = strings.TrimSpace(authID)
 	authIndex = strings.TrimSpace(authIndex)
+	provider = strings.TrimSpace(provider)
+
 	m.mu.RLock()
-	if resolvedAuthID != "" {
-		if auth, ok := m.auths[resolvedAuthID]; !ok || auth == nil {
-			resolvedAuthID = ""
+	defer m.mu.RUnlock()
+
+	if authID != "" {
+		if auth, ok := m.auths[authID]; ok && auth != nil {
+			return auth.ID
 		}
-	}
-	if resolvedAuthID == "" && authIndex != "" {
-		for _, auth := range m.auths {
-			if auth != nil && strings.TrimSpace(auth.Index) == authIndex {
-				resolvedAuthID = auth.ID
-				break
-			}
-		}
-	}
-	if resolvedAuthID == "" && len(identities) > 0 {
-		provider = strings.TrimSpace(provider)
+		base := filepath.Base(authID)
 		for _, auth := range m.auths {
 			if auth == nil {
 				continue
 			}
-			if provider != "" && !strings.EqualFold(strings.TrimSpace(auth.Provider), provider) {
+			if strings.EqualFold(strings.TrimSpace(auth.ID), authID) ||
+				strings.EqualFold(strings.TrimSpace(auth.FileName), authID) ||
+				strings.EqualFold(filepath.Base(strings.TrimSpace(auth.FileName)), base) ||
+				strings.EqualFold(filepath.Base(strings.TrimSpace(auth.ID)), base) {
+				return auth.ID
+			}
+		}
+	}
+	if authIndex != "" {
+		for _, auth := range m.auths {
+			if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Index), authIndex) {
+				return auth.ID
+			}
+		}
+	}
+	for _, requireProvider := range []bool{true, false} {
+		for _, auth := range m.auths {
+			if auth == nil {
+				continue
+			}
+			if requireProvider && provider != "" && !strings.EqualFold(strings.TrimSpace(auth.Provider), provider) {
 				continue
 			}
 			if packetFilterIdentityMatchesAuth(auth, identities...) {
-				resolvedAuthID = auth.ID
-				break
+				return auth.ID
 			}
-		}
-		// Retry without provider filter when provider alias mismatches (e.g. xai vs xai-auth-file).
-		if resolvedAuthID == "" {
-			for _, auth := range m.auths {
-				if auth == nil {
-					continue
-				}
-				if packetFilterIdentityMatchesAuth(auth, identities...) {
-					resolvedAuthID = auth.ID
-					break
+			hay := strings.ToLower(strings.TrimSpace(auth.ID) + " " + strings.TrimSpace(auth.FileName) + " " + strings.TrimSpace(auth.Label))
+			for _, identity := range identities {
+				norm := normalizePacketFilterIdentity(identity)
+				if norm != "" && strings.Contains(hay, norm) {
+					return auth.ID
 				}
 			}
 		}
 	}
-	m.mu.RUnlock()
-	if resolvedAuthID == "" {
-		log.Warnf("packet filter action skipped: unresolved auth id=%q index=%q provider=%q model=%q action=%q identities=%v", authID, authIndex, provider, model, action, identities)
-		return false
-	}
-
-	actionCtx := contextWithPacketFilterActionState(ctx)
-	PublishPacketFilterAction(actionCtx, action, target, seconds, ruleName, resolvedAuthID)
-	m.MarkResult(actionCtx, Result{
-		AuthID:   resolvedAuthID,
-		Provider: strings.TrimSpace(provider),
-		Model:    strings.TrimSpace(model),
-		Success:  false,
-		Error: &Error{
-			Code:       requestScopedErrorCode,
-			Message:    "packet filter matched",
-			Retryable:  true,
-			HTTPStatus: http.StatusTooManyRequests,
-		},
-	})
-	return true
+	return ""
 }
+
+func forceApplyPacketFilterAction(auth *Auth, action, model string, seconds int, ruleName string, now time.Time) {
+	if auth == nil {
+		return
+	}
+	message := "packet filter matched"
+	if strings.TrimSpace(ruleName) != "" {
+		message += ": " + strings.TrimSpace(ruleName)
+	}
+	switch strings.TrimSpace(action) {
+	case "disable":
+		auth.Disabled = true
+		auth.Unavailable = true
+		auth.Status = StatusDisabled
+		auth.StatusMessage = message
+		auth.NextRetryAfter = time.Time{}
+		if model != "" && model != "*" {
+			state := ensureModelState(auth, model)
+			state.Status = StatusDisabled
+			state.Unavailable = true
+			state.StatusMessage = message
+			state.NextRetryAfter = time.Time{}
+			state.UpdatedAt = now
+		}
+	default:
+		if seconds <= 0 {
+			seconds = 300
+		}
+		next := now.Add(time.Duration(seconds) * time.Second)
+		auth.Unavailable = true
+		auth.Status = StatusError
+		auth.StatusMessage = message
+		auth.NextRetryAfter = next
+		auth.Quota.Exceeded = true
+		auth.Quota.Reason = "quota"
+		auth.Quota.NextRecoverAt = next
+		if model == "" {
+			model = "*"
+		}
+		state := ensureModelState(auth, model)
+		state.Status = StatusError
+		state.Unavailable = true
+		state.StatusMessage = message
+		state.NextRetryAfter = next
+		state.Quota = QuotaState{
+			Exceeded:      true,
+			Reason:        "quota",
+			NextRecoverAt: next,
+			BackoffLevel:  state.Quota.BackoffLevel,
+		}
+		state.UpdatedAt = now
+	}
+	auth.UpdatedAt = now
+}
+
 
 func packetFilterIdentityMatchesAuth(auth *Auth, identities ...string) bool {
 	if auth == nil {
@@ -3289,54 +3416,21 @@ func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID,
 			return
 		}
 	}
-	message := "packet filter matched"
-	if ruleName != "" {
-		message += ": " + ruleName
+	// 统一走 forceApply：保证 model 级状态与 .cds 持久化字段齐全
+	forceApplyPacketFilterAction(auth, action, model, seconds, ruleName, now)
+	if action == "cooldown" {
+		log.Infof("auth packet filter cooldown applied: auth=%s index=%s provider=%s model=%s seconds=%d until=%s rule=%s",
+			strings.TrimSpace(auth.ID), strings.TrimSpace(auth.Index), strings.TrimSpace(auth.Provider), strings.TrimSpace(model), seconds, auth.NextRetryAfter.UTC().Format(time.RFC3339), ruleName)
 	}
-	switch action {
-	case "disable":
-		auth.Disabled = true
-		auth.Unavailable = true
-		auth.Status = StatusDisabled
-		auth.StatusMessage = message
-		auth.NextRetryAfter = time.Time{}
-		if model != "" {
-			state := ensureModelState(auth, model)
-			state.Status = StatusDisabled
-			state.Unavailable = true
-			state.StatusMessage = message
-			state.NextRetryAfter = time.Time{}
-			state.UpdatedAt = now
+}
+
+func firstNonEmptyModel(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
 		}
-	case "cooldown":
-		if seconds <= 0 {
-			seconds = 300
-		}
-		next := now.Add(time.Duration(seconds) * time.Second)
-		auth.Unavailable = true
-		auth.Status = StatusError
-		auth.StatusMessage = message
-		auth.NextRetryAfter = next
-		auth.Quota.Exceeded = true
-		auth.Quota.Reason = "quota"
-		auth.Quota.NextRecoverAt = next
-		if model != "" {
-			state := ensureModelState(auth, model)
-			state.Status = StatusError
-			state.Unavailable = true
-			state.StatusMessage = message
-			state.NextRetryAfter = next
-			state.Quota = QuotaState{
-				Exceeded:      true,
-				Reason:        "quota",
-				NextRecoverAt: next,
-				BackoffLevel:  state.Quota.BackoffLevel,
-			}
-			state.UpdatedAt = now
-		}
-		log.Infof("auth packet filter cooldown applied: auth=%s index=%s provider=%s model=%s seconds=%d until=%s rule=%s", strings.TrimSpace(auth.ID), strings.TrimSpace(auth.Index), strings.TrimSpace(auth.Provider), strings.TrimSpace(model), seconds, next.UTC().Format(time.RFC3339), ruleName)
 	}
-	auth.UpdatedAt = now
+	return "*"
 }
 
 // (comment normalized)
@@ -3577,7 +3671,8 @@ func updateAggregatedAvailability(auth *Auth, now time.Time) {
 		return
 	}
 	auth.Unavailable = allUnavailable
-	if allUnavailable {
+	// 顶层 next_retry_after 取最早的模型冷却；非“全部模型不可用”时仍暴露倒计时供管理页展示
+	if !earliestRetry.IsZero() {
 		auth.NextRetryAfter = earliestRetry
 	} else {
 		auth.NextRetryAfter = time.Time{}
