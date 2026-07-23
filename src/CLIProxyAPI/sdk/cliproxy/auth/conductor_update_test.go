@@ -319,6 +319,43 @@ func TestManagerApplyPacketFilterAction_ResolvesAuthByIndex(t *testing.T) {
 	}
 }
 
+func TestManagerApplyPacketFilterAction_ResolvesAuthByAccountIdentity(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "xai-20260722-002254-oxjit-fonh2u@icloud.com.json",
+		Index:    "110968f2f64ea783",
+		FileName: "xai-20260722-002254-oxjit-fonh2u@icloud.com.json",
+		Label:    "oxjit+fonh2u@icloud.com",
+		Provider: "xai",
+		Status:   StatusActive,
+		Attributes: map[string]string{
+			"auth_kind": "oauth",
+		},
+		Metadata: map[string]any{
+			"email": "oxjit+fonh2u@icloud.com",
+		},
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	ok := m.ApplyPacketFilterAction(context.Background(), "", "", "xai", "grok-4.5-build-free", "cooldown", "api_key", 86400, "xai 429 cooldown", "oxjit+fonh2u@icloud.com")
+	if !ok {
+		t.Fatal("expected packet filter action to resolve by account email")
+	}
+
+	updated, ok := m.GetByID("xai-20260722-002254-oxjit-fonh2u@icloud.com.json")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown, got unavailable=%v next=%v", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown, got %+v", state)
+	}
+}
+
 func TestManager_Update_DisabledExistingDoesNotInheritModelStates(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 

@@ -241,6 +241,80 @@ func TestCaptureFromUsageRecordCooldownActionUpdatesAuthManager(t *testing.T) {
 	}
 }
 
+func TestApplyRulesCooldownActionResolvesAuthByAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	if err := InitDefaultInLogDir(t.TempDir()); err != nil {
+		t.Fatalf("InitDefaultInLogDir: %v", err)
+	}
+	defer CloseDefault()
+	if err := DefaultStore().SetEnabled(context.Background(), true); err != nil {
+		t.Fatalf("SetEnabled: %v", err)
+	}
+
+	previousRulesProvider := defaultRulesProvider
+	SetDefaultRulesProvider(func(context.Context) ([]Rule, error) {
+		return []Rule{{
+			ID:              "rule-xai-auth-file-429",
+			Name:            "[运营商到CPA]xai响应码429冷却24h",
+			Enabled:         true,
+			RecordHistory:   true,
+			Provider:        "xai-auth-file",
+			Packet:          "upstream_response",
+			Part:            "status",
+			Operator:        "num_eq",
+			ValueNumber:     429,
+			Action:          "cooldown",
+			Target:          "api_key",
+			CooldownSeconds: 86400,
+		}}, nil
+	})
+	defer SetDefaultRulesProvider(previousRulesProvider)
+
+	manager := cliproxyauth.NewManager(nil, nil, nil)
+	registered, err := manager.Register(context.Background(), &cliproxyauth.Auth{
+		ID:       "xai-20260722-002254-oxjit-fonh2u@icloud.com.json",
+		Provider: "xai",
+		FileName: "xai-20260722-002254-oxjit-fonh2u@icloud.com.json",
+		Label:    "oxjit+fonh2u@icloud.com",
+		Status:   cliproxyauth.StatusActive,
+		Attributes: map[string]string{
+			"auth_kind": "oauth",
+		},
+		Metadata: map[string]any{
+			"email": "oxjit+fonh2u@icloud.com",
+		},
+	})
+	if err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+	SetDefaultActionHandler(func(ctx context.Context, event ActionEvent) {
+		manager.ApplyPacketFilterAction(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName, event.Account, event.AuthLabel, event.APIKey)
+	})
+	defer SetDefaultActionHandler(nil)
+
+	_, _, triggers := ApplyRules(context.Background(), Record{
+		Provider:  "xai",
+		Source:    "xai-auth-file",
+		Model:     "grok-4.5-build-free",
+		AuthLabel: "oxjit+fonh2u@icloud.com",
+	}, "upstream_response", "HTTP/2 429 Too Many Requests\nContent-Type: application/json\n\n{}")
+	if len(triggers) != 1 {
+		t.Fatalf("triggers len = %d, want 1", len(triggers))
+	}
+
+	updated, ok := manager.GetByID(registered.ID)
+	if !ok || updated == nil {
+		t.Fatal("expected auth to remain registered")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("auth cooldown = unavailable:%v next:%v, want about 24h", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("model cooldown = %+v, want about 24h", state)
+	}
+}
+
 func TestRulesWildcardRandomAndOriginalReplacement(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "packet_capture.db"))
 	if err != nil {

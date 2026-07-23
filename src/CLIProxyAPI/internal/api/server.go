@@ -402,7 +402,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		if authManager == nil {
 			return
 		}
-		authManager.ApplyPacketFilterAction(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName)
+		authManager.ApplyPacketFilterAction(ctx, event.AuthID, event.AuthIndex, event.Provider, event.Model, event.Action, event.Target, event.CooldownSeconds, event.RuleName, event.Account, event.AuthLabel, event.APIKey)
 	})
 	// Save initial YAML snapshot
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)

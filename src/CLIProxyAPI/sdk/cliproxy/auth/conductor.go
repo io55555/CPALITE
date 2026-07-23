@@ -3126,7 +3126,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 // ApplyPacketFilterAction applies an action emitted by the packet-capture
 // history path to the matching auth record.
-func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string) bool {
+func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex, provider, model, action, target string, seconds int, ruleName string, identities ...string) bool {
 	if m == nil {
 		return false
 	}
@@ -3146,6 +3146,21 @@ func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex
 	if resolvedAuthID == "" && authIndex != "" {
 		for _, auth := range m.auths {
 			if auth != nil && strings.TrimSpace(auth.Index) == authIndex {
+				resolvedAuthID = auth.ID
+				break
+			}
+		}
+	}
+	if resolvedAuthID == "" && len(identities) > 0 {
+		provider = strings.TrimSpace(provider)
+		for _, auth := range m.auths {
+			if auth == nil {
+				continue
+			}
+			if provider != "" && !strings.EqualFold(strings.TrimSpace(auth.Provider), provider) {
+				continue
+			}
+			if packetFilterIdentityMatchesAuth(auth, identities...) {
 				resolvedAuthID = auth.ID
 				break
 			}
@@ -3171,6 +3186,48 @@ func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex
 		},
 	})
 	return true
+}
+
+func packetFilterIdentityMatchesAuth(auth *Auth, identities ...string) bool {
+	if auth == nil {
+		return false
+	}
+	candidates := []string{
+		auth.ID,
+		auth.Index,
+		auth.FileName,
+		auth.Label,
+	}
+	if kind, account := auth.AccountInfo(); account != "" {
+		candidates = append(candidates, account)
+		if strings.EqualFold(kind, AuthKindAPIKey) {
+			candidates = append(candidates, strings.TrimPrefix(account, "Bearer "))
+		}
+	}
+	for _, identity := range identities {
+		normalizedIdentity := normalizePacketFilterIdentity(identity)
+		if normalizedIdentity == "" {
+			continue
+		}
+		for _, candidate := range candidates {
+			if normalizePacketFilterIdentity(candidate) == normalizedIdentity {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizePacketFilterIdentity(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(value, " ("); idx > 0 && strings.HasSuffix(value, ")") {
+		value = strings.TrimSpace(value[:idx])
+	}
+	value = strings.TrimPrefix(value, "Bearer ")
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID, model string, now time.Time) {

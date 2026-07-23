@@ -146,6 +146,7 @@ type TriggerRecord struct {
 type ActionEvent struct {
 	Record          Record
 	Trigger         TriggerRecord
+	Account         string
 	AuthID          string
 	AuthLabel       string
 	AuthType        string

@@ -238,6 +238,7 @@ func publishActionEvents(ctx context.Context, rec Record, triggers []TriggerReco
 		handler(ctx, ActionEvent{
 			Record:          rec,
 			Trigger:         trigger,
+			Account:         strings.TrimSpace(firstNonEmptyString(trigger.Account, rec.AuthLabel, rec.APIKey)),
 			AuthID:          strings.TrimSpace(firstNonEmptyString(trigger.AuthID, rec.AuthID)),
 			AuthLabel:       strings.TrimSpace(firstNonEmptyString(trigger.AuthLabel, rec.AuthLabel)),
 			AuthType:        strings.TrimSpace(firstNonEmptyString(trigger.AuthType, rec.AuthType)),

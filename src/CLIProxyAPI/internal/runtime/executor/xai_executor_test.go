@@ -21,6 +21,7 @@ import (
 	internalcache "github.com/router-for-me/CLIProxyAPI/v7/internal/cache"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/packetcapture"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/translator"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -280,6 +281,94 @@ func TestXAIExecutorPacketFilterCooldownUsesRuleSeconds(t *testing.T) {
 	}
 	if len(triggers) != 1 || triggers[0].Action != "cooldown" || triggers[0].CooldownSeconds != 86400 {
 		t.Fatalf("triggers = %+v, want one 86400s cooldown", triggers)
+	}
+}
+
+func TestXAIManagerPacketFilter429CooldownUpdatesAuthState(t *testing.T) {
+	dir := t.TempDir()
+	if err := packetcapture.InitDefaultInLogDir(dir); err != nil {
+		t.Fatalf("InitDefaultInLogDir: %v", err)
+	}
+	t.Cleanup(func() { _ = packetcapture.CloseDefault() })
+	store := packetcapture.DefaultStore()
+	if store == nil {
+		t.Fatal("expected packet capture store")
+	}
+	if _, err := store.UpsertRule(context.Background(), packetcapture.Rule{
+		Name:            "[运营商到CPA]xai响应码429冷却24h",
+		Enabled:         true,
+		RecordHistory:   true,
+		Priority:        100,
+		Provider:        "xai-auth-file",
+		Packet:          "upstream_response",
+		Part:            "status",
+		Operator:        "num_eq",
+		ValueNumber:     429,
+		Action:          "cooldown",
+		Target:          "api_key",
+		CooldownSeconds: 86400,
+	}); err != nil {
+		t.Fatalf("UpsertRule: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code":"subscription:free-usage-exhausted","error":"You've used all the included free usage for model grok-4.5-build-free for now."}`))
+	}))
+	defer server.Close()
+
+	const authID = "xai-20260722-002254-oxjit-fonh2u@icloud.com.json"
+	const model = "grok-4.5-build-free"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(authID, "xai", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { reg.UnregisterClient(authID) })
+
+	manager := cliproxyauth.NewManager(nil, nil, nil)
+	manager.SetConfig(&config.Config{
+		XAIQuotaCooldownBaseSeconds: 86400,
+		XAIQuotaCooldownMaxSeconds:  86400,
+	})
+	manager.RegisterExecutor(NewXAIExecutor(&config.Config{
+		XAIQuotaCooldownBaseSeconds: 86400,
+		XAIQuotaCooldownMaxSeconds:  86400,
+	}))
+	if _, err := manager.Register(context.Background(), &cliproxyauth.Auth{
+		ID:       authID,
+		FileName: authID,
+		Label:    "oxjit+fonh2u@icloud.com",
+		Provider: "xai",
+		Status:   cliproxyauth.StatusActive,
+		Attributes: map[string]string{
+			"base_url":  server.URL,
+			"auth_kind": "oauth",
+			"path":      ".cli-proxy-api/" + authID,
+		},
+		Metadata: map[string]any{
+			"access_token": "xai-token",
+			"email":        "oxjit+fonh2u@icloud.com",
+		},
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	_, err := manager.Execute(context.Background(), []string{"xai"}, cliproxyexecutor.Request{
+		Model:   model,
+		Payload: []byte(`{"model":"grok-4.5-build-free","input":"hello"}`),
+	}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse})
+	if err == nil {
+		t.Fatal("expected 429 error")
+	}
+
+	updated, ok := manager.GetByID(authID)
+	if !ok || updated == nil {
+		t.Fatal("expected auth to remain registered")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("auth cooldown = unavailable:%v next:%v status:%s message:%q", updated.Unavailable, updated.NextRetryAfter, updated.Status, updated.StatusMessage)
+	}
+	state := updated.ModelStates[model]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("model cooldown = %+v, want about 24h", state)
 	}
 }
 
