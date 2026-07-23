@@ -46,6 +46,8 @@ func InitDefaultInLogDir(logDir string) error {
 	previous := defaultService
 	defaultService = &Service{store: store}
 	defaultMu.Unlock()
+	// 默认在 packet_capture.db 旁写冷却审计日志（可由配置关闭）
+	SetCooldownAuditLog(filepath.Join(logDir, "cooldown-audit.log"), true)
 	if previous != nil && previous.store != nil {
 		_ = previous.store.Close()
 	}

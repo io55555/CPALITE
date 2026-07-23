@@ -576,3 +576,9 @@ nonstream-keepalive-interval: 0
 #       params: # JSON paths (gjson/sjson syntax) to remove from the payload
 #         - "generationConfig.thinkingConfig.thinkingBudget"
 #         - "generationConfig.responseJsonSchema"
+
+# ??????????packet_capture.db ??? cooldown-audit.log?
+# packet-capture:
+#   # ?????false ????????
+#   cooldown-log: true
+#   filter-rules: []

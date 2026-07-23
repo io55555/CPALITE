@@ -298,10 +298,16 @@ func defaultPluginInstanceConfigNode() *yaml.Node {
 type PacketCaptureConfig struct {
 	FilterRules    []PacketFilterRule `yaml:"filter-rules" json:"filter-rules"`
 	CLIDetailedLog *bool              `yaml:"cli-detailed-log,omitempty" json:"cli-detailed-log,omitempty"`
+	// CooldownLog 在 packet_capture.db 同目录写 cooldown-audit.log；nil/缺省=开启，false=关闭
+	CooldownLog *bool `yaml:"cooldown-log,omitempty" json:"cooldown-log,omitempty"`
 }
 
 func (c PacketCaptureConfig) CLIDetailedLogEnabled() bool {
 	return c.CLIDetailedLog == nil || *c.CLIDetailedLog
+}
+
+func (c PacketCaptureConfig) CooldownLogEnabled() bool {
+	return c.CooldownLog == nil || *c.CooldownLog
 }
 
 type PacketFilterRule struct {

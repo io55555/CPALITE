@@ -955,3 +955,144 @@ func TestManagerReconcileRegistryModelStates_PreservesActivePacketCooldown(t *te
 		t.Fatalf("star cooldown wiped: %+v", star)
 	}
 }
+
+// TestManagerMarkResult_SurvivesOpenAICompatWipe reproduces the VPS bug:
+// ApplyExternalState/openai_compat clears non-compat auths after packet cooldown is written.
+func TestManagerMarkResult_SurvivesOpenAICompatWipe(t *testing.T) {
+	prev := ApplyExternalState
+	t.Cleanup(func() { ApplyExternalState = prev })
+	// Simulate the OLD broken ApplyToAuth wipe for any auth without compat attrs.
+	ApplyExternalState = func(auth *Auth, _ time.Time) {
+		if auth == nil {
+			return
+		}
+		if auth.Attributes != nil {
+			if strings.TrimSpace(auth.Attributes["compat_name"]) != "" && strings.TrimSpace(auth.Attributes["api_key"]) != "" {
+				return
+			}
+			if strings.TrimSpace(auth.Attributes["provider_key"]) != "" && strings.TrimSpace(auth.Attributes["api_key"]) != "" {
+				return
+			}
+		}
+		auth.Unavailable = false
+		auth.NextRetryAfter = time.Time{}
+		auth.Quota = QuotaState{}
+		auth.Status = StatusActive
+		auth.StatusMessage = ""
+		for _, state := range auth.ModelStates {
+			if state == nil {
+				continue
+			}
+			state.Unavailable = false
+			state.NextRetryAfter = time.Time{}
+			state.Quota = QuotaState{}
+			state.Status = StatusActive
+			state.StatusMessage = ""
+		}
+	}
+
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{
+		XAIQuotaCooldownBaseSeconds: 86400,
+		XAIQuotaCooldownMaxSeconds:  86400,
+	})
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json",
+		Provider: "xai",
+		FileName: "xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json",
+		Label:    "h.tt.p.s.a.p.p@googlemail.com",
+		Status:   StatusActive,
+		Attributes: map[string]string{
+			"path":   ".cli-proxy-api/xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json",
+			"source": "file",
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	ginCtx := packetFilterTestGin{values: map[string]any{
+		packetFilterActionContextKey:          "cooldown",
+		packetFilterTargetContextKey:          "api_key",
+		packetFilterAuthIDContextKey:          "xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json",
+		packetFilterRuleContextKey:            "[????CPA]xai???429??24h",
+		packetFilterCooldownSecondsContextKey: 86400,
+	}}
+	ctx := context.WithValue(context.Background(), "gin", ginCtx)
+	m.MarkResult(ctx, Result{
+		AuthID:   "xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json",
+		Provider: "xai",
+		Model:    "grok-4.5-build-free",
+		Success:  false,
+		Error:    &Error{Code: "upstream", Message: "HTTP 429", HTTPStatus: http.StatusTooManyRequests},
+	})
+
+	updated, ok := m.GetByID("xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json")
+	if !ok || updated == nil {
+		t.Fatal("auth missing")
+	}
+	if updated.Status == StatusActive && updated.NextRetryAfter.IsZero() {
+		t.Fatalf("cooldown wiped by external state: status=%s unavailable=%v next=%v msg=%q", updated.Status, updated.Unavailable, updated.NextRetryAfter, updated.StatusMessage)
+	}
+	if !updated.NextRetryAfter.After(time.Now().Add(23 * time.Hour)) {
+		t.Fatalf("expected ~24h cooldown, next=%v status=%s msg=%q", updated.NextRetryAfter, updated.Status, updated.StatusMessage)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.NextRetryAfter.After(time.Now().Add(23*time.Hour)) {
+		t.Fatalf("model cooldown missing: %+v", state)
+	}
+}
+
+func TestManagerUpdate_SurvivesOpenAICompatWipe(t *testing.T) {
+	prev := ApplyExternalState
+	t.Cleanup(func() { ApplyExternalState = prev })
+	ApplyExternalState = func(auth *Auth, _ time.Time) {
+		if auth == nil {
+			return
+		}
+		auth.Unavailable = false
+		auth.NextRetryAfter = time.Time{}
+		auth.Quota = QuotaState{}
+		auth.Status = StatusActive
+		auth.StatusMessage = ""
+		auth.ModelStates = nil
+	}
+
+	m := NewManager(nil, nil, nil)
+	until := time.Now().Add(24 * time.Hour)
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:             "xai-file.json",
+		Provider:       "xai",
+		Status:         StatusError,
+		Unavailable:    true,
+		StatusMessage:  "packet filter matched: rule",
+		NextRetryAfter: until,
+		Quota:          QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: until},
+		ModelStates: map[string]*ModelState{
+			"grok-4": {
+				Status:         StatusError,
+				Unavailable:    true,
+				StatusMessage:  "packet filter matched: rule",
+				NextRetryAfter: until,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Simulate file reload overwriting runtime with disk active state.
+	if _, err := m.Update(context.Background(), &Auth{
+		ID:       "xai-file.json",
+		Provider: "xai",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	updated, ok := m.GetByID("xai-file.json")
+	if !ok || updated == nil {
+		t.Fatal("auth missing")
+	}
+	if !updated.NextRetryAfter.After(time.Now().Add(23 * time.Hour)) {
+		t.Fatalf("update path wiped cooldown: status=%s next=%v", updated.Status, updated.NextRetryAfter)
+	}
+}

@@ -439,6 +439,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		if err := packetcapture.InitDefaultInLogDir(logDir); err != nil {
 			log.WithError(err).Warn("packet capture store unavailable")
 		}
+		s.applyPacketCaptureCooldownLogConfig(cfg, logDir)
 	}
 	s.ensureOpenAICompatKeyState(cfg)
 	s.mgmt.SetUsageStore(usage.DefaultStore())
@@ -581,6 +582,20 @@ func (s *Server) homeHeartbeatMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+
+func (s *Server) applyPacketCaptureCooldownLogConfig(cfg *config.Config, logDir string) {
+	if strings.TrimSpace(logDir) == "" {
+		logDir = logging.ResolveLogDirectory(cfg)
+	}
+	enabled := true
+	if cfg != nil {
+		enabled = cfg.PacketCapture.CooldownLogEnabled()
+	}
+	path := filepath.Join(logDir, "cooldown-audit.log")
+	auth.SetCooldownAuditLog(path, enabled)
+	packetcapture.SetCooldownAuditLog(path, enabled)
 }
 
 func (s *Server) configurePacketCaptureRulesProvider() {

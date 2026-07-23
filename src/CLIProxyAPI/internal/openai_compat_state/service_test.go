@@ -129,3 +129,45 @@ func TestApplyToAuthClearsStaleRuntimeStateWithoutPersistedState(t *testing.T) {
 		t.Fatalf("model stale state not cleared: state=%+v", state)
 	}
 }
+
+func TestApplyToAuthIgnoresNonOpenAICompatAuth(t *testing.T) {
+	service, err := New(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	defer service.Close()
+
+	until := time.Now().Add(24 * time.Hour)
+	auth := &cliproxyauth.Auth{
+		ID:             "xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json",
+		Provider:       "xai",
+		Unavailable:    true,
+		Status:         cliproxyauth.StatusError,
+		StatusMessage:  "packet filter matched: [运营商到CPA]xai响应码429冷却24h",
+		NextRetryAfter: until,
+		Quota:          cliproxyauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: until},
+		Attributes: map[string]string{
+			"path":   ".cli-proxy-api/xai-20260722-003202-h.tt.p.s.a.p.p@googlemail.com.json",
+			"source": "file",
+		},
+		ModelStates: map[string]*cliproxyauth.ModelState{
+			"grok-4.5-build-free": {
+				Status:         cliproxyauth.StatusError,
+				StatusMessage:  "packet filter matched: [运营商到CPA]xai响应码429冷却24h",
+				Unavailable:    true,
+				NextRetryAfter: until,
+				Quota:          cliproxyauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: until},
+			},
+		},
+	}
+
+	service.ApplyToAuth(auth)
+
+	if !auth.Unavailable || auth.Status != cliproxyauth.StatusError || !auth.NextRetryAfter.Equal(until) {
+		t.Fatalf("xai cooldown wiped by ApplyToAuth: unavailable=%v status=%s next=%v msg=%q", auth.Unavailable, auth.Status, auth.NextRetryAfter, auth.StatusMessage)
+	}
+	state := auth.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.Unavailable || !state.NextRetryAfter.Equal(until) {
+		t.Fatalf("xai model cooldown wiped: %+v", state)
+	}
+}

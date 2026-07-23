@@ -360,8 +360,25 @@ func (s *Service) MarkSuccess(provider, apiKey, rawRequest, rawResponse string) 
 	})
 }
 
+func isOpenAICompatManagedAuth(auth *cliproxyauth.Auth) bool {
+	if auth == nil || auth.Attributes == nil {
+		return false
+	}
+	provider := strings.TrimSpace(auth.Attributes["compat_name"])
+	if provider == "" {
+		provider = strings.TrimSpace(auth.Attributes["provider_key"])
+	}
+	apiKey := strings.TrimSpace(auth.Attributes["api_key"])
+	return provider != "" && apiKey != ""
+}
+
 func (s *Service) ApplyToAuth(auth *cliproxyauth.Auth) {
 	if s == nil || auth == nil || auth.Attributes == nil {
+		return
+	}
+	// 仅处理 openai-compatibility 托管 key；xAI/Codex oauth 等认证文件绝不能走清理逻辑
+	// 旧逻辑在 Get 未命中时 clearOpenAICompatAuthRuntimeState，会把刚写入的抓包/配额冷却整段抹掉
+	if !isOpenAICompatManagedAuth(auth) {
 		return
 	}
 	provider := strings.TrimSpace(auth.Attributes["compat_name"])
@@ -420,6 +437,10 @@ func (s *Service) ApplyToAuth(auth *cliproxyauth.Auth) {
 
 func clearOpenAICompatAuthRuntimeState(auth *cliproxyauth.Auth) {
 	if auth == nil || auth.Disabled {
+		return
+	}
+	// 双重保险：非 openai-compat 托管认证禁止清理，避免误伤 xAI/Codex 冷却
+	if !isOpenAICompatManagedAuth(auth) {
 		return
 	}
 	auth.Unavailable = false

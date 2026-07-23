@@ -1656,7 +1656,12 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	authClone := auth.Clone()
-	applyOpenAICompatPersistedState(authClone, time.Now())
+	beforeCompat := authClone.Clone()
+	now := time.Now()
+	applyOpenAICompatPersistedState(authClone, now)
+	if restoreCooldownAfterExternalStateWipe(authClone, beforeCompat, now) {
+		appendCooldownAudit("RESTORE after openai_compat wipe on Register auth=%s provider=%s before_until=%s", authClone.ID, authClone.Provider, beforeCompat.NextRetryAfter.UTC().Format(time.RFC3339))
+	}
 	m.mu.Lock()
 	delete(m.removedAuthIDs, auth.ID)
 	m.auths[auth.ID] = authClone
@@ -1742,7 +1747,12 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	authClone := auth.Clone()
-	applyOpenAICompatPersistedState(authClone, time.Now())
+	beforeCompat := authClone.Clone()
+	now := time.Now()
+	applyOpenAICompatPersistedState(authClone, now)
+	if restoreCooldownAfterExternalStateWipe(authClone, beforeCompat, now) {
+		appendCooldownAudit("RESTORE after openai_compat wipe on Update auth=%s provider=%s before_until=%s", authClone.ID, authClone.Provider, beforeCompat.NextRetryAfter.UTC().Format(time.RFC3339))
+	}
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
 	if !shouldDeferAPIKeyModelAliasRebuild(ctx) {
@@ -3177,10 +3187,18 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			updateAggregatedAvailability(auth, now)
 		}
 
+		beforeCompat := auth.Clone()
 		applyOpenAICompatPersistedState(auth, now)
+		if restoreCooldownAfterExternalStateWipe(auth, beforeCompat, now) {
+			appendCooldownAudit("RESTORE after openai_compat wipe auth=%s provider=%s before_until=%s", auth.ID, auth.Provider, beforeCompat.NextRetryAfter.UTC().Format(time.RFC3339))
+		}
 		authSnapshot = auth.Clone()
 		persistSnapshot = authSnapshot.Clone()
 		saveCooldownState = cooldownStateChanged(beforeSnapshot, authSnapshot, now)
+		if authSnapshot != nil && authKeepsTopLevelCooldown(authSnapshot, now) {
+			appendCooldownAudit("MARKRESULT auth=%s provider=%s model=%s success=%v status=%s unavailable=%v until=%s msg=%q",
+				authSnapshot.ID, authSnapshot.Provider, result.Model, result.Success, authSnapshot.Status, authSnapshot.Unavailable, authSnapshot.NextRetryAfter.UTC().Format(time.RFC3339), authSnapshot.StatusMessage)
+		}
 	}
 	m.mu.Unlock()
 	m.queuePersist(ctx, persistSnapshot)
@@ -3231,6 +3249,7 @@ func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex
 	if resolvedAuthID == "" {
 		registerPendingPacketCooldown(authID, authIndex, provider, model, action, seconds, ruleName, identities...)
 		log.Warnf("packet filter action deferred: unresolved auth id=%q index=%q provider=%q model=%q action=%q identities=%v", authID, authIndex, provider, model, action, identities)
+		appendCooldownAudit("DEFERRED unresolved auth id=%q index=%q provider=%q model=%q action=%q seconds=%d rule=%q identities=%v", authID, authIndex, provider, model, action, seconds, ruleName, identities)
 		return false
 	}
 
@@ -3269,6 +3288,8 @@ func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex
 	}
 	log.Infof("packet filter action applied: auth=%s index=%s provider=%s model=%s action=%s seconds=%d rule=%s until=%s",
 		resolvedAuthID, strings.TrimSpace(authSnapshot.Index), strings.TrimSpace(authSnapshot.Provider), model, action, seconds, ruleName, authSnapshot.NextRetryAfter.UTC().Format(time.RFC3339))
+	appendCooldownAudit("APPLIED auth=%s index=%s provider=%s model=%s action=%s seconds=%d rule=%q until=%s status=%s unavailable=%v",
+		resolvedAuthID, strings.TrimSpace(authSnapshot.Index), strings.TrimSpace(authSnapshot.Provider), model, action, seconds, ruleName, authSnapshot.NextRetryAfter.UTC().Format(time.RFC3339), authSnapshot.Status, authSnapshot.Unavailable)
 	return true
 }
 
@@ -3796,6 +3817,50 @@ func clearAuthStateOnSuccess(auth *Auth, now time.Time) {
 	auth.LastError = nil
 	auth.NextRetryAfter = time.Time{}
 	auth.UpdatedAt = now
+}
+
+
+// restoreCooldownAfterExternalStateWipe ? ApplyExternalState/openai_compat ????????
+// ?? true ?????????????????
+func restoreCooldownAfterExternalStateWipe(auth, before *Auth, now time.Time) bool {
+	if auth == nil || before == nil {
+		return false
+	}
+	if !authKeepsTopLevelCooldown(before, now) {
+		return false
+	}
+	if authKeepsTopLevelCooldown(auth, now) {
+		// ???????????? after ??????????????
+		if !before.NextRetryAfter.After(now) || auth.NextRetryAfter.After(now) {
+			return false
+		}
+	}
+	auth.Unavailable = before.Unavailable
+	auth.Status = before.Status
+	auth.StatusMessage = before.StatusMessage
+	auth.NextRetryAfter = before.NextRetryAfter
+	auth.Quota = before.Quota
+	if before.ModelStates != nil {
+		if auth.ModelStates == nil {
+			auth.ModelStates = make(map[string]*ModelState, len(before.ModelStates))
+		}
+		for model, state := range before.ModelStates {
+			if state != nil && shouldPreserveModelCooldownState(state, now) {
+				auth.ModelStates[model] = state.Clone()
+			}
+		}
+	}
+	// ???????????? status=error + ?????
+	if auth.NextRetryAfter.After(now) {
+		auth.Unavailable = true
+		if auth.Status != StatusDisabled {
+			auth.Status = StatusError
+		}
+	}
+	updateAggregatedAvailability(auth, now)
+	// updateAggregatedAvailability ????????????? Unavailable ? false???? NextRetryAfter?
+	// ??????? next_retry_after/cooldown_until??????
+	return true
 }
 
 func applyOpenAICompatPersistedState(auth *Auth, now time.Time) {
