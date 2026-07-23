@@ -177,7 +177,7 @@ func codexTerminalFailureStatus(body []byte) int {
 		return http.StatusForbidden
 	case errorType == "not_found_error", errorCode == "not_found", errorCode == "model_not_found":
 		return http.StatusNotFound
-	case errorType == "rate_limit_error", errorCode == "rate_limit_exceeded":
+	case errorType == "rate_limit_error", errorType == "usage_limit_reached", errorCode == "rate_limit_exceeded", errorCode == "usage_limit_reached":
 		return http.StatusTooManyRequests
 	default:
 		return http.StatusBadGateway
@@ -1197,6 +1197,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 		eventType := gjson.GetBytes(eventData, "type").String()
 
 		if streamErr, terminalBody, ok := codexTerminalFailureErr(eventData); ok {
+			e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, streamErr.StatusCode(), http.Header{}, terminalBody)
 			if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
 				return resp, errClearReplay
 			}
@@ -1473,6 +1474,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 				data := bytes.TrimSpace(line[5:])
 				eventType := gjson.GetBytes(data, "type").String()
 				if streamErr, terminalBody, ok := codexTerminalFailureErr(data); ok {
+					e.applyUpstreamResponsePacketFilters(ctx, auth, apiKey, baseModel, streamErr.StatusCode(), http.Header{}, terminalBody)
 					if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
 						helps.RecordAPIResponseError(ctx, e.cfg, errClearReplay)
 						reporter.PublishFailure(ctx, errClearReplay)

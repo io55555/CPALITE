@@ -713,6 +713,15 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 						continue
 					}
 					normalizedEventName := gjson.GetBytes(eventData, "type").String()
+					if status, ok := xaiStreamEventFailureStatus(eventData); ok {
+						streamErr := e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, status, httpResp.Header.Clone(), eventData)
+						reporter.PublishFailure(ctx, streamErr)
+						select {
+						case out <- cliproxyexecutor.StreamChunk{Err: streamErr}:
+						case <-ctx.Done():
+						}
+						return
+					}
 					switch normalizedEventName {
 					case "response.output_item.done":
 						xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
@@ -2887,4 +2896,39 @@ func xaiStatusErr(code int, body []byte) statusErr {
 		err.retryAfter = &d
 	}
 	return err
+}
+
+func xaiStreamEventFailureStatus(eventData []byte) (int, bool) {
+	if len(eventData) == 0 || !gjson.ValidBytes(eventData) {
+		return 0, false
+	}
+	for _, path := range []string{
+		"status_code",
+		"statusCode",
+		"error.status_code",
+		"error.statusCode",
+		"response.status_code",
+		"response.statusCode",
+		"response.error.status_code",
+		"response.error.statusCode",
+	} {
+		if status := int(gjson.GetBytes(eventData, path).Int()); status > 0 {
+			return status, status == http.StatusTooManyRequests
+		}
+	}
+	eventType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(eventData, "type").String()))
+	responseStatus := strings.ToLower(strings.TrimSpace(gjson.GetBytes(eventData, "response.status").String()))
+	if !strings.Contains(eventType, "error") && !strings.Contains(eventType, "failed") && responseStatus != "failed" {
+		return 0, false
+	}
+	text := strings.ToLower(string(eventData))
+	if strings.Contains(text, "429") ||
+		strings.Contains(text, "too many requests") ||
+		strings.Contains(text, "rate limit") ||
+		strings.Contains(text, "usage exhausted") ||
+		strings.Contains(text, "free-usage-exhausted") ||
+		strings.Contains(text, "included free usage") {
+		return http.StatusTooManyRequests, true
+	}
+	return 0, false
 }
