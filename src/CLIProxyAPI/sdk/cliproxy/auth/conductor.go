@@ -3197,9 +3197,22 @@ func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex
 				break
 			}
 		}
+		// Retry without provider filter when provider alias mismatches (e.g. xai vs xai-auth-file).
+		if resolvedAuthID == "" {
+			for _, auth := range m.auths {
+				if auth == nil {
+					continue
+				}
+				if packetFilterIdentityMatchesAuth(auth, identities...) {
+					resolvedAuthID = auth.ID
+					break
+				}
+			}
+		}
 	}
 	m.mu.RUnlock()
 	if resolvedAuthID == "" {
+		log.Warnf("packet filter action skipped: unresolved auth id=%q index=%q provider=%q model=%q action=%q identities=%v", authID, authIndex, provider, model, action, identities)
 		return false
 	}
 
@@ -3693,10 +3706,46 @@ func resultErrorFromError(err error) *Error {
 	if resultErr.HTTPStatus == 0 {
 		resultErr.HTTPStatus = statusCodeFromError(err)
 	}
-	if isRequestScopedError(err) || isRequestInvalidError(err) {
+	if resultErr.HTTPStatus == 0 {
+		resultErr.HTTPStatus = inferHTTPStatusFromErrorMessage(resultErr.Message)
+	}
+	// 401/429 are credential-level failures; never treat them as request-scoped
+	// for cooldown scheduling even if transport wrappers marked them so.
+	if resultErr.HTTPStatus == http.StatusUnauthorized || resultErr.HTTPStatus == http.StatusTooManyRequests {
+		if resultErr.Code == requestScopedErrorCode {
+			resultErr.Code = ""
+		}
+	} else if isRequestScopedError(err) || isRequestInvalidError(err) {
 		resultErr.Code = requestScopedErrorCode
 	}
 	return resultErr
+}
+
+func inferHTTPStatusFromErrorMessage(message string) int {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return 0
+	}
+	if strings.Contains(lower, "free-usage-exhausted") ||
+		strings.Contains(lower, "included free usage") ||
+		strings.Contains(lower, "usage_limit_reached") ||
+		strings.Contains(lower, "usage limit") ||
+		strings.Contains(lower, "too many requests") ||
+		strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "\"status\":429") ||
+		strings.Contains(lower, "\"status_code\":429") ||
+		strings.Contains(lower, "http/2 429") ||
+		strings.Contains(lower, "http/1.1 429") ||
+		strings.Contains(lower, " status 429") ||
+		strings.HasPrefix(lower, "429") {
+		return http.StatusTooManyRequests
+	}
+	if strings.Contains(lower, "http/2 401") ||
+		strings.Contains(lower, "http/1.1 401") ||
+		(strings.Contains(lower, "unauthorized") && strings.Contains(lower, "401")) {
+		return http.StatusUnauthorized
+	}
+	return 0
 }
 
 func isUnauthorizedError(err error) bool {
@@ -3959,6 +4008,14 @@ func shouldApplyCredentialFailureState(err *Error) bool {
 
 func shouldApplyCredentialFailureStateForResult(result Result) bool {
 	if result.RetryAfter != nil && *result.RetryAfter > 0 {
+		return true
+	}
+	if result.Error != nil && result.Error.HTTPStatus == 0 {
+		if inferred := inferHTTPStatusFromErrorMessage(result.Error.Message); inferred > 0 {
+			result.Error.HTTPStatus = inferred
+		}
+	}
+	if result.Error != nil && (result.Error.HTTPStatus == http.StatusTooManyRequests || result.Error.HTTPStatus == http.StatusUnauthorized) {
 		return true
 	}
 	return shouldApplyCredentialFailureState(result.Error)

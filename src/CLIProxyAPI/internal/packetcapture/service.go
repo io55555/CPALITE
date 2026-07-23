@@ -177,11 +177,16 @@ func captureFromUsageRecord(ctx context.Context, record coreusage.Record, allowQ
 		AuthType:           strings.TrimSpace(record.AuthType),
 		AuthIndex:          strings.TrimSpace(record.AuthIndex),
 		AuthID:             strings.TrimSpace(record.AuthID),
+		AuthLabel:          strings.TrimSpace(firstNonEmptyString(record.AuthID, record.Source)),
 		APIKey:             strings.TrimSpace(record.APIKey),
 		Endpoint:           internallogging.GetEndpoint(ctx),
 		UpstreamStatusCode: statusFromPacket(packets.UpstreamResponse, record.Fail.StatusCode),
 		Failed:             record.Failed,
 		Packets:            packets,
+	}
+	// Prefer Fail.StatusCode when raw packet status cannot be parsed (websocket timeline).
+	if rec.UpstreamStatusCode <= 0 && record.Fail.StatusCode > 0 {
+		rec.UpstreamStatusCode = record.Fail.StatusCode
 	}
 	if ginCtx, _ := ctx.Value("gin").(*gin.Context); ginCtx != nil && ginCtx.Request != nil {
 		rec.ClientUA = strings.TrimSpace(ginCtx.Request.UserAgent())

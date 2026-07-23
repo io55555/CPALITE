@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -839,6 +840,48 @@ func TestManagerMarkResult_SubsequentFailureKeepsPacketFilterCooldown(t *testing
 	}
 	if !strings.Contains(strings.ToLower(state.StatusMessage), "packet filter matched") {
 		t.Fatalf("status message = %q, want packet filter matched", state.StatusMessage)
+	}
+}
+
+func TestManagerMarkResult_InfersXAIFreeUsageExhaustedAs429Cooldown(t *testing.T) {
+	now := time.Now()
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{
+		XAIQuotaCooldownBaseSeconds: 86400,
+		XAIQuotaCooldownMaxSeconds:  86400,
+	})
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "xai-0x3345@gmail.com.json",
+		Index:    "1c83b46dcf2fc438",
+		Provider: "xai",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Simulate incorrectly request-scoped free-usage body without HTTPStatus.
+	errBody := `{"code":"subscription:free-usage-exhausted","error":"You've used all the included free usage for model grok-4.5-build-free for now."}`
+	raw := resultErrorFromError(errors.New(errBody))
+	if raw == nil || raw.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("resultErrorFromError HTTPStatus = %+v, want 429", raw)
+	}
+	if raw.IsRequestScoped() {
+		t.Fatalf("429 must not stay request-scoped: %+v", raw)
+	}
+
+	m.MarkResult(context.Background(), Result{
+		AuthID:   "xai-0x3345@gmail.com.json",
+		Provider: "xai",
+		Model:    "grok-4.5-build-free",
+		Success:  false,
+		Error:    raw,
+	})
+	updated, ok := m.GetByID("xai-0x3345@gmail.com.json")
+	if !ok || updated == nil {
+		t.Fatal("auth missing")
+	}
+	if !updated.Unavailable || updated.NextRetryAfter.Before(now.Add(23*time.Hour)) {
+		t.Fatalf("expected ~24h xai config cooldown, got unavailable=%v next=%v status=%s msg=%q", updated.Unavailable, updated.NextRetryAfter, updated.Status, updated.StatusMessage)
 	}
 }
 
