@@ -2989,7 +2989,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		} else {
 			if result.Model != "" {
-				if shouldApplyCredentialFailureState(result.Error) {
+				if shouldApplyCredentialFailureStateForResult(result) {
 					disableCooling := quotaCooldownDisabledForAuth(auth)
 					state := ensureModelState(auth, result.Model)
 					state.Unavailable = true
@@ -3003,6 +3003,9 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					}
 
 					statusCode := statusCodeFromResult(result.Error)
+					if statusCode == 0 && result.RetryAfter != nil && *result.RetryAfter > 0 {
+						statusCode = http.StatusTooManyRequests
+					}
 					if isProxyFailureResultError(result.Error) {
 						next := now.Add(m.proxyFailureCooldown())
 						state.NextRetryAfter = next
@@ -3238,8 +3241,11 @@ func applyPacketFilterActionState(ctx context.Context, auth *Auth, resultAuthID,
 	if action == "" || (target != "api_key" && target != "auth") {
 		return
 	}
-	if actionAuthID != "" && resultAuthID != "" && actionAuthID != resultAuthID && strings.TrimSpace(auth.Index) != actionAuthID {
-		return
+	if actionAuthID != "" {
+		matchesResultAuth := resultAuthID != "" && actionAuthID == resultAuthID
+		if !matchesResultAuth && !packetFilterIdentityMatchesAuth(auth, actionAuthID) {
+			return
+		}
 	}
 	message := "packet filter matched"
 	if ruleName != "" {
@@ -3828,6 +3834,13 @@ func shouldApplyCredentialFailureState(err *Error) bool {
 	default:
 		return false
 	}
+}
+
+func shouldApplyCredentialFailureStateForResult(result Result) bool {
+	if result.RetryAfter != nil && *result.RetryAfter > 0 {
+		return true
+	}
+	return shouldApplyCredentialFailureState(result.Error)
 }
 
 func isCountTokensEndpointNotFoundError(err error, requestedModel string) bool {

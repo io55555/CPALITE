@@ -138,6 +138,34 @@ func TestApplyPacketFilterActionStateMatchesAuthIndex(t *testing.T) {
 	}
 }
 
+func TestApplyPacketFilterActionStateMatchesAuthAccount(t *testing.T) {
+	ctx := contextWithPacketFilterActionState(context.Background())
+	PublishPacketFilterAction(ctx, "cooldown", "api_key", 86400, "xai 429 cooldown", "js.js.7178.3@googlemail.com")
+	auth := &Auth{
+		ID:       "xai-20260721-235814-js.js.7178.3@googlemail.com.json",
+		Index:    "b4863f65e3b5ac47",
+		FileName: "xai-20260721-235814-js.js.7178.3@googlemail.com.json",
+		Label:    "js.js.7178.3@googlemail.com",
+		Provider: "xai",
+		Attributes: map[string]string{
+			AttributeAuthKind: AuthKindOAuth,
+		},
+		Metadata: map[string]any{
+			"email": "js.js.7178.3@googlemail.com",
+		},
+	}
+
+	applyPacketFilterActionState(ctx, auth, auth.ID, "grok-4.5-build-free", time.Now())
+
+	if !auth.Unavailable || time.Until(auth.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown by account, got unavailable=%v next=%v", auth.Unavailable, auth.NextRetryAfter)
+	}
+	state := auth.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown by account, got %+v", state)
+	}
+}
+
 func TestManagerMarkResult_AppliesPacketFilterCooldownForRequestScopedError(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 	if _, err := m.Register(context.Background(), &Auth{
@@ -220,6 +248,39 @@ func TestManagerMarkResult_RequestScoped429UsesProviderCooldownConfig(t *testing
 		if state == nil || !state.Unavailable || state.NextRetryAfter.Before(now.Add(23*time.Hour)) {
 			t.Fatalf("%s model state = %+v, want about 24h cooldown", tc.authID, state)
 		}
+	}
+}
+
+func TestManagerMarkResult_RetryAfterAppliesWhenStatusMissing(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	if _, err := m.Register(context.Background(), &Auth{
+		ID:       "xai-auth",
+		Provider: "xai",
+		Status:   StatusActive,
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	retryAfter := 24 * time.Hour
+	m.MarkResult(context.Background(), Result{
+		AuthID:     "xai-auth",
+		Provider:   "xai",
+		Model:      "grok-4.5-build-free",
+		Success:    false,
+		RetryAfter: &retryAfter,
+		Error:      &Error{Code: requestScopedErrorCode, Message: "429 wrapped without status"},
+	})
+
+	updated, ok := m.GetByID("xai-auth")
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	if !updated.Unavailable || time.Until(updated.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected auth 24h cooldown from retryAfter, got unavailable=%v next=%v", updated.Unavailable, updated.NextRetryAfter)
+	}
+	state := updated.ModelStates["grok-4.5-build-free"]
+	if state == nil || !state.Unavailable || time.Until(state.NextRetryAfter) < 23*time.Hour {
+		t.Fatalf("expected model 24h cooldown from retryAfter, got %+v", state)
 	}
 }
 
