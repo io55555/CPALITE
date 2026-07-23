@@ -252,6 +252,120 @@ func TestListAuthFiles_IncludesXAICooldownFromManager(t *testing.T) {
 	}
 }
 
+func TestListAuthFiles_IncludesCodexCooldownWithFileNameWithoutPath(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+
+	authDir := t.TempDir()
+	fileName := "codex-user@example.com-pro.json"
+	cooldownUntil := time.Now().Add(24 * time.Hour).UTC().Round(time.Second)
+	manager := coreauth.NewManager(nil, nil, nil)
+	record := &coreauth.Auth{
+		ID:       "codex-runtime-auth",
+		FileName: fileName,
+		Provider: "codex",
+		Status:   coreauth.StatusError,
+		Attributes: map[string]string{
+			"auth_kind": "oauth",
+		},
+		Metadata: map[string]any{
+			"type":  "codex",
+			"email": "user@example.com",
+		},
+		ModelStates: map[string]*coreauth.ModelState{
+			"gpt-5-codex": {
+				Status:         coreauth.StatusError,
+				StatusMessage:  "packet filter matched: 429 cooldown",
+				Unavailable:    true,
+				NextRetryAfter: cooldownUntil,
+				Quota:          coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: cooldownUntil},
+				UpdatedAt:      time.Now().UTC(),
+			},
+		},
+	}
+	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
+		t.Fatalf("failed to register auth record: %v", errRegister)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, manager)
+	h.tokenStore = &memoryAuthStore{}
+
+	entry := firstAuthFileEntry(t, h)
+	if got := entry["name"]; got != fileName {
+		t.Fatalf("expected name %q, got %#v", fileName, got)
+	}
+	if got := entry["type"]; got != "codex" {
+		t.Fatalf("expected type codex, got %#v", got)
+	}
+	if got := entry["cooldown_model"]; got != "gpt-5-codex" {
+		t.Fatalf("expected cooldown_model gpt-5-codex, got %#v", got)
+	}
+	if _, ok := entry["cooldown_until"].(string); !ok {
+		t.Fatalf("expected cooldown_until string, got %#v", entry["cooldown_until"])
+	}
+	if _, exists := entry["path"]; exists {
+		t.Fatalf("expected no synthetic path for runtime file identity, got %#v", entry["path"])
+	}
+}
+
+func TestListAuthFiles_IncludesXAICooldownWithFileNameWithoutPath(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+
+	authDir := t.TempDir()
+	fileName := "xai-user.json"
+	cooldownUntil := time.Now().Add(24 * time.Hour).UTC().Round(time.Second)
+	manager := coreauth.NewManager(nil, nil, nil)
+	record := &coreauth.Auth{
+		ID:       "xai-runtime-auth",
+		FileName: fileName,
+		Provider: "xai",
+		Status:   coreauth.StatusError,
+		Attributes: map[string]string{
+			"auth_kind": "oauth",
+		},
+		Metadata: map[string]any{
+			"type":          "xai",
+			"access_token":  "token",
+			"refresh_token": "refresh",
+		},
+		ModelStates: map[string]*coreauth.ModelState{
+			"grok-4.5-build-free": {
+				Status:         coreauth.StatusError,
+				StatusMessage:  "packet filter matched: 429 cooldown",
+				Unavailable:    true,
+				NextRetryAfter: cooldownUntil,
+				Quota:          coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: cooldownUntil},
+				UpdatedAt:      time.Now().UTC(),
+			},
+		},
+	}
+	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
+		t.Fatalf("failed to register auth record: %v", errRegister)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, manager)
+	h.tokenStore = &memoryAuthStore{}
+
+	entry := firstAuthFileEntry(t, h)
+	if got := entry["name"]; got != fileName {
+		t.Fatalf("expected name %q, got %#v", fileName, got)
+	}
+	if got := entry["type"]; got != "xai" {
+		t.Fatalf("expected type xai, got %#v", got)
+	}
+	if got := entry["account_type"]; got != "oauth" {
+		t.Fatalf("expected account_type oauth, got %#v", got)
+	}
+	if got := entry["cooldown_model"]; got != "grok-4.5-build-free" {
+		t.Fatalf("expected cooldown_model grok-4.5-build-free, got %#v", got)
+	}
+	if _, ok := entry["cooldown_until"].(string); !ok {
+		t.Fatalf("expected cooldown_until string, got %#v", entry["cooldown_until"])
+	}
+	if _, exists := entry["path"]; exists {
+		t.Fatalf("expected no synthetic path for runtime file identity, got %#v", entry["path"])
+	}
+}
+
 func TestListAuthFilesFromDisk_IncludesWebsockets(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 

@@ -260,7 +260,7 @@
   grid-template-columns: auto minmax(90px, max-content) minmax(90px, max-content) minmax(
       100px,
       max-content
-    ) minmax(90px, max-content) minmax(0, 1fr) auto auto;
+    ) minmax(90px, max-content) minmax(180px, 1fr) auto auto;
   justify-content: stretch;
 }
 
@@ -284,6 +284,7 @@
   gap: 2px;
   line-height: 1.35;
   min-width: 0;
+  max-width: 100%;
 }
 
 .triggerIdentity > span {

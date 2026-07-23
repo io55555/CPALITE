@@ -435,16 +435,24 @@ const triggerIdentity = (item: PacketTrigger) => {
   const apiKey = String(item.api_key || '').trim();
   const authIndex = String(item.auth_index || '').trim();
   const authID = String(item.auth_id || '').trim();
-  const credential =
-    authType === 'api-key'
-      ? ['apikey', apiKey || account || authIndex || authID].filter(Boolean).join(' ')
-      : ['认证文件', authLabel || account || authIndex || authID, account && account !== authLabel ? account : '']
-          .filter(Boolean)
-          .join(' ');
+  if (authType === 'api-key') {
+    return {
+      primary: providerParts.join(' / ') || '-',
+      lines: ['apikey', apiKey || account || authIndex || authID].filter(Boolean),
+    };
+  }
+
+  const fileName = authLabel || authID || authIndex;
+  const accountName =
+    account && account !== fileName && !account.startsWith(`${fileName} `)
+      ? account
+      : authIndex && authIndex !== fileName
+        ? authIndex
+        : '';
 
   return {
     primary: providerParts.join(' / ') || '-',
-    secondary: credential || '-',
+    lines: ['认证文件', fileName ? `文件名 ${fileName}` : '', accountName ? `账号 ${accountName}` : ''].filter(Boolean),
   };
 };
 
@@ -1021,36 +1029,41 @@ export function PacketCapturePage() {
           </div>
         </div>
         <div className={styles.triggerList}>
-          {triggerPageItems.map((item) => (
-            <div className={styles.triggerItem} key={item.id}>
-              <input
-                type="checkbox"
-                checked={Boolean(selectedTriggerIds[item.id])}
-                onChange={() => setSelectedTriggerIds((prev) => {
-                  const next = { ...prev };
-                  if (next[item.id]) delete next[item.id]; else next[item.id] = true;
-                  return next;
-                })}
-              />
-              <span>{formatTime(item.timestamp)}</span>
-              <strong>{item.rule_name}</strong>
-              <span>{item.action}</span>
-              <span>{[item.target || '-', triggerCooldown(item)].filter(Boolean).join(' / ')}</span>
-              <span className={styles.triggerIdentity}>
-                <span>{triggerIdentity(item).primary}</span>
-                <span>{triggerIdentity(item).secondary}</span>
-              </span>
-              <Button size="sm" variant="secondary" onClick={() => void showTriggerDetail(item)}>详情</Button>
-              <button
-                type="button"
-                className={styles.iconButton}
-                title="删除"
-                onClick={() => void deleteTriggerIds([item.id])}
-              >
-                <IconTrash2 size={14} />
-              </button>
-            </div>
-          ))}
+          {triggerPageItems.map((item) => {
+            const identity = triggerIdentity(item);
+            return (
+              <div className={styles.triggerItem} key={item.id}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedTriggerIds[item.id])}
+                  onChange={() => setSelectedTriggerIds((prev) => {
+                    const next = { ...prev };
+                    if (next[item.id]) delete next[item.id]; else next[item.id] = true;
+                    return next;
+                  })}
+                />
+                <span>{formatTime(item.timestamp)}</span>
+                <strong>{item.rule_name}</strong>
+                <span>{item.action}</span>
+                <span>{[item.target || '-', triggerCooldown(item)].filter(Boolean).join(' / ')}</span>
+                <span className={styles.triggerIdentity}>
+                  <span>{identity.primary}</span>
+                  {identity.lines.map((line, index) => (
+                    <span key={`${item.id}-identity-${index}`}>{line}</span>
+                  ))}
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => void showTriggerDetail(item)}>详情</Button>
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  title="删除"
+                  onClick={() => void deleteTriggerIds([item.id])}
+                >
+                  <IconTrash2 size={14} />
+                </button>
+              </div>
+            );
+          })}
         </div>
         {triggers.length > triggerSize && (
           <div className={styles.pagination}>

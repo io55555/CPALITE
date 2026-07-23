@@ -421,10 +421,11 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		return nil
 	}
 	path := strings.TrimSpace(authAttribute(auth, "path"))
-	if path == "" && !runtimeOnly {
+	name := strings.TrimSpace(auth.FileName)
+	hasFileIdentity := name != ""
+	if path == "" && !runtimeOnly && !hasFileIdentity {
 		return nil
 	}
-	name := strings.TrimSpace(auth.FileName)
 	if name == "" {
 		name = auth.ID
 	}
