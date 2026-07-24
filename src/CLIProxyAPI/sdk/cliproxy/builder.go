@@ -274,6 +274,11 @@ func (b *Builder) Build() (*Service, error) {
 		}
 	}
 
+	serverOptions := append([]api.ServerOption(nil), b.serverOptions...)
+	// Ensure the shared plugin host reaches management/API handlers (menus, ListPlugins, resources).
+	if b.pluginHost != nil {
+		serverOptions = append(serverOptions, api.WithPluginHost(b.pluginHost))
+	}
 	service := &Service{
 		cfg:            b.cfg,
 		configPath:     b.configPath,
@@ -285,7 +290,7 @@ func (b *Builder) Build() (*Service, error) {
 		accessManager:  accessManager,
 		coreManager:    coreManager,
 		pluginHost:     b.pluginHost,
-		serverOptions:  append([]api.ServerOption(nil), b.serverOptions...),
+		serverOptions:  serverOptions,
 	}
 	return service, nil
 }

@@ -513,6 +513,10 @@ func cleanPluginPath(path string) string {
 	if path == "" {
 		return ""
 	}
+	// Virtual builtin plugin URIs must stay OS-independent (filepath.Clean mangles "://").
+	if strings.HasPrefix(path, "builtin://") {
+		return path
+	}
 	return filepath.Clean(path)
 }
 

@@ -648,6 +648,10 @@ func (s *Service) applyConfigUpdate(newCfg *config.Config) {
 		s.coreManager.SetOAuthModelAlias(newCfg.OAuthModelAlias)
 	}
 	ctx := coreauth.WithSkipPersist(context.Background())
+	// Keep plugin runtime/menus in sync when config.yaml is hot-reloaded.
+	if s.pluginHost != nil {
+		s.pluginHost.ApplyConfig(ctx, newCfg)
+	}
 	s.syncPluginRuntimeConfig(ctx)
 	var auths []*coreauth.Auth
 	if s.coreManager != nil {
