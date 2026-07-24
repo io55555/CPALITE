@@ -105,9 +105,19 @@ jobs:
 
       - name: Ensure clean git tree for GoReleaser
         run: |
-          # GoReleaser rejects dirty tracked files. Keep untracked build artifacts.
+          # GoReleaser rejects dirty tracked files. Keep untracked build artifacts
+          # (management.html, dist/plugins, backend dist after this step, etc.).
+          set -euo pipefail
           git status --short || true
+          # Restore tracked content/mode changes introduced by CI steps.
           git checkout -- .
+          git clean -fd --exclude=management.html --exclude=dist --exclude=src/CLIProxyAPI/dist --exclude=src/Cli-Proxy-API-Management-Center/dist || true
+          if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+            echo "Tracked files still dirty after cleanup:" >&2
+            git status --short --untracked-files=no >&2
+            exit 1
+          fi
+          echo "Tracked worktree is clean for GoReleaser."
           git status --short || true
 
       - name: Build archives with GoReleaser
