@@ -588,3 +588,17 @@ nonstream-keepalive-interval: 0
 
 # Enable fixed Grok Build header defaults for xAI auth-file requests (default false).
 # xai-grok-build-header-defaults: false
+
+
+# ---------------------------------------------------------------------------
+# 插件（可选）
+# Release 压缩包若包含 grok-manager，可按平台放到 plugins/<os>/<arch>/ 后启用：
+#   Windows: plugins/windows/amd64/grok-manager.dll
+#   Linux:   plugins/linux/amd64/grok-manager.so
+# ---------------------------------------------------------------------------
+# plugins:
+#   enabled: true
+#   dir: plugins
+#   configs:
+#     grok-manager:
+#       enabled: true

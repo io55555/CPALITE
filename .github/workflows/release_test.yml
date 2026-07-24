@@ -27,6 +27,9 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref || github.sha }}
       FRONTEND_DIR: src/Cli-Proxy-API-Management-Center
       BACKEND_DIR: src/CLIProxyAPI
+      # 中文目录名需保持与仓库一致
+      GROK_MANAGER_DIR: src/grok-manager
+      GROK_MANAGER_VERSION: "1.3.7"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,7 +60,22 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: ${{ env.BACKEND_DIR }}/go.mod
-          cache-dependency-path: ${{ env.BACKEND_DIR }}/go.sum
+          cache-dependency-path: |
+            ${{ env.BACKEND_DIR }}/go.sum
+            ${{ env.GROK_MANAGER_DIR }}/go.mod
+
+      - name: Install CGO cross compilers for grok-manager
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ gcc-aarch64-linux-gnu g++-aarch64-linux-gnu gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 zip unzip
+
+      - name: Build grok-manager plugin (linux/windows)
+        run: |
+          chmod +x .github/scripts/build-grok-manager.sh
+          PLUGIN_SRC="$GITHUB_WORKSPACE/${GROK_MANAGER_DIR}" \
+          OUT_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
+          GROK_MANAGER_VERSION="$GROK_MANAGER_VERSION" \
+          .github/scripts/build-grok-manager.sh
 
       - name: Create release notes
         run: |
@@ -65,9 +83,9 @@ jobs:
           RELEASE_NOTES_FILE="$RUNNER_TEMP/release_notes.md"
           cat > "$RELEASE_NOTES_FILE" <<EOF
           Official base version: $VERSION
-          Upstream baselines: CLIProxyAPI@bb5ac40 / Management-Center@65f8b23
-          Includes: management.html, CLIProxyAPI multi-platform archives, checksums.txt
-          Enhancements: state persistence / monitoring / rules engine / packet debug
+          Upstream baselines: see UPSTREAM_BASELINES.md
+          Includes: management.html, CLIProxyAPI multi-platform archives, grok-manager plugin (where built), checksums.txt
+          Plugin: grok-manager v$GROK_MANAGER_VERSION (xAI 测活/隔离/SSO/401 重刷；代理优先级=认证文件>CPA>直连)
 
           ${{ inputs.release_notes }}
           EOF
@@ -95,6 +113,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Inject grok-manager into CPA archives
+        run: |
+          chmod +x .github/scripts/package-grok-manager.sh
+          BACKEND_DIR="$GITHUB_WORKSPACE/${BACKEND_DIR}" \
+          PLUGIN_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
+          .github/scripts/package-grok-manager.sh
+
       - name: Create tag when missing
         run: |
           if ! git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
@@ -112,6 +137,12 @@ jobs:
             ${{ env.BACKEND_DIR }}/dist/*.tar.gz
             ${{ env.BACKEND_DIR }}/dist/*.zip
             ${{ env.BACKEND_DIR }}/dist/checksums.txt
+            dist/plugins/linux/amd64/grok-manager.so
+            dist/plugins/linux/amd64/grok-manager-v${{ env.GROK_MANAGER_VERSION }}.so
+            dist/plugins/linux/arm64/grok-manager.so
+            dist/plugins/linux/arm64/grok-manager-v${{ env.GROK_MANAGER_VERSION }}.so
+            dist/plugins/windows/amd64/grok-manager.dll
+            dist/plugins/windows/amd64/grok-manager-v${{ env.GROK_MANAGER_VERSION }}.dll
 
       - name: Keep only latest 10 releases
         env:

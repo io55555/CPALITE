@@ -1,0 +1,24 @@
+# build outputs
+dist/
+*.dll
+*.so
+*.h
+*.a
+*.lib
+*.exp
+
+# local / temp
+_gotmp/
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# local scripts not for release
+_strip_public_html.py
+_build.bat
