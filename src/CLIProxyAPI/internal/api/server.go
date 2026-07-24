@@ -1184,25 +1184,71 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 		mgmt.DELETE("/oauth-session", s.mgmt.CancelAuthSession)
 
-		// Plugin management APIs + dynamic plugin-owned management routes.
+		// Plugin management APIs.
+		// Gin forbids mixing /plugins/:id/config with /plugins/:id/*path, so one catch-all
+		// dispatches built-in CRUD and plugin-owned management routes.
 		mgmt.GET("/plugins", s.mgmt.ListPlugins)
-		mgmt.GET("/plugins/:id/config", s.mgmt.GetPluginConfig)
-		mgmt.PUT("/plugins/:id/config", s.mgmt.PutPluginConfig)
-		mgmt.PATCH("/plugins/:id/config", s.mgmt.PatchPluginConfig)
-		mgmt.PATCH("/plugins/:id/enabled", s.mgmt.PatchPluginEnabled)
-		mgmt.DELETE("/plugins/:id", s.mgmt.DeletePlugin)
+		mgmt.Any("/plugins/*pluginPath", s.servePluginManagementDispatch)
 		mgmt.GET("/plugin-store", s.mgmt.ListPluginStore)
 		mgmt.POST("/plugin-store/:id/install", s.mgmt.InstallPluginFromStore)
-		// Catch-all under /plugins/:id/* so plugin panels can call their own APIs with management auth.
-		mgmt.Any("/plugins/:id/*path", s.servePluginManagementHTTP)
 	}
 }
 
-// servePluginManagementHTTP dispatches authenticated plugin management routes.
-func (s *Server) servePluginManagementHTTP(c *gin.Context) {
-	if s == nil || c == nil || c.Request == nil {
+// servePluginManagementDispatch routes /v0/management/plugins/* under management auth.
+// Built-in: /:id/config, /:id/enabled, DELETE /:id
+// Plugin-owned: everything else (e.g. /grok-manager/status).
+func (s *Server) servePluginManagementDispatch(c *gin.Context) {
+	if s == nil || c == nil || c.Request == nil || s.mgmt == nil {
 		return
 	}
+
+	rest := strings.Trim(c.Param("pluginPath"), "/")
+	if rest == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "plugin management route not found"})
+		return
+	}
+	parts := strings.Split(rest, "/")
+	id := strings.TrimSpace(parts[0])
+	if id == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "plugin management route not found"})
+		return
+	}
+	// Ensure built-in handlers can read c.Param("id").
+	c.Params = append(c.Params, gin.Param{Key: "id", Value: id})
+
+	if len(parts) == 1 {
+		if c.Request.Method == http.MethodDelete {
+			s.mgmt.DeletePlugin(c)
+			return
+		}
+		// Fall through to plugin host for exact /plugins/<id> plugin routes.
+	} else if len(parts) == 2 {
+		switch parts[1] {
+		case "config":
+			switch c.Request.Method {
+			case http.MethodGet:
+				s.mgmt.GetPluginConfig(c)
+				return
+			case http.MethodPut:
+				s.mgmt.PutPluginConfig(c)
+				return
+			case http.MethodPatch:
+				s.mgmt.PatchPluginConfig(c)
+				return
+			default:
+				c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method_not_allowed"})
+				return
+			}
+		case "enabled":
+			if c.Request.Method == http.MethodPatch {
+				s.mgmt.PatchPluginEnabled(c)
+				return
+			}
+			c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method_not_allowed"})
+			return
+		}
+	}
+
 	if s.pluginHost != nil && s.pluginHost.ServeManagementHTTP(c.Writer, c.Request) {
 		return
 	}

@@ -13,6 +13,7 @@
 #
 # bash /root/cpa/up.cpa.release.sh --check-new --restart --force
 # bash /root/cpa/up.cpa.release.sh --check-new --restart --force --version v7.2.95-18
+# bash /root/cpa/up.cpa.release.sh --check-new --restart --force --version v7.2.97-5
 
 set -euo pipefail
 
