@@ -85,7 +85,7 @@ jobs:
           Official base version: $VERSION
           Upstream baselines: see UPSTREAM_BASELINES.md
           Includes: management.html, CLIProxyAPI multi-platform archives, grok-manager plugin (where built), checksums.txt
-          Plugin: grok-manager v$GROK_MANAGER_VERSION (proxy: auth-file > CPA proxy-url > direct)
+          Plugin assets: grok-manager-<os>-<arch>.so|.dll (and versioned -vX-os-arch); also embedded under plugins/<os>/<arch>/ in CPA archives
 
           ${{ inputs.release_notes }}
           EOF
@@ -153,12 +153,12 @@ jobs:
             ${{ env.BACKEND_DIR }}/dist/*.tar.gz
             ${{ env.BACKEND_DIR }}/dist/*.zip
             ${{ env.BACKEND_DIR }}/dist/checksums.txt
-            dist/plugins/linux/amd64/grok-manager.so
-            dist/plugins/linux/amd64/grok-manager-v${{ env.GROK_MANAGER_VERSION }}.so
-            dist/plugins/linux/arm64/grok-manager.so
-            dist/plugins/linux/arm64/grok-manager-v${{ env.GROK_MANAGER_VERSION }}.so
-            dist/plugins/windows/amd64/grok-manager.dll
-            dist/plugins/windows/amd64/grok-manager-v${{ env.GROK_MANAGER_VERSION }}.dll
+            dist/plugins/release/grok-manager-linux-amd64.so
+            dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-linux-amd64.so
+            dist/plugins/release/grok-manager-linux-arm64.so
+            dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-linux-arm64.so
+            dist/plugins/release/grok-manager-windows-amd64.dll
+            dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-windows-amd64.dll
 
       - name: Keep only latest 10 releases
         env:

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # Inject grok-manager plugin binaries into CPA release archives produced by GoReleaser.
+# Inside archive path keeps CPA convention:
+#   plugins/<os>/<arch>/grok-manager.<ext>
 
 ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 BACKEND_DIR="${BACKEND_DIR:-$ROOT/src/CLIProxyAPI}"
@@ -34,14 +36,10 @@ inject_tar() {
   local tmp
   tmp="$(mktemp -d)"
   tar -xzf "$archive" -C "$tmp"
-  # archive root may be flat or nested; place plugins at archive root
   mkdir -p "$tmp/plugins/${goos}/${goarch}"
   cp -f "$plugin" "$tmp/plugins/${goos}/${goarch}/grok-manager.${ext}"
-  # also versioned convenience copy
-  if compgen -G "$PLUGIN_ROOT/${goos}/${goarch}/grok-manager-v*.${ext}" > /dev/null; then
-    cp -f "$PLUGIN_ROOT/${goos}/${goarch}/grok-manager-v"*.${ext} "$tmp/plugins/${goos}/${goarch}/" || true
-  fi
-  # rebuild archive in place
+  # also drop a clearly named copy for operators inspecting the archive
+  cp -f "$plugin" "$tmp/plugins/${goos}/${goarch}/grok-manager-${goos}-${goarch}.${ext}"
   local abs
   abs="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
   rm -f "$abs"
@@ -59,9 +57,7 @@ inject_zip() {
   unzip -q "$archive" -d "$tmp"
   mkdir -p "$tmp/plugins/${goos}/${goarch}"
   cp -f "$plugin" "$tmp/plugins/${goos}/${goarch}/grok-manager.${ext}"
-  if compgen -G "$PLUGIN_ROOT/${goos}/${goarch}/grok-manager-v*.${ext}" > /dev/null; then
-    cp -f "$PLUGIN_ROOT/${goos}/${goarch}/grok-manager-v"*.${ext} "$tmp/plugins/${goos}/${goarch}/" || true
-  fi
+  cp -f "$plugin" "$tmp/plugins/${goos}/${goarch}/grok-manager-${goos}-${goarch}.${ext}"
   local abs
   abs="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
   rm -f "$abs"
@@ -85,7 +81,6 @@ for archive in "$DIST_DIR"/CPA_*.tar.gz "$DIST_DIR"/CPA_*.zip; do
   if [[ "$goos" == "windows" ]]; then
     ext="dll"
   fi
-  # only inject when we built that platform plugin
   if [[ ! -f "$PLUGIN_ROOT/${goos}/${goarch}/grok-manager.${ext}" ]]; then
     echo "no plugin for ${goos}/${goarch}, leave archive unchanged: $base"
     continue
@@ -97,12 +92,10 @@ for archive in "$DIST_DIR"/CPA_*.tar.gz "$DIST_DIR"/CPA_*.zip; do
   fi
 done
 
-# regenerate checksums if present
-if [[ -f "$DIST_DIR/checksums.txt" ]] || compgen -G "$DIST_DIR/CPA_*" > /dev/null; then
+if compgen -G "$DIST_DIR/CPA_*" > /dev/null; then
   (
     cd "$DIST_DIR"
     rm -f checksums.txt
-    # sha256 of release archives only
     if command -v sha256sum >/dev/null 2>&1; then
       sha256sum CPA_*.tar.gz CPA_*.zip 2>/dev/null > checksums.txt || true
     fi
