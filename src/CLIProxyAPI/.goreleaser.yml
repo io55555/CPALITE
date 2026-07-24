@@ -42,3 +42,14 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+
+# Ignore monorepo/CI noise so dirty-tree checks stay focused on backend release inputs.
+git:
+  ignore_changes:
+    - .github/**
+    - dist/**
+    - management.html
+    - src/grok-manager/**
+    - src/Cli-Proxy-API-Management-Center/**
+    - '**/*.so'
+    - '**/*.dll'

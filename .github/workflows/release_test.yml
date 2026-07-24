@@ -27,7 +27,7 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref || github.sha }}
       FRONTEND_DIR: src/Cli-Proxy-API-Management-Center
       BACKEND_DIR: src/CLIProxyAPI
-      # 中文目录名需保持与仓库一致
+      # Local plugin source (do not build from upstream-original trees)
       GROK_MANAGER_DIR: src/grok-manager
       GROK_MANAGER_VERSION: "1.3.7"
     steps:
@@ -71,11 +71,11 @@ jobs:
 
       - name: Build grok-manager plugin (linux/windows)
         run: |
-          chmod +x .github/scripts/build-grok-manager.sh
+          # Use bash instead of chmod so tracked file modes stay clean for GoReleaser.
           PLUGIN_SRC="$GITHUB_WORKSPACE/${GROK_MANAGER_DIR}" \
           OUT_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
           GROK_MANAGER_VERSION="$GROK_MANAGER_VERSION" \
-          .github/scripts/build-grok-manager.sh
+          bash .github/scripts/build-grok-manager.sh
 
       - name: Create release notes
         run: |
@@ -85,7 +85,7 @@ jobs:
           Official base version: $VERSION
           Upstream baselines: see UPSTREAM_BASELINES.md
           Includes: management.html, CLIProxyAPI multi-platform archives, grok-manager plugin (where built), checksums.txt
-          Plugin: grok-manager v$GROK_MANAGER_VERSION (xAI 测活/隔离/SSO/401 重刷；代理优先级=认证文件>CPA>直连)
+          Plugin: grok-manager v$GROK_MANAGER_VERSION (proxy: auth-file > CPA proxy-url > direct)
 
           ${{ inputs.release_notes }}
           EOF
@@ -103,11 +103,18 @@ jobs:
             git tag "$VERSION"
           fi
 
+      - name: Ensure clean git tree for GoReleaser
+        run: |
+          # GoReleaser rejects dirty tracked files. Keep untracked build artifacts.
+          git status --short || true
+          git checkout -- .
+          git status --short || true
+
       - name: Build archives with GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: '~> v2'
           workdir: ${{ env.BACKEND_DIR }}
           args: release --clean --skip=publish
         env:
@@ -115,10 +122,9 @@ jobs:
 
       - name: Inject grok-manager into CPA archives
         run: |
-          chmod +x .github/scripts/package-grok-manager.sh
           BACKEND_DIR="$GITHUB_WORKSPACE/${BACKEND_DIR}" \
           PLUGIN_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
-          .github/scripts/package-grok-manager.sh
+          bash .github/scripts/package-grok-manager.sh
 
       - name: Create tag when missing
         run: |
@@ -149,7 +155,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # 保留最近 10 个 release（按创建时间倒序），删除更旧的 release 及其 tag
           mapfile -t releases < <(gh release list --limit 200 --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[].tagName')
           total="${#releases[@]}"
           echo "Found ${total} releases"
