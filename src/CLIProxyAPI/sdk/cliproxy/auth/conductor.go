@@ -304,6 +304,8 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		homeSessionSelections: make(map[string]map[homeSessionSelectionKey]*HomeDispatchSelection),
 		providerOffsets:       make(map[string]int),
 		modelPoolOffsets:      make(map[string]int),
+		removedAuthIDs:        make(map[string]struct{}),
+		persistDirty:          make(map[string]*Auth),
 	}
 	// atomic.Value requires non-nil initial value.
 	manager.runtimeConfig.Store(&internalconfig.Config{})
@@ -8524,10 +8526,17 @@ func (m *Manager) queuePersist(ctx context.Context, auth *Auth) {
 		return
 	}
 	snapshot := auth.Clone()
+	if snapshot == nil || strings.TrimSpace(snapshot.ID) == "" {
+		return
+	}
 	m.persistStarted.Do(func() {
 		go m.persistLoop()
 	})
 	m.persistMu.Lock()
+	if m.persistDirty == nil {
+		// defensive: avoid nil map assignment when Manager is not constructed via NewManager
+		m.persistDirty = make(map[string]*Auth)
+	}
 	m.persistDirty[snapshot.ID] = snapshot
 	m.persistMu.Unlock()
 }
@@ -8548,6 +8557,9 @@ func (m *Manager) flushQueuedPersist(ctx context.Context) {
 	pending := m.persistDirty
 	m.persistDirty = make(map[string]*Auth)
 	m.persistMu.Unlock()
+	if pending == nil {
+		return
+	}
 	for _, auth := range pending {
 		if err := m.persist(ctx, auth); err != nil {
 			logEntryWithRequestID(ctx).WithField("auth_id", auth.ID).Warnf("failed to persist queued auth state: %v", err)
