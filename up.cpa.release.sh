@@ -10,6 +10,9 @@
 #
 # cron：
 #   */30 * * * * bash /root/cpa/up.cpa.release.sh --check-new --restart >>/root/cpa/up.cpa.release.log 2>&1
+#
+# bash /root/cpa/up.cpa.release.sh --check-new --restart --force
+# bash /root/cpa/up.cpa.release.sh --check-new --restart --force --version v7.2.95-18
 
 set -euo pipefail
 

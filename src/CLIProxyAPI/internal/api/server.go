@@ -681,6 +681,8 @@ func (s *Server) setupRoutes() {
 	s.engine.HEAD("/healthz", healthzHandler)
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
+	// Plugin resource pages (iframe targets). Intentionally outside management auth middleware.
+	s.engine.GET("/v0/resource/plugins/*path", s.servePluginResourceHTTP)
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
 	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
 	geminiCLIHandlers := gemini.NewGeminiCLIAPIHandler(s.handlers)
@@ -1181,7 +1183,41 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/xai-auth-url", s.mgmt.RequestXAIToken)
 		mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 		mgmt.DELETE("/oauth-session", s.mgmt.CancelAuthSession)
+
+		// Plugin management APIs + dynamic plugin-owned management routes.
+		mgmt.GET("/plugins", s.mgmt.ListPlugins)
+		mgmt.GET("/plugins/:id/config", s.mgmt.GetPluginConfig)
+		mgmt.PUT("/plugins/:id/config", s.mgmt.PutPluginConfig)
+		mgmt.PATCH("/plugins/:id/config", s.mgmt.PatchPluginConfig)
+		mgmt.PATCH("/plugins/:id/enabled", s.mgmt.PatchPluginEnabled)
+		mgmt.DELETE("/plugins/:id", s.mgmt.DeletePlugin)
+		mgmt.GET("/plugin-store", s.mgmt.ListPluginStore)
+		mgmt.POST("/plugin-store/:id/install", s.mgmt.InstallPluginFromStore)
+		// Catch-all under /plugins/:id/* so plugin panels can call their own APIs with management auth.
+		mgmt.Any("/plugins/:id/*path", s.servePluginManagementHTTP)
 	}
+}
+
+// servePluginManagementHTTP dispatches authenticated plugin management routes.
+func (s *Server) servePluginManagementHTTP(c *gin.Context) {
+	if s == nil || c == nil || c.Request == nil {
+		return
+	}
+	if s.pluginHost != nil && s.pluginHost.ServeManagementHTTP(c.Writer, c.Request) {
+		return
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "not_found", "message": "plugin management route not found"})
+}
+
+// servePluginResourceHTTP dispatches unauthenticated browser-navigable plugin resource pages.
+func (s *Server) servePluginResourceHTTP(c *gin.Context) {
+	if s == nil || c == nil || c.Request == nil {
+		return
+	}
+	if s.pluginHost != nil && s.pluginHost.ServeResourceHTTP(c.Writer, c.Request) {
+		return
+	}
+	c.Status(http.StatusNotFound)
 }
 
 func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {

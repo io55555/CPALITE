@@ -23,6 +23,9 @@ import {
   IconSidebarQuota,
   IconSidebarSystem,
   IconSidebarMonitoring,
+  IconSidebarPlugins,
+  IconSidebarStore,
+  IconPlug,
 } from '@/components/ui/icons';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
 import {
@@ -36,6 +39,12 @@ import { triggerHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER } from '@/utils/constants';
 import { isSupportedLanguage } from '@/utils/language';
 import type { Theme } from '@/types';
+import { pluginsApi } from '@/services/api';
+import {
+  collectPluginResourceEntries,
+  PLUGIN_RESOURCES_REFRESH_EVENT,
+  type PluginResourceEntry,
+} from '@/features/plugins/pluginResources';
 
 const sidebarIcons: Record<string, ReactNode> = {
   dashboard: <IconSidebarDashboard size={18} />,
@@ -48,6 +57,9 @@ const sidebarIcons: Record<string, ReactNode> = {
   config: <IconSidebarConfig size={18} />,
   logs: <IconSidebarLogs size={18} />,
   system: <IconSidebarSystem size={18} />,
+  plugins: <IconSidebarPlugins size={18} />,
+  pluginStore: <IconSidebarStore size={18} />,
+  pluginPage: <IconPlug size={18} />,
 };
 
 // Header action icons - smaller size for header buttons
@@ -216,6 +228,7 @@ export function MainLayout() {
   const location = useLocation();
 
   const logout = useAuthStore((state) => state.logout);
+  const connectionStatus = useAuthStore((state) => state.connectionStatus);
 
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const clearCache = useConfigStore((state) => state.clearCache);
@@ -230,6 +243,7 @@ export function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [pluginMenus, setPluginMenus] = useState<PluginResourceEntry[]>([]);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const languageMenuRef = useRef<HTMLDivElement | null>(null);
   const themeMenuRef = useRef<HTMLDivElement | null>(null);
@@ -388,6 +402,31 @@ export function MainLayout() {
     });
   }, [fetchConfig]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPluginMenus = async () => {
+      if (connectionStatus !== 'connected') {
+        if (!cancelled) setPluginMenus([]);
+        return;
+      }
+      try {
+        const response = await pluginsApi.list();
+        if (cancelled) return;
+        setPluginMenus(collectPluginResourceEntries(response.plugins ?? []));
+      } catch {
+        if (!cancelled) setPluginMenus([]);
+      }
+    };
+
+    void loadPluginMenus();
+    window.addEventListener(PLUGIN_RESOURCES_REFRESH_EVENT, loadPluginMenus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PLUGIN_RESOURCES_REFRESH_EVENT, loadPluginMenus);
+    };
+  }, [connectionStatus]);
+
   const navItems = [
     { path: '/', label: t('nav.dashboard'), icon: sidebarIcons.dashboard },
     { path: '/config', label: t('nav.config_management'), icon: sidebarIcons.config },
@@ -405,6 +444,13 @@ export function MainLayout() {
       ? [{ path: '/logs', label: t('nav.logs'), icon: sidebarIcons.logs }]
       : []),
     { path: '/system', label: '中心信息', icon: sidebarIcons.system },
+    { path: '/plugins', label: t('nav.plugins'), icon: sidebarIcons.plugins },
+    { path: '/plugin-store', label: t('nav.plugin_store'), icon: sidebarIcons.pluginStore },
+    ...pluginMenus.map((entry) => ({
+      path: entry.route,
+      label: entry.label,
+      icon: sidebarIcons.pluginPage,
+    })),
   ];
   const navOrder = navItems.map((item) => item.path);
   const getRouteOrder = (pathname: string) => {

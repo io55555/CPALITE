@@ -316,6 +316,8 @@ func (h *Host) ApplyConfig(ctx context.Context, cfg *config.Config) {
 	h.snapshot.Store(&Snapshot{enabled: true, records: records})
 	h.mu.Unlock()
 	h.refreshThinkingProviders(records)
+	// Rebuild plugin-owned management/resource menus after the active snapshot is live.
+	h.RegisterManagementRoutes(ctx, nil)
 	for _, fields := range hotReloadLogs {
 		log.WithFields(fields).Info("pluginhost: plugin hot reloaded")
 	}
@@ -432,6 +434,7 @@ func (h *Host) UnloadPlugin(id string) bool {
 
 	h.refreshThinkingProviders(records)
 	h.RegisterFrontendAuthProviders()
+	h.RegisterManagementRoutes(context.Background(), nil)
 	for _, target := range targets {
 		if target.client != nil {
 			target.client.Shutdown()

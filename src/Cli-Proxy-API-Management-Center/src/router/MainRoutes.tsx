@@ -25,6 +25,9 @@ import { MonitoringCenterSsfunPage } from '@/pages/MonitoringCenterSsfunPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SystemPage } from '@/pages/SystemPage';
+import { PluginsPage } from '@/features/plugins/PluginsPage';
+import { PluginStorePage } from '@/features/plugins/PluginStorePage';
+import { PluginResourcePage } from '@/features/plugins/PluginResourcePage';
 
 const mainRoutes = [
   { path: '/', element: <DashboardPage /> },
@@ -88,6 +91,9 @@ const mainRoutes = [
   { path: '/config', element: <ConfigPage /> },
   { path: '/logs', element: <LogsPage /> },
   { path: '/system', element: <SystemPage /> },
+  { path: '/plugins', element: <PluginsPage /> },
+  { path: '/plugin-store', element: <PluginStorePage /> },
+  { path: '/plugin-pages/:pluginId/:menuIndex', element: <PluginResourcePage /> },
   { path: '*', element: <Navigate to="/" replace /> },
 ];
 
