@@ -81,34 +81,32 @@ jobs:
         run: |
           echo "RELEASE_NOTES_FILE=$RUNNER_TEMP/release_notes.md" >> "$GITHUB_ENV"
           RELEASE_NOTES_FILE="$RUNNER_TEMP/release_notes.md"
-          cat > "$RELEASE_NOTES_FILE" <<EOF
-Official base version: $VERSION
-Upstream baselines: see UPSTREAM_BASELINES.md
-
-## Assets
-- `CPA_<ver>_linux_<arch>.tar.gz` — default Linux (glibc, CGO=1)
-- `CPA_<ver>_linux_<arch>_musl.tar.gz` — Alpine-native musl (CGO=1)
-- `CPA_<ver>_linux_<arch>_no-plugin.tar.gz` — portable static Linux (CGO=0; name kept for compatibility)
-- `CPA_<ver>_windows_amd64.zip` — Windows
-- `management.html` — management panel
-
-## grok-manager
-- **Built into the CPA binary** (in-process). No `.so` / `.dll` release assets.
-- Enable in `config.yaml`:
-
-```yaml
-plugins:
-  enabled: true
-  configs:
-    grok-manager:
-      enabled: true
-```
-
-- Works on Alpine/musl, glibc, and Windows the same way (config only).
-- Optional: `CPA_GROK_MANAGER_BUILTIN=0` forces dynamic library mode if you ship your own `.so` (not recommended).
-
-${{ inputs.release_notes }}
-EOF
+          {
+            echo "Official base version: $VERSION"
+            echo "Upstream baselines: see UPSTREAM_BASELINES.md"
+            echo ""
+            echo "## Assets"
+            echo "- CPA_<ver>_linux_<arch>.tar.gz — default Linux (glibc, CGO=1)"
+            echo "- CPA_<ver>_linux_<arch>_musl.tar.gz — Alpine-native musl (CGO=1)"
+            echo "- CPA_<ver>_linux_<arch>_no-plugin.tar.gz — portable static Linux (CGO=0; name kept for compatibility)"
+            echo "- CPA_<ver>_windows_amd64.zip — Windows"
+            echo "- management.html — management panel"
+            echo ""
+            echo "## grok-manager"
+            echo "- Built into the CPA binary (in-process). No .so / .dll release assets."
+            echo "- Enable in config.yaml:"
+            echo ""
+            echo "  plugins:"
+            echo "    enabled: true"
+            echo "    configs:"
+            echo "      grok-manager:"
+            echo "        enabled: true"
+            echo ""
+            echo "- Works on Alpine/musl, glibc, and Windows the same way (config only)."
+            echo "- Optional: CPA_GROK_MANAGER_BUILTIN=0 forces dynamic library mode if you ship your own .so (not recommended)."
+            echo ""
+            echo "${{ inputs.release_notes }}"
+          } > "$RELEASE_NOTES_FILE"
 
       - name: Prepare release tag
         run: |
