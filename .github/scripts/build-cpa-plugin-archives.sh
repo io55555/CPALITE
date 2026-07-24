@@ -9,16 +9,52 @@ set -euo pipefail
 #   windows             : CGO=0 host   -> plugins via LoadDLL
 
 ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
-BACKEND_DIR="${BACKEND_DIR:-$ROOT/src/CLIProxyAPI}"
-DIST_DIR="${DIST_DIR:-$BACKEND_DIR/dist}"
+ROOT="$(cd "$ROOT" && pwd)"
+
+# Accept relative or absolute BACKEND_DIR/DIST_DIR; never double-prefix GITHUB_WORKSPACE.
+if [[ -z "${BACKEND_DIR:-}" ]]; then
+  BACKEND_DIR="$ROOT/src/CLIProxyAPI"
+elif [[ "$BACKEND_DIR" != /* ]]; then
+  BACKEND_DIR="$ROOT/$BACKEND_DIR"
+fi
+BACKEND_DIR="$(cd "$BACKEND_DIR" && pwd)"
+
+if [[ -z "${DIST_DIR:-}" ]]; then
+  DIST_DIR="$BACKEND_DIR/dist"
+elif [[ "$DIST_DIR" != /* ]]; then
+  DIST_DIR="$ROOT/$DIST_DIR"
+fi
+mkdir -p "$DIST_DIR"
+DIST_DIR="$(cd "$DIST_DIR" && pwd)"
+
+if [[ -z "${PLUGIN_ROOT:-}" ]]; then
+  PLUGIN_ROOT="$ROOT/dist/plugins"
+elif [[ "$PLUGIN_ROOT" != /* ]]; then
+  PLUGIN_ROOT="$ROOT/$PLUGIN_ROOT"
+fi
+
 VERSION="${VERSION:-dev}"
 COMMIT="${COMMIT:-unknown}"
 BUILD_DATE="${BUILD_DATE:-unknown}"
-PLUGIN_ROOT="${PLUGIN_ROOT:-$ROOT/dist/plugins}"
 VER_NUM="${VERSION#v}"
 GO_ALPINE_IMAGE="${GO_ALPINE_IMAGE:-}"
 
-mkdir -p "$DIST_DIR"
+# Path of backend inside the docker mount at /workspace
+if [[ "$BACKEND_DIR" == "$ROOT" ]]; then
+  BACKEND_REL="."
+elif [[ "$BACKEND_DIR" == "$ROOT"/* ]]; then
+  BACKEND_REL="${BACKEND_DIR#"$ROOT"/}"
+else
+  echo "BACKEND_DIR ($BACKEND_DIR) must be inside ROOT ($ROOT) for musl docker builds" >&2
+  exit 1
+fi
+
+echo "ROOT=$ROOT"
+echo "BACKEND_DIR=$BACKEND_DIR"
+echo "BACKEND_REL=$BACKEND_REL"
+echo "DIST_DIR=$DIST_DIR"
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"
+
 cd "$BACKEND_DIR"
 
 detect_go_alpine_image() {
@@ -136,35 +172,54 @@ build_musl_one() {
   local platform="linux/amd64"
   [[ "$goarch" == "arm64" ]] && platform="linux/arm64"
 
-  local out_dir work_dir image
+  local out_dir work_dir image docker_out host_out
   out_dir="$DIST_DIR/build/linux_${goarch}_musl"
   work_dir="$out_dir/archive"
   rm -rf "$out_dir"
   mkdir -p "$work_dir"
   image="$(detect_go_alpine_image)"
 
+  # Write into the same host work_dir via the /workspace mount.
+  # Prefer DIST_DIR if it is under ROOT; otherwise fall back to backend-relative dist.
+  if [[ "$DIST_DIR" == "$ROOT"/* ]]; then
+    docker_out="/workspace/${DIST_DIR#"$ROOT"/}/build/linux_${goarch}_musl/archive/CPA"
+  else
+    docker_out="/workspace/${BACKEND_REL}/dist/build/linux_${goarch}_musl/archive/CPA"
+  fi
+  host_out="$work_dir/CPA"
+
   echo "Building linux/${goarch} musl via docker image=$image platform=$platform"
+  echo "docker output path: $docker_out"
+  echo "host expect path:   $host_out"
+
   docker run --rm --platform "$platform" \
     -v "$ROOT:/workspace" \
-    -w /workspace/src/CLIProxyAPI \
+    -w "/workspace/${BACKEND_REL}" \
     -e VER_NUM="$VER_NUM" \
     -e COMMIT="$COMMIT" \
     -e BUILD_DATE="$BUILD_DATE" \
     -e GOARCH="$goarch" \
+    -e DOCKER_OUT="$docker_out" \
     "$image" \
     sh -ec '
       set -euo pipefail
       apk add --no-cache build-base binutils >/dev/null
+      mkdir -p "$(dirname "$DOCKER_OUT")"
       CGO_ENABLED=1 GOOS=linux GOARCH="${GOARCH}" go build -buildvcs=false \
         -ldflags="-s -w -X main.Version=${VER_NUM} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
-        -o "/workspace/src/CLIProxyAPI/dist/build/linux_${GOARCH}_musl/archive/CPA" ./cmd/server/
-      # musl dynamic binary should request ld-musl interpreter
+        -o "$DOCKER_OUT" ./cmd/server/
       if command -v readelf >/dev/null 2>&1; then
-        readelf -l "/workspace/src/CLIProxyAPI/dist/build/linux_${GOARCH}_musl/archive/CPA" | grep -E "program interpreter|Requesting program interpreter" || true
+        readelf -l "$DOCKER_OUT" | grep -E "program interpreter|Requesting program interpreter" || true
       fi
+      ls -lh "$DOCKER_OUT"
     '
 
-  [[ -s "$work_dir/CPA" ]] || { echo "musl CPA binary missing for $goarch" >&2; exit 1; }
+  if [[ ! -s "$host_out" ]]; then
+    echo "musl CPA binary missing for $goarch at $host_out" >&2
+    echo "listing dist build tree:" >&2
+    find "$DIST_DIR/build" -maxdepth 4 -type f -print >&2 || true
+    exit 1
+  fi
   embed_plugin "$work_dir" linux "$goarch" musl
   copy_docs "$work_dir"
   package_archive "$work_dir" linux "$goarch" "_musl"
@@ -193,7 +248,6 @@ build_one windows amd64 0 x86_64-w64-mingw32-gcc "" windows
   cd "$DIST_DIR"
   rm -f checksums.txt
   if command -v sha256sum >/dev/null 2>&1; then
-    # include all CPA archives (goreleaser darwin/freebsd + custom linux/windows)
     shopt -s nullglob
     files=(CPA_*.tar.gz CPA_*.zip)
     if [[ ${#files[@]} -gt 0 ]]; then

@@ -10,8 +10,20 @@ set -euo pipefail
 #   dist/plugins/release/grok-manager-v<ver>-<os>-<arch>[.musl].<ext>
 
 ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
-PLUGIN_SRC="${PLUGIN_SRC:-$ROOT/src/grok-manager}"
-OUT_ROOT="${OUT_ROOT:-$ROOT/dist/plugins}"
+ROOT="$(cd "$ROOT" && pwd)"
+
+if [[ -z "${PLUGIN_SRC:-}" ]]; then
+  PLUGIN_SRC="$ROOT/src/grok-manager"
+elif [[ "$PLUGIN_SRC" != /* ]]; then
+  PLUGIN_SRC="$ROOT/$PLUGIN_SRC"
+fi
+
+if [[ -z "${OUT_ROOT:-}" ]]; then
+  OUT_ROOT="$ROOT/dist/plugins"
+elif [[ "$OUT_ROOT" != /* ]]; then
+  OUT_ROOT="$ROOT/$OUT_ROOT"
+fi
+
 VERSION="${GROK_MANAGER_VERSION:-1.3.7}"
 RELEASE_DIR="${OUT_ROOT}/release"
 GO_ALPINE_IMAGE="${GO_ALPINE_IMAGE:-}"
@@ -78,18 +90,32 @@ build_musl_one() {
   image="$(detect_go_alpine_image)"
 
   mkdir -p "$out_dir"
+  local docker_out host_out plugin_rel
+  if [[ "$OUT_ROOT" != "$ROOT"/* ]]; then
+    echo "OUT_ROOT ($OUT_ROOT) must be inside ROOT ($ROOT) for musl docker builds" >&2
+    exit 1
+  fi
+  plugin_rel="${OUT_ROOT#"$ROOT"/}/linux-musl/${goarch}/grok-manager.so"
+  docker_out="/workspace/${plugin_rel}"
+  host_out="$out_file"
+
   echo "Building grok-manager linux/${goarch} (musl/alpine docker: $image, platform=$platform)"
+  echo "docker output path: $docker_out"
   docker run --rm --platform "$platform" \
     -v "$ROOT:/workspace" \
     -w /workspace/src/grok-manager \
+    -e DOCKER_OUT="$docker_out" \
+    -e GOARCH_BUILD="$goarch" \
     "$image" \
-    sh -ec "
+    sh -ec '
       set -euo pipefail
       apk add --no-cache build-base >/dev/null
-      CGO_ENABLED=1 GOOS=linux GOARCH='${goarch}' \
-        go build -buildvcs=false -buildmode=c-shared -trimpath -ldflags='-s -w' \
-        -o '/workspace/dist/plugins/linux-musl/${goarch}/grok-manager.so' .
-    "
+      mkdir -p "$(dirname "$DOCKER_OUT")"
+      CGO_ENABLED=1 GOOS=linux GOARCH="${GOARCH_BUILD}" \
+        go build -buildvcs=false -buildmode=c-shared -trimpath -ldflags="-s -w" \
+        -o "$DOCKER_OUT" .
+      ls -lh "$DOCKER_OUT"
+    '
   rm -f "${out_file%.so}.h" "$out_dir/grok-manager.h" || true
   [[ -s "$out_file" ]] || { echo "musl plugin missing: $out_file" >&2; exit 1; }
   publish_release_copies "$out_file" "$release_plain" "$release_ver"

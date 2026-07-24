@@ -85,8 +85,8 @@ jobs:
 
       - name: Build grok-manager plugin (glibc + musl + windows)
         run: |
-          PLUGIN_SRC="$GITHUB_WORKSPACE/${GROK_MANAGER_DIR}" \
-          OUT_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
+          PLUGIN_SRC="$GROK_MANAGER_DIR" \
+          OUT_ROOT="dist/plugins" \
           GROK_MANAGER_VERSION="$GROK_MANAGER_VERSION" \
           GO_ALPINE_IMAGE="$GO_ALPINE_IMAGE" \
           bash .github/scripts/build-grok-manager.sh
@@ -161,12 +161,15 @@ jobs:
 
       - name: Build Linux/Windows CPA archives (glibc + musl + no-plugin)
         run: |
+          # Keep paths relative to repo root; the script normalizes them.
+          # Do NOT pre-expand GITHUB_WORKSPACE into BACKEND_DIR and then again into DIST_DIR
+          # (bash left-to-right env assignments would double the absolute path).
           VERSION="$VERSION_NUM" \
           COMMIT="$COMMIT" \
           BUILD_DATE="$BUILD_DATE" \
-          BACKEND_DIR="$GITHUB_WORKSPACE/${BACKEND_DIR}" \
-          DIST_DIR="$GITHUB_WORKSPACE/${BACKEND_DIR}/dist" \
-          PLUGIN_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
+          BACKEND_DIR="$BACKEND_DIR" \
+          DIST_DIR="$BACKEND_DIR/dist" \
+          PLUGIN_ROOT="dist/plugins" \
           GO_ALPINE_IMAGE="$GO_ALPINE_IMAGE" \
           bash .github/scripts/build-cpa-plugin-archives.sh
 
