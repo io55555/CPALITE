@@ -11,3 +11,9 @@
 - 开发与发布构建以 `src/grok-manager` 为准
 - 上游原版：`src原始代码/grok-manager`（保持与官方仓库一致，便于 diff/合并）
 - 集成说明：`src/grok-manager/CPA_INTEGRATION.md`
+
+## Linux 发布包（插件）
+- `CPA_*_linux_<arch>.tar.gz`：glibc（Ubuntu/Debian），可加载插件
+- `CPA_*_linux_<arch>_musl.tar.gz`：musl（Alpine），可加载插件
+- `CPA_*_linux_<arch>_no-plugin.tar.gz`：静态包，不可加载插件
+- 升级脚本 `up.cpa.release.sh` 会按 libc 自动选择；详见 `src/grok-manager/CPA_INTEGRATION.md`

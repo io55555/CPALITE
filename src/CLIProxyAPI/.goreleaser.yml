@@ -1,29 +1,32 @@
 version: 2
 
+# Linux archives are built separately with CGO (plugin-capable) and no-plugin variants.
+# This GoReleaser config only covers non-Linux targets that stay CGO-free.
 builds:
-  - id: "cli-proxy-api"
+  - id: "cli-proxy-api-nolinux"
     env:
       - CGO_ENABLED=0
     goos:
-      - linux
-      - windows
       - darwin
       - freebsd
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: freebsd
+        goarch: amd64
     main: ./cmd/server/
     binary: CPA
     ldflags:
       - -s -w -X 'main.Version={{.Version}}' -X 'main.Commit={{.ShortCommit}}' -X 'main.BuildDate={{.Date}}'
+
 archives:
-  - id: "cli-proxy-api"
+  - id: "cli-proxy-api-nolinux"
+    builds:
+      - cli-proxy-api-nolinux
     format: tar.gz
     name_template: >-
       CPA_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
       - LICENSE
       - README.md
@@ -32,6 +35,7 @@ archives:
 
 checksum:
   name_template: 'checksums.txt'
+  # regenerated later after custom linux/windows archives are added
 
 snapshot:
   name_template: "{{ incpatch .Version }}-next"

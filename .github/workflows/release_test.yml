@@ -27,7 +27,6 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref || github.sha }}
       FRONTEND_DIR: src/Cli-Proxy-API-Management-Center
       BACKEND_DIR: src/CLIProxyAPI
-      # Local plugin source (do not build from upstream-original trees)
       GROK_MANAGER_DIR: src/grok-manager
       GROK_MANAGER_VERSION: "1.3.7"
     steps:
@@ -41,6 +40,17 @@ jobs:
         run: |
           echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          VER="${VERSION#v}"
+          echo "VERSION_NUM=$VER" >> "$GITHUB_ENV"
+          GO_VER="$(awk '/^go / {print $2; exit}' "$BACKEND_DIR/go.mod")"
+          GO_VER="$(printf '%s\n' "$GO_VER" | awk -F. '{print $1"."$2}')"
+          echo "GO_ALPINE_IMAGE=golang:${GO_VER}-alpine" >> "$GITHUB_ENV"
+
+      - name: Setup QEMU (for alpine arm64 musl builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -64,17 +74,21 @@ jobs:
             ${{ env.BACKEND_DIR }}/go.sum
             ${{ env.GROK_MANAGER_DIR }}/go.mod
 
-      - name: Install CGO cross compilers for grok-manager
+      - name: Install CGO toolchains
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc g++ gcc-aarch64-linux-gnu g++-aarch64-linux-gnu gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 zip unzip
+          sudo apt-get install -y \
+            gcc g++ \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
+            zip unzip binutils
 
-      - name: Build grok-manager plugin (linux/windows)
+      - name: Build grok-manager plugin (glibc + musl + windows)
         run: |
-          # Use bash instead of chmod so tracked file modes stay clean for GoReleaser.
           PLUGIN_SRC="$GITHUB_WORKSPACE/${GROK_MANAGER_DIR}" \
           OUT_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
           GROK_MANAGER_VERSION="$GROK_MANAGER_VERSION" \
+          GO_ALPINE_IMAGE="$GO_ALPINE_IMAGE" \
           bash .github/scripts/build-grok-manager.sh
 
       - name: Create release notes
@@ -84,8 +98,27 @@ jobs:
           cat > "$RELEASE_NOTES_FILE" <<EOF
           Official base version: $VERSION
           Upstream baselines: see UPSTREAM_BASELINES.md
-          Includes: management.html, CLIProxyAPI multi-platform archives, grok-manager plugin (where built), checksums.txt
-          Plugin assets: grok-manager-<os>-<arch>.so|.dll (and versioned -vX-os-arch); also embedded under plugins/<os>/<arch>/ in CPA archives
+
+          ## Linux assets (choose by libc)
+
+          | Package | Host libc | Plugins |
+          |---|---|---|
+          | \`CPA_<ver>_linux_<arch>.tar.gz\` | glibc (Ubuntu/Debian) | Yes (CGO=1) |
+          | \`CPA_<ver>_linux_<arch>_musl.tar.gz\` | musl (Alpine) | Yes (CGO=1 musl) |
+          | \`CPA_<ver>_linux_<arch>_no-plugin.tar.gz\` | any (static) | No |
+
+          ## Plugin assets
+          - glibc: \`grok-manager-linux-amd64.so\` / \`grok-manager-linux-arm64.so\`
+          - musl/Alpine: \`grok-manager-linux-amd64-musl.so\` / \`grok-manager-linux-arm64-musl.so\`
+          - windows: \`grok-manager-windows-amd64.dll\`
+          - versioned copies: \`grok-manager-v${GROK_MANAGER_VERSION}-...\`
+          - Embedded path inside plugin-capable CPA archives: \`plugins/<os>/<arch>/grok-manager.so|.dll\`
+
+          ## Important
+          - Host binary and plugin **must use the same libc** (glibc with glibc, musl with musl).
+          - Alpine users should install \`_musl\` package (or use \`up.cpa.release.sh\`, which auto-selects).
+          - Dynamic plugins require a CGO-enabled host; static \`_no-plugin\` cannot load plugins.
+          - Windows plugins load via LoadDLL (host CGO not required).
 
           ${{ inputs.release_notes }}
           EOF
@@ -105,11 +138,8 @@ jobs:
 
       - name: Ensure clean git tree for GoReleaser
         run: |
-          # GoReleaser rejects dirty tracked files. Keep untracked build artifacts
-          # (management.html, dist/plugins, backend dist after this step, etc.).
           set -euo pipefail
           git status --short || true
-          # Restore tracked content/mode changes introduced by CI steps.
           git checkout -- .
           git clean -fd --exclude=management.html --exclude=dist --exclude=src/CLIProxyAPI/dist --exclude=src/Cli-Proxy-API-Management-Center/dist || true
           if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
@@ -118,9 +148,8 @@ jobs:
             exit 1
           fi
           echo "Tracked worktree is clean for GoReleaser."
-          git status --short || true
 
-      - name: Build archives with GoReleaser
+      - name: Build non-Linux archives with GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -130,11 +159,80 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Inject grok-manager into CPA archives
+      - name: Build Linux/Windows CPA archives (glibc + musl + no-plugin)
         run: |
+          VERSION="$VERSION_NUM" \
+          COMMIT="$COMMIT" \
+          BUILD_DATE="$BUILD_DATE" \
           BACKEND_DIR="$GITHUB_WORKSPACE/${BACKEND_DIR}" \
+          DIST_DIR="$GITHUB_WORKSPACE/${BACKEND_DIR}/dist" \
           PLUGIN_ROOT="$GITHUB_WORKSPACE/dist/plugins" \
-          bash .github/scripts/package-grok-manager.sh
+          GO_ALPINE_IMAGE="$GO_ALPINE_IMAGE" \
+          bash .github/scripts/build-cpa-plugin-archives.sh
+
+      - name: Verify plugin-capable binaries are dynamically linked
+        run: |
+          set -euo pipefail
+          DIST="$BACKEND_DIR/dist"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          check_tar_dynamic() {
+            local archive="$1" expect_musl="${2:-0}"
+            local name
+            name="$(basename "$archive")"
+            [[ -f "$archive" ]] || { echo "missing $archive" >&2; exit 1; }
+            rm -rf "$tmp/a"
+            mkdir -p "$tmp/a"
+            tar -xzf "$archive" -C "$tmp/a"
+            local bin
+            bin="$(find "$tmp/a" -maxdepth 2 -type f -name CPA | head -n1)"
+            [[ -n "$bin" ]] || { echo "CPA binary missing in $name" >&2; exit 1; }
+            if ! readelf -l "$bin" | grep -q 'Requesting program interpreter'; then
+              echo "$name is unexpectedly static (plugin host needs dynamic CGO binary)" >&2
+              exit 1
+            fi
+            if [[ "$expect_musl" == "1" ]]; then
+              if ! readelf -l "$bin" | grep -Ei 'musl|ld-musl' >/dev/null; then
+                echo "$name does not look like a musl binary" >&2
+                readelf -l "$bin" | grep -i interpreter || true
+                exit 1
+              fi
+            fi
+            local plugin
+            plugin="$(find "$tmp/a/plugins" -type f -name 'grok-manager.so' 2>/dev/null | head -n1 || true)"
+            [[ -n "$plugin" ]] || { echo "plugin missing inside $name" >&2; exit 1; }
+            echo "ok dynamic+plugin: $name"
+          }
+
+          check_tar_static() {
+            local archive="$1"
+            local name
+            name="$(basename "$archive")"
+            rm -rf "$tmp/a"
+            mkdir -p "$tmp/a"
+            tar -xzf "$archive" -C "$tmp/a"
+            local bin
+            bin="$(find "$tmp/a" -maxdepth 2 -type f -name CPA | head -n1)"
+            if readelf -l "$bin" | grep -q 'Requesting program interpreter'; then
+              echo "$name should be static no-plugin" >&2
+              exit 1
+            fi
+            if find "$tmp/a" -type f -name 'grok-manager.so' | grep -q .; then
+              echo "$name no-plugin archive should not embed plugins" >&2
+              exit 1
+            fi
+            echo "ok static no-plugin: $name"
+          }
+
+          check_tar_dynamic "$DIST/CPA_${VERSION_NUM}_linux_amd64.tar.gz" 0
+          check_tar_dynamic "$DIST/CPA_${VERSION_NUM}_linux_arm64.tar.gz" 0
+          check_tar_dynamic "$DIST/CPA_${VERSION_NUM}_linux_amd64_musl.tar.gz" 1
+          check_tar_dynamic "$DIST/CPA_${VERSION_NUM}_linux_arm64_musl.tar.gz" 1
+          check_tar_static "$DIST/CPA_${VERSION_NUM}_linux_amd64_no-plugin.tar.gz"
+          check_tar_static "$DIST/CPA_${VERSION_NUM}_linux_arm64_no-plugin.tar.gz"
+          [[ -f "$DIST/CPA_${VERSION_NUM}_windows_amd64.zip" ]] || { echo "windows zip missing" >&2; exit 1; }
+          echo "archive verification passed"
 
       - name: Create tag when missing
         run: |
@@ -157,6 +255,10 @@ jobs:
             dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-linux-amd64.so
             dist/plugins/release/grok-manager-linux-arm64.so
             dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-linux-arm64.so
+            dist/plugins/release/grok-manager-linux-amd64-musl.so
+            dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-linux-amd64-musl.so
+            dist/plugins/release/grok-manager-linux-arm64-musl.so
+            dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-linux-arm64-musl.so
             dist/plugins/release/grok-manager-windows-amd64.dll
             dist/plugins/release/grok-manager-v${{ env.GROK_MANAGER_VERSION }}-windows-amd64.dll
 
