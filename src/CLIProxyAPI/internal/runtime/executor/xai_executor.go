@@ -155,7 +155,7 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 	if err != nil {
 		return resp, err
 	}
-	applyXAIChatHeaders(httpReq, auth, token, true, prepared.sessionID)
+	applyXAIChatHeaders(e.cfg, httpReq, auth, token, true, prepared.sessionID)
 	e.recordXAIRequest(ctx, auth, url, httpReq.Header.Clone(), prepared.body)
 
 	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
@@ -214,6 +214,12 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 			cacheXAIReasoningReplayFromCompleted(ctx, prepared.replayScope, completedData)
 			var param any
 			out := sdktranslator.TranslateNonStream(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, completedData, &param)
+			if xaiOpenWebUICompatEnabled(e.cfg) && prepared.responseFormat == sdktranslator.FormatOpenAI {
+				out = convertXAIResponsesPayloadToOpenAIChat(ctx, req.Model, prepared.originalPayload, prepared.body, out)
+				headers := httpResp.Header.Clone()
+				headers.Set("Content-Type", "application/json")
+				return cliproxyexecutor.Response{Payload: out, Headers: headers}, nil
+			}
 			return cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}, nil
 		}
 	}
@@ -636,7 +642,7 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 	if err != nil {
 		return nil, err
 	}
-	applyXAIChatHeaders(httpReq, auth, token, true, prepared.sessionID)
+	applyXAIChatHeaders(e.cfg, httpReq, auth, token, true, prepared.sessionID)
 	e.recordXAIRequest(ctx, auth, url, httpReq.Header.Clone(), prepared.body)
 
 	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
@@ -678,7 +684,12 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 		responseFilter := newXAIInternalXSearchResponseFilter(prepared.filterInternalXSearch, prepared.clientDeclaredTools)
 		var pendingEventLine []byte
 		emitTranslatedLine := func(translatedLine []byte) bool {
-			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param, claudeInputTokens)
+			var chunks [][]byte
+			if xaiOpenWebUICompatEnabled(e.cfg) && prepared.responseFormat == sdktranslator.FormatOpenAI {
+				chunks = convertXAIStreamLineToOpenAIChat(ctx, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param)
+			} else {
+				chunks = helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param, claudeInputTokens)
+			}
 			for i := range chunks {
 				select {
 				case out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}:
@@ -898,7 +909,7 @@ func (e *XAIExecutor) prepareResponsesRequest(ctx context.Context, req cliproxye
 func (e *XAIExecutor) prepareResponsesRequestTo(ctx context.Context, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, stream bool, to sdktranslator.Format) (*xaiPreparedRequest, error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 	from := opts.SourceFormat
-	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
+	responseFormat := xaiForceChatCompletionsFormat(e.cfg, cliproxyexecutor.ResponseFormatOrSource(opts))
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
 		originalPayloadSource = opts.OriginalRequest
@@ -1155,9 +1166,11 @@ func applyXAICustomHeaders(r *http.Request, auth *cliproxyauth.Auth) {
 // applyXAIHeaders behavior. CLI chat-proxy identity headers are only attached
 // when using_api is false and the resolved chat base URL is the official CLI
 // chat-proxy endpoint.
-func applyXAIChatHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, stream bool, sessionID string) {
+func applyXAIChatHeaders(cfg *config.Config, r *http.Request, auth *cliproxyauth.Auth, token string, stream bool, sessionID string) {
 	if xaiUsingAPI(auth) {
 		applyXAIHeaders(r, auth, token, stream, sessionID)
+		// 配置开启时，在标准 Header 之后再固定 Grok Build 拟真字段
+		applyXAIGrokBuildHeaderDefaults(cfg, r)
 		return
 	}
 	applyXAIDefaultHeaders(r, token, stream, sessionID)
@@ -1167,6 +1180,8 @@ func applyXAIChatHeaders(r *http.Request, auth *cliproxyauth.Auth, token string,
 		r.Header.Set("User-Agent", "xai-grok-workspace/"+xaiClientVersionValue)
 	}
 	applyXAICustomHeaders(r, auth)
+	// 配置开启时覆盖为固定拟真 Header（含 User-Agent）
+	applyXAIGrokBuildHeaderDefaults(cfg, r)
 }
 
 func xaiResolveComposerSessionID(ctx context.Context, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, baseModel string) (string, error) {

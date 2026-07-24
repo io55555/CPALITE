@@ -1,3 +1,4 @@
+import { refreshVisibleQuotas } from '@/features/authFiles/refreshVisibleQuotas';
 import {
   useCallback,
   type CSSProperties,
@@ -570,6 +571,10 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   const currentPage = Math.min(page, totalPages);
   const start = (currentPage - 1) * pageSize;
   const pageItems = useMemo(() => sorted.slice(start, start + pageSize), [pageSize, sorted, start]);
+
+  const handleRefreshVisibleQuotas = useCallback(async () => {
+    await refreshVisibleQuotas(pageItems, showNotification, t);
+  }, [pageItems, showNotification, t]);
   const selectablePageItems = useMemo(
     () => pageItems.filter((file) => !isRuntimeOnlyAuthFile(file)),
     [pageItems]
@@ -799,6 +804,9 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
           <div className={styles.headerActions}>
             <Button variant="secondary" size="sm" onClick={handleHeaderRefresh} disabled={loading}>
               {t('common.refresh')}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => void handleRefreshVisibleQuotas()} disabled={connectionStatus !== 'connected'}>
+              刷新本页全部额度
             </Button>
             <Button
               size="sm"

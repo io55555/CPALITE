@@ -880,6 +880,8 @@ function getNextDirtyFields(
       'codexHeaderUserAgent',
       'codexHeaderBetaFeatures',
       'codexIdentityConfuse',
+      'xaiGrokBuildHeaderDefaults',
+      'xaiOpenWebUICompat',
       'host',
       'port',
       'tlsEnable',
@@ -1106,6 +1108,8 @@ export function useVisualConfig() {
         proxyUrl: typeof parsed['proxy-url'] === 'string' ? parsed['proxy-url'] : '',
         forceModelPrefix: Boolean(parsed['force-model-prefix']),
         passthroughHeaders: Boolean(parsed['passthrough-headers']),
+        xaiGrokBuildHeaderDefaults: Boolean(parsed['xai-grok-build-header-defaults']),
+        xaiOpenWebUICompat: Boolean(parsed['xai-openwebui-compat']),
         requestRetry: String(parsed['request-retry'] ?? ''),
         maxRetryCredentials: String(parsed['max-retry-credentials'] ?? ''),
         maxRetryInterval: String(parsed['max-retry-interval'] ?? ''),
@@ -1446,6 +1450,12 @@ export function useVisualConfig() {
           ensureMapInDoc(doc, ['codex']);
           setBooleanInDoc(doc, ['codex', 'identity-confuse'], values.codexIdentityConfuse);
           deleteIfMapEmpty(doc, ['codex']);
+        }
+        if (dirtyFields.has('xaiGrokBuildHeaderDefaults')) {
+          setBooleanInDoc(doc, ['xai-grok-build-header-defaults'], values.xaiGrokBuildHeaderDefaults);
+        }
+        if (dirtyFields.has('xaiOpenWebUICompat')) {
+          setBooleanInDoc(doc, ['xai-openwebui-compat'], values.xaiOpenWebUICompat);
         }
 
         const quotaDirty =

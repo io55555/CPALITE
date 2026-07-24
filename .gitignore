@@ -27,6 +27,13 @@ build/
 cpa.back*
 up.cpa*
 .codegraph/
+.codex/
+.gotest.*
+.gotest2.*
+.gobuild.*
+.gobuild2.*
+.gotest.*
+.gotest2.*
 
 # Python
 __pycache__/

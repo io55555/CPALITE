@@ -1,0 +1,23 @@
+
+> cli-proxy-webui-react@0.0.0 build
+> tsc && vite build
+
+ϵͳ�Ҳ���ָ����·����
+ϵͳ�Ҳ���ָ����·����
+[36mvite v8.1.4 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 810 modules transformed.
+rendering chunks...
+[plugin vite:singlefile] 
+
+[plugin vite:singlefile] Inlining: index-CiJ_FLTW.js
+[plugin vite:singlefile] Inlining: style-D_3JrapK.css
+computing gzip size...
+dist/index.html  4,021.18 kB │ gzip: 1,181.81 kB
+
+[33m[33m[PLUGIN_TIMINGS] [0mYour build spent significant time in plugins. Here is a breakdown:
+  - vite:css (75%)
+  - vite:css-post (13%)
+  - vite:asset (11%)
+See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+[39m
+[32m✓ built in 4.32s[39m

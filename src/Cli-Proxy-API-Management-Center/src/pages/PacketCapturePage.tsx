@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/Card';
 import { IconTrash2 } from '@/components/ui/icons';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { copyToClipboard } from '@/utils/clipboard';
 import { Select } from '@/components/ui/Select';
 import {
   packetCaptureApi,
@@ -16,6 +17,7 @@ import {
 } from '@/services/api/packetCapture';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { downloadBlob } from '@/utils/download';
+import { useNotificationStore } from '@/stores';
 import styles from './PacketCapturePage.module.scss';
 
 const ALL = '__all__';
@@ -538,6 +540,12 @@ const compactRuleSummary = (rule: PacketRule) => {
 };
 
 export function PacketCapturePage() {
+
+  const showNotification = useNotificationStore((s) => s.showNotification);
+  const handleCopyPacketContent = async (content: string) => {
+    const ok = await copyToClipboard(content || '');
+    showNotification(ok ? '已复制到剪贴板' : '复制失败', ok ? 'success' : 'error');
+  };
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const config = useConfigStore((state) => state.config);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -1077,7 +1085,10 @@ export function PacketCapturePage() {
       <Modal open={detail !== null} title="查看数据包" onClose={() => setDetail(null)} width={760}>
         {detail && packetOptions.map((item) => (
           <div className={styles.packetBlock} key={item.value}>
-            <h3>{item.label}</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <h3 style={{ margin: 0 }}>{item.label}</h3>
+              <Button size="sm" variant="secondary" onClick={() => void handleCopyPacketContent(detail.packets[item.value as keyof typeof detail.packets] || '')}>复制内容</Button>
+            </div>
             <pre>{detail.packets[item.value as keyof typeof detail.packets] || '-'}</pre>
           </div>
         ))}
@@ -1087,13 +1098,19 @@ export function PacketCapturePage() {
         {triggerDetailError && <p className={styles.errorText}>{triggerDetailError}</p>}
         {triggerDetail && packetOptions.map((item) => (
           <div className={styles.packetBlock} key={item.value}>
-            <h3>{item.label}</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <h3 style={{ margin: 0 }}>{item.label}</h3>
+              <Button size="sm" variant="secondary" onClick={() => void handleCopyPacketContent(triggerDetail.packets[item.value as keyof typeof triggerDetail.packets] || '')}>复制内容</Button>
+            </div>
             <pre>{triggerDetail.packets[item.value as keyof typeof triggerDetail.packets] || '-'}</pre>
           </div>
         ))}
         {triggerPacketDetail && (
           <div className={styles.packetBlock}>
-            <h3>{packetOptions.find((item) => item.value === triggerPacketDetail.packet_name)?.label || triggerPacketDetail.packet_name || '触发数据包'}</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <h3 style={{ margin: 0 }}>{packetOptions.find((item) => item.value === triggerPacketDetail.packet_name)?.label || triggerPacketDetail.packet_name || '触发数据包'}</h3>
+              <Button size="sm" variant="secondary" onClick={() => void handleCopyPacketContent(triggerPacketDetail.packet || '')}>复制内容</Button>
+            </div>
             <pre>{triggerPacketDetail.packet || '-'}</pre>
           </div>
         )}

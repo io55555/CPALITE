@@ -4627,7 +4627,7 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 		auth := &cliproxyauth.Auth{
 			Attributes: map[string]string{"base_url": xaiauth.DefaultAPIBaseURL},
 		}
-		applyXAIChatHeaders(req, auth, "xai-token", true, "conv-1")
+		applyXAIChatHeaders(nil, req, auth, "xai-token", true, "conv-1")
 
 		if got := req.Header.Get("Authorization"); got != "Bearer xai-token" {
 			t.Fatalf("Authorization = %q, want Bearer xai-token", got)
@@ -4654,7 +4654,7 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 				"base_url":  xaiauth.DefaultAPIBaseURL,
 			},
 		}
-		applyXAIChatHeaders(req, auth, "xai-token", true, "conv-1")
+		applyXAIChatHeaders(nil, req, auth, "xai-token", true, "conv-1")
 
 		if got := req.Header.Get("Authorization"); got != "Bearer xai-token" {
 			t.Fatalf("Authorization = %q, want Bearer xai-token", got)
@@ -4681,7 +4681,7 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 				xaiUsingAPIAttr: "false",
 			},
 		}
-		applyXAIChatHeaders(req, auth, "xai-token", false, "")
+		applyXAIChatHeaders(nil, req, auth, "xai-token", false, "")
 
 		if got := req.Header.Get(xaiTokenAuthHeader); got != "" {
 			t.Fatalf("%s = %q, want empty for custom gateway", xaiTokenAuthHeader, got)
@@ -4704,7 +4704,7 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 				"header:" + xaiClientVersionHeader: "custom-client-version",
 			},
 		}
-		applyXAIChatHeaders(req, auth, "xai-token", true, "")
+		applyXAIChatHeaders(nil, req, auth, "xai-token", true, "")
 
 		if got := req.Header.Get(xaiTokenAuthHeader); got != "custom-token-auth" {
 			t.Fatalf("%s = %q, want custom-token-auth", xaiTokenAuthHeader, got)
@@ -4722,7 +4722,7 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 				xaiUsingAPIAttr: "false",
 			},
 		}
-		applyXAIChatHeaders(req, auth, "xai-token", true, "")
+		applyXAIChatHeaders(nil, req, auth, "xai-token", true, "")
 
 		if got := req.Header.Get(xaiTokenAuthHeader); got != xaiTokenAuthValue {
 			t.Fatalf("%s = %q, want %q", xaiTokenAuthHeader, got, xaiTokenAuthValue)

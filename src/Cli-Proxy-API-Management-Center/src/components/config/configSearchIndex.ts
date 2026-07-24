@@ -426,7 +426,22 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
     qualifierKey: L('sections.headers.codex_title'),
     hintKey: L('sections.headers.codex_identity_confuse_desc'),
     yamlKeys: ['codex-header-defaults', 'identity-confuse'],
-    keywords: ['codex'],
+  },
+  {
+    fieldId: 'xaiGrokBuildHeaderDefaults',
+    sectionId: 'advanced',
+    labelKey: L('sections.headers.xai_grok_build_defaults'),
+    qualifierKey: L('sections.headers.xai_title'),
+    yamlKeys: ['xai-grok-build-header-defaults'],
+    keywords: ['xai', 'header'],
+  },
+  {
+    fieldId: 'xaiOpenWebUICompat',
+    sectionId: 'advanced',
+    labelKey: L('sections.headers.xai_openwebui_compat'),
+    qualifierKey: L('sections.headers.xai_title'),
+    yamlKeys: ['xai-openwebui-compat'],
+    keywords: ['xai', 'openwebui'],
   },
   // ── payload (coarse: one entry per rule group) ──────────────────────────────
   {

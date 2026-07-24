@@ -202,10 +202,20 @@ type Config struct {
 
 	// PacketCapture stores packet filter rules in config.yaml; packet records remain in sqlite.
 	PacketCapture PacketCaptureConfig `yaml:"packet-capture" json:"packet-capture"`
+	// XAIOpenWebUICompat enables Responses->ChatCompletions conversion for OpenWebUI (default off).
+	XAIOpenWebUICompat bool `yaml:"xai-openwebui-compat" json:"xai-openwebui-compat"`
+	// XAIGrokBuildHeaderDefaults enables fixed Grok Build UA/headers for xAI auth files (default off).
+	XAIGrokBuildHeaderDefaults bool `yaml:"xai-grok-build-header-defaults" json:"xai-grok-build-header-defaults"`
 
 	ConfigFilePath string `yaml:"-" json:"-"`
 
 	legacyMigrationPending bool `yaml:"-" json:"-"`
+
+	// CredentialConcurrency contains Home-authoritative credential lifecycle settings.
+	CredentialConcurrency CredentialConcurrencyConfig `yaml:"credential-concurrency" json:"credential-concurrency"`
+
+	// CredentialInFlight configures credential observation snapshots.
+	CredentialInFlight CredentialInFlightConfig `yaml:"credential-in-flight" json:"credential-in-flight"`
 }
 
 // PluginsConfig holds dynamic plugin system settings.

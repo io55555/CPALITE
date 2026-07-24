@@ -137,6 +137,8 @@ export type VisualConfigValues = {
   codexHeaderUserAgent: string;
   codexHeaderBetaFeatures: string;
   codexIdentityConfuse: boolean;
+  xaiGrokBuildHeaderDefaults: boolean;
+  xaiOpenWebUICompat: boolean;
   payloadDefaultRules: PayloadRule[];
   payloadDefaultRawRules: PayloadRule[];
   payloadOverrideRules: PayloadRule[];
@@ -202,6 +204,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
   codexHeaderUserAgent: '',
   codexHeaderBetaFeatures: '',
   codexIdentityConfuse: false,
+  xaiGrokBuildHeaderDefaults: false,
+  xaiOpenWebUICompat: false,
   payloadDefaultRules: [],
   payloadDefaultRawRules: [],
   payloadOverrideRules: [],

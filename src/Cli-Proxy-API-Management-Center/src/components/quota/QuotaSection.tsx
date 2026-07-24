@@ -241,6 +241,17 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     [config, disabled, quota, setQuota, showNotification, t]
   );
 
+  const refreshVisibleQuotas = useCallback(async () => {
+    const targets = pageItems.filter((file) => !disabled && !file.disabled);
+    if (targets.length === 0) {
+      showNotification(t('common.no_data') || '当前没有可刷新的铭牌', 'info');
+      return;
+    }
+    for (const file of targets) {
+      await refreshQuotaForFile(file);
+    }
+  }, [disabled, pageItems, refreshQuotaForFile, showNotification, t]);
+
   const resetQuotaForFile = useCallback(
     (file: AuthFileItem) => {
       const resetQuota = config.resetQuota;
@@ -327,6 +338,18 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
               {t('auth_files.view_mode_all')}
             </Button>
           </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            className={styles.refreshAllButton}
+            onClick={() => void refreshVisibleQuotas()}
+            disabled={disabled}
+            title="刷新本页全部额度"
+            aria-label="刷新本页全部额度"
+          >
+            <IconRefreshCw size={16} />
+            刷新本页全部额度
+          </Button>
           <Button
             variant="secondary"
             size="sm"

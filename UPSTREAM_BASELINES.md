@@ -2,9 +2,9 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: f71ec0eb6776854457892452cf28c47f0d658251
-- tag: v7.2.95
-- note: selectively merged and validated against local enhancement-preserving overrides; retained packet capture/filtering, status-rulers, provider enhancements, quota display fixes, OpenAI-compatible cooldown/candidate-skip behavior, auth-file cooldown views, UA/request logging, proxy-failure 3-minute cooldown behavior, and added provider-specific Codex/xAI quota cooldown configuration plus xAI packet-filter cooldown handling
+- commit: 42f36b94e0805a9897c3aa3be46a2b124be0057e
+- tag: v7.2.97
+- note: selectively merged new files + unmodified upstream paths from v7.2.95..v7.2.97; kept heavily customized local chains (service/handlers/server/websockets/config/packet/cooldown) and carefully upgraded auth conductor for home concurrency compatibility; Management Center remains v1.18.6 (already latest)
 
 ## Cli-Proxy-API-Management-Center
 - branch: main

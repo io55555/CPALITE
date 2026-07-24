@@ -362,8 +362,23 @@ func normalizeAccountInspectionSchedule(input accountInspectionSchedule) account
 	if settings.TargetType == "" {
 		settings.TargetType = defaults.TargetType
 	}
-	if _, ok := accountInspectionSupportedProviders[settings.TargetType]; !ok && settings.TargetType != accountInspectionProviderAll {
-		settings.TargetType = defaults.TargetType
+	if settings.TargetType != accountInspectionProviderAll {
+		parts := strings.Split(settings.TargetType, ",")
+		validParts := make([]string, 0, len(parts))
+		for _, part := range parts {
+			p := strings.ToLower(strings.TrimSpace(part))
+			if p == "" {
+				continue
+			}
+			if _, ok := accountInspectionSupportedProviders[p]; ok {
+				validParts = append(validParts, p)
+			}
+		}
+		if len(validParts) == 0 {
+			settings.TargetType = defaults.TargetType
+		} else {
+			settings.TargetType = strings.Join(validParts, ",")
+		}
 	}
 	if settings.Workers <= 0 {
 		settings.Workers = defaults.Workers
@@ -1258,13 +1273,20 @@ func accountFromAuth(auth *coreauth.Auth) accountInspectionAccount {
 }
 
 func shouldInspectAccount(account accountInspectionAccount, targetType string) bool {
-	if account.Auth == nil {
-		return false
+	targetType = strings.ToLower(strings.TrimSpace(targetType))
+	if targetType == "" || targetType == accountInspectionProviderAll {
+		return true
 	}
-	if _, ok := accountInspectionSupportedProviders[account.Provider]; !ok {
-		return false
+	for _, part := range strings.Split(targetType, ",") {
+		p := strings.ToLower(strings.TrimSpace(part))
+		if p == "" {
+			continue
+		}
+		if p == account.Provider {
+			return true
+		}
 	}
-	return targetType == accountInspectionProviderAll || targetType == account.Provider
+	return false
 }
 
 func sampleAccounts(accounts []accountInspectionAccount, sampleSize int) []accountInspectionAccount {

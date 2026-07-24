@@ -582,3 +582,9 @@ nonstream-keepalive-interval: 0
 #   # ?????false ????????
 #   cooldown-log: true
 #   filter-rules: []
+
+# Enable xAI Responses -> OpenAI Chat Completions conversion for OpenWebUI (default false).
+# xai-openwebui-compat: false
+
+# Enable fixed Grok Build header defaults for xAI auth-file requests (default false).
+# xai-grok-build-header-defaults: false

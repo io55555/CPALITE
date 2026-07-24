@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -1313,6 +1313,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
   const [refreshingTokenKey, setRefreshingTokenKey] = useState<string | null>(null);
   const [exportingAuthFiles, setExportingAuthFiles] = useState(false);
   const [selectedAssetProvider, setSelectedAssetProvider] = useState<string>('all');
+  const [selectedInspectionProviders, setSelectedInspectionProviders] = useState<string[]>([]);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getDocumentTheme());
   const logListRef = useRef<HTMLDivElement | null>(null);
   const resultsPanelRef = useRef<HTMLDivElement | null>(null);
@@ -1470,6 +1471,19 @@ export function MonitoringCenterSsfunInspectionPanel() {
       setLogsCollapsed(false);
 
       try {
+        // 巡检前将渠道多选写入 targetType（逗号分隔；空=全部）
+        const targetType = selectedInspectionProviders.length > 0
+          ? selectedInspectionProviders.join(',')
+          : (inspectionSettings.targetType || 'all');
+        if (schedule) {
+          await accountInspectionApi.updateSchedule({
+            ...schedule,
+            settings: {
+              ...inspectionSettings,
+              targetType,
+            },
+          });
+        }
         const response = await accountInspectionApi.runNow();
         applyBackendResponse(response);
       } catch (error) {
@@ -1478,7 +1492,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
         setLogsCollapsed(false);
       }
     },
-    [appendLog, applyBackendResponse, connectionStatus, showNotification, t]
+    [appendLog, applyBackendResponse, connectionStatus, inspectionSettings, schedule, selectedInspectionProviders, showNotification, t]
   );
 
   const handleRunInspection = useCallback(() => {
@@ -2100,7 +2114,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
         nextRunAt: scheduleDraft.enabled
           ? (schedule?.nextRunAt ?? 0)
           : 0,
-        settings: nextSettings,
+        settings: { ...nextSettings, targetType: selectedInspectionProviders.length > 0 ? selectedInspectionProviders.join(',') : nextSettings.targetType },
       });
       applyBackendResponse(response);
       setIsSettingsModalOpen(false);
@@ -2115,7 +2129,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
   const handleResetSettings = useCallback(() => {
     clearAccountInspectionConfigurableSettings();
     const nextSettings = saveAccountInspectionConfigurableSettings(DEFAULT_ACCOUNT_INSPECTION_SETTINGS);
-    dispatchBackendState({ type: 'resetSettings', settings: nextSettings });
+    dispatchBackendState({ type: 'resetSettings', settings: { ...nextSettings, targetType: selectedInspectionProviders.length > 0 ? selectedInspectionProviders.join(',') : nextSettings.targetType } });
     showNotification(t('monitoring.account_inspection_settings_reset'), 'success');
   }, [showNotification, t]);
 
@@ -2144,6 +2158,71 @@ export function MonitoringCenterSsfunInspectionPanel() {
     settingsDraft.autoExecuteRequestErrorAction !== 'none' ? `${t('monitoring.account_inspection_account_request_error')}: ${draftRequestErrorActionLabel}` : '',
   ].filter(Boolean).join(' · ') || settingDisabledLabel;
 
+  const handleExportResultsEmails = useCallback(() => {
+    const rows = resultsViewState.rows
+      .map((row) => String(row.item.email || '').trim())
+      .filter(Boolean);
+    if (rows.length === 0) {
+      showNotification('没有可导出的邮箱', 'info');
+      return;
+    }
+    const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inspection-emails-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showNotification('已导出邮箱列表', 'success');
+  }, [resultsViewState.rows, showNotification]);
+
+  const handleExportResultsFull = useCallback(() => {
+    const rows = resultsViewState.rows.map((row, index) => {
+      const item = row.item as any;
+      return [
+        index + 1,
+        item.email || '',
+        item.provider || '',
+        item.fileName || item.file_name || '',
+        item.verdict || item.status || row.healthStatus || '',
+        item.message || item.error || '',
+      ].join('\t');
+    });
+    if (rows.length === 0) {
+      showNotification('没有可导出的巡检结果', 'info');
+      return;
+    }
+    const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inspection-results-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showNotification('已导出完整巡检结果', 'success');
+  }, [resultsViewState.rows, showNotification]);
+
+  const handleExportLogsFull = useCallback(() => {
+    const rows = logs.map((entry) => {
+      const ts = new Date(entry.timestamp).toLocaleString();
+      // 高亮/绿色日志在导出行前加标记，便于文本检索
+      const mark = entry.level === 'error' || entry.level === 'warning' ? '【高亮】' : entry.level === 'success' ? '【绿色】' : '';
+      return `${mark}${ts}  ${entry.message}`;
+    });
+    if (rows.length === 0) {
+      showNotification('没有可导出的巡检日志', 'info');
+      return;
+    }
+    const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inspection-logs-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showNotification('已导出完整巡检日志', 'success');
+  }, [logs, showNotification]);
+
   return (
     <div className={styles.page}>
       <Card className={styles.heroCard}>
@@ -2166,6 +2245,41 @@ export function MonitoringCenterSsfunInspectionPanel() {
         </div>
 
         <div className={styles.assetOverviewGrid}>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <strong>巡检渠道选择</strong>
+            <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={selectedInspectionProviders.length === 0}
+                onChange={() => setSelectedInspectionProviders([])}
+              />
+              全部渠道
+            </label>
+            {authFileStats.providers.map((provider) => {
+              const checked = selectedInspectionProviders.includes(provider.provider);
+              return (
+                <label key={`inspect-${provider.provider}`} style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      setSelectedInspectionProviders((prev) => {
+                        if (prev.includes(provider.provider)) {
+                          return prev.filter((item) => item !== provider.provider);
+                        }
+                        return [...prev, provider.provider];
+                      });
+                    }}
+                  />
+                  {resolveProviderDisplayLabel(provider.provider)} ({provider.total})
+                </label>
+              );
+            })}
+            <span style={{ opacity: 0.75 }}>
+              {selectedInspectionProviders.length === 0 ? '当前：巡检全部渠道' : `当前：仅巡检 ${selectedInspectionProviders.length} 个渠道`}
+            </span>
+          </div>
+
           <div className={styles.assetKpiGrid}>
             {accountAssetCards.map((card, index) => (
               <Card
@@ -2197,7 +2311,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
             <div className={styles.providerSelectorList}>
               <button
                 type="button"
-                className={[styles.providerSelectorRow, selectedAssetProvider === 'all' ? styles.providerSelectorRowActive : '']
+                className={[styles.providerSelectorRow, selectedAssetProvider === 'all' ? styles.providerSelectorRowActive : '', selectedInspectionProviders.length === 0 ? styles.providerSelectorRowActive : '']
                   .filter(Boolean)
                   .join(' ')}
                 onClick={() => setSelectedAssetProvider('all')}
@@ -2435,6 +2549,10 @@ export function MonitoringCenterSsfunInspectionPanel() {
         <div className={styles.operationModuleHeader}>
           <div>
             <h2>{t('monitoring.account_inspection_results_title')}</h2>
+            <div style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
+              <Button size="sm" variant="secondary" onClick={handleExportResultsEmails}>导出txt(仅邮箱)</Button>
+              <Button size="sm" variant="secondary" onClick={handleExportResultsFull}>导出txt(完整)</Button>
+            </div>
             <p>{t('monitoring.account_inspection_results_desc')}</p>
           </div>
           {result ? (
@@ -2461,6 +2579,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
             <div className={styles.tableWrap}>
               <table className={styles.table}>
                 <colgroup>
+                  <col style={{ width: 56 }} />
                   <col className={styles.accountColumn} />
                   <col className={styles.healthColumn} />
                   <col className={styles.enabledColumn} />
@@ -2471,6 +2590,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
                 </colgroup>
                 <thead>
                   <tr>
+                    <th>#</th>
                     <th>{t('monitoring.account_label')}</th>
                     <th>{t('monitoring.account_inspection_health_status')}</th>
                     <th>{t('monitoring.account_inspection_enabled_status')}</th>
@@ -2482,10 +2602,11 @@ export function MonitoringCenterSsfunInspectionPanel() {
                 </thead>
                 <tbody>
                   {filteredResultRows.length > 0 ? (
-                    filteredResultRows.map(({ item, healthStatus, manualActions }) => {
+                    filteredResultRows.map(({ item, healthStatus, manualActions }, rowIndex) => {
                       const tokenRefreshDetail = formatTokenRefreshDetail(item, i18n.language, t);
                       return (
                         <tr key={item.key}>
+                          <td>{rowIndex + 1}</td>
                           <td><div className={styles.primaryCell}><span>{item.fileName}</span><small>{item.provider}</small></div></td>
                           <td><span className={`${styles.healthBadge} ${healthToneClass[healthStatus]}`}>{t(healthLabelKey[healthStatus])}</span></td>
                           <td><span className={item.disabled ? styles.stateTextMuted : styles.stateTextGood}>{formatCurrentStateLabel(item, t)}</span></td>
@@ -2531,7 +2652,7 @@ export function MonitoringCenterSsfunInspectionPanel() {
                       );
                     })
                   ) : (
-                    <tr><td colSpan={7}><div className={styles.emptyBlockSmall}>{t('monitoring.account_inspection_no_filtered_results')}</div></td></tr>
+                    <tr><td colSpan={8}><div className={styles.emptyBlockSmall}>{t('monitoring.account_inspection_no_filtered_results')}</div></td></tr>
                   )}
                 </tbody>
               </table>
@@ -2550,6 +2671,9 @@ export function MonitoringCenterSsfunInspectionPanel() {
         <div className={styles.operationModuleHeader}>
           <div>
             <h2>{t('monitoring.account_inspection_logs_title')}</h2>
+            <div style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
+              <Button size="sm" variant="secondary" onClick={handleExportLogsFull}>导出txt(完整)</Button>
+            </div>
             <p>{t('monitoring.account_inspection_logs_desc')}</p>
           </div>
           <div className={styles.logHeaderActions}>

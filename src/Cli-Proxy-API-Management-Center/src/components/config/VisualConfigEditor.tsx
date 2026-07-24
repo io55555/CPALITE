@@ -1728,7 +1728,29 @@ export function VisualConfigEditor({
                           onChange={(codexIdentityConfuse) => onChange({ codexIdentityConfuse })}
                         />
                       </FieldAnchor>
-                    </SectionGrid>
+                    
+                    <div className={styles.subsectionHeader}>
+                      <h4>{t('config_management.visual.sections.headers.xai_title')}</h4>
+                    </div>
+                    <div className={styles.fieldGrid}>
+                      <FieldAnchor fieldId="xaiGrokBuildHeaderDefaults">
+                        <ToggleRow
+                          title={t('config_management.visual.sections.headers.xai_grok_build_defaults')}
+                          description={t('config_management.visual.sections.headers.xai_grok_build_defaults_desc')}
+                          checked={values.xaiGrokBuildHeaderDefaults}
+                          onChange={(xaiGrokBuildHeaderDefaults) => onChange({ xaiGrokBuildHeaderDefaults })}
+                        />
+                      </FieldAnchor>
+                      <FieldAnchor fieldId="xaiOpenWebUICompat">
+                        <ToggleRow
+                          title={t('config_management.visual.sections.headers.xai_openwebui_compat')}
+                          description={t('config_management.visual.sections.headers.xai_openwebui_compat_desc')}
+                          checked={values.xaiOpenWebUICompat}
+                          onChange={(xaiOpenWebUICompat) => onChange({ xaiOpenWebUICompat })}
+                        />
+                      </FieldAnchor>
+                    </div>
+</SectionGrid>
                   </SectionStack>
                 </Collapsible>
               </SectionStack>
