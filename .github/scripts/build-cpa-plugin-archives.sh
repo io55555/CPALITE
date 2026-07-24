@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build CPA Linux/Windows archives for plugin support.
+# Build CPA Linux/Windows release archives.
+# grok-manager is compiled into the CPA binary (in-process builtin); no .so/.dll packaging.
+#
 # Variants:
-#   linux default       : CGO=1 glibc  -> can dlopen plugins (Ubuntu/Debian)
-#   linux _no-plugin    : CGO=0 static -> Alpine/OpenWrt portable, NO plugins
-#   linux _musl         : CGO=1 musl   -> Alpine plugin-capable
-#   windows             : CGO=0 host   -> plugins via LoadDLL
+#   linux default    : CGO=1 glibc
+#   linux _no-plugin : CGO=0 static (portable; name kept for compatibility)
+#   linux _musl      : CGO=1 musl (Alpine-native dynamic binary)
+#   windows          : CGO=0
 
 ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 ROOT="$(cd "$ROOT" && pwd)"
 
-# Accept relative or absolute BACKEND_DIR/DIST_DIR; never double-prefix GITHUB_WORKSPACE.
 if [[ -z "${BACKEND_DIR:-}" ]]; then
   BACKEND_DIR="$ROOT/src/CLIProxyAPI"
 elif [[ "$BACKEND_DIR" != /* ]]; then
@@ -27,19 +28,12 @@ fi
 mkdir -p "$DIST_DIR"
 DIST_DIR="$(cd "$DIST_DIR" && pwd)"
 
-if [[ -z "${PLUGIN_ROOT:-}" ]]; then
-  PLUGIN_ROOT="$ROOT/dist/plugins"
-elif [[ "$PLUGIN_ROOT" != /* ]]; then
-  PLUGIN_ROOT="$ROOT/$PLUGIN_ROOT"
-fi
-
 VERSION="${VERSION:-dev}"
 COMMIT="${COMMIT:-unknown}"
 BUILD_DATE="${BUILD_DATE:-unknown}"
 VER_NUM="${VERSION#v}"
 GO_ALPINE_IMAGE="${GO_ALPINE_IMAGE:-}"
 
-# Path of backend inside the docker mount at /workspace
 if [[ "$BACKEND_DIR" == "$ROOT" ]]; then
   BACKEND_REL="."
 elif [[ "$BACKEND_DIR" == "$ROOT"/* ]]; then
@@ -53,7 +47,6 @@ echo "ROOT=$ROOT"
 echo "BACKEND_DIR=$BACKEND_DIR"
 echo "BACKEND_REL=$BACKEND_REL"
 echo "DIST_DIR=$DIST_DIR"
-echo "PLUGIN_ROOT=$PLUGIN_ROOT"
 
 cd "$BACKEND_DIR"
 
@@ -68,35 +61,6 @@ detect_go_alpine_image() {
   fi
   ver="$(printf '%s\n' "$ver" | awk -F. '{print $1"."$2}')"
   echo "golang:${ver}-alpine"
-}
-
-embed_plugin() {
-  local work_dir="$1" goos="$2" goarch="$3" kind="$4"
-  local pext="so"
-  [[ "$goos" == "windows" ]] && pext="dll"
-
-  local plugin_src=""
-  case "$kind" in
-    musl)
-      plugin_src="$PLUGIN_ROOT/linux-musl/${goarch}/grok-manager.${pext}"
-      ;;
-    *)
-      plugin_src="$PLUGIN_ROOT/${goos}/${goarch}/grok-manager.${pext}"
-      ;;
-  esac
-
-  if [[ -f "$plugin_src" ]]; then
-    mkdir -p "$work_dir/plugins/${goos}/${goarch}"
-    cp -f "$plugin_src" "$work_dir/plugins/${goos}/${goarch}/grok-manager.${pext}"
-    if [[ "$kind" == "musl" ]]; then
-      cp -f "$plugin_src" "$work_dir/plugins/${goos}/${goarch}/grok-manager-linux-${goarch}-musl.${pext}"
-    else
-      cp -f "$plugin_src" "$work_dir/plugins/${goos}/${goarch}/grok-manager-${goos}-${goarch}.${pext}"
-    fi
-    echo "embedded plugin ($kind): plugins/${goos}/${goarch}/grok-manager.${pext}"
-  else
-    echo "warning: plugin missing for ${goos}/${goarch} kind=${kind}: $plugin_src" >&2
-  fi
 }
 
 package_archive() {
@@ -123,7 +87,7 @@ copy_docs() {
 }
 
 build_one() {
-  local goos="$1" goarch="$2" cgo="$3" cc="${4:-}" suffix="${5:-}" kind="${6:-glibc}"
+  local goos="$1" goarch="$2" cgo="$3" cc="${4:-}" suffix="${5:-}"
   local out_dir work_dir binary_name
   out_dir="$DIST_DIR/build/${goos}_${goarch}${suffix}"
   work_dir="$out_dir/archive"
@@ -135,7 +99,7 @@ build_one() {
     binary_name="CPA.exe"
   fi
 
-  echo "Building ${goos}/${goarch} cgo=${cgo} kind=${kind} suffix=${suffix:-none}"
+  echo "Building ${goos}/${goarch} cgo=${cgo} suffix=${suffix:-none}"
   (
     export GOOS="$goos" GOARCH="$goarch" CGO_ENABLED="$cgo"
     if [[ -n "$cc" ]]; then
@@ -152,15 +116,11 @@ build_one() {
   if [[ "$cgo" == "0" && "$goos" == "linux" ]]; then
     if command -v readelf >/dev/null 2>&1; then
       if readelf -l "$work_dir/${binary_name}" | grep -q 'Requesting program interpreter'; then
-        echo "no-plugin binary unexpectedly requires dynamic interpreter" >&2
+        echo "static/no-plugin binary unexpectedly requires dynamic interpreter" >&2
         readelf -l "$work_dir/${binary_name}" >&2 || true
         exit 1
       fi
     fi
-  fi
-
-  if [[ "$cgo" == "1" || "$goos" == "windows" ]]; then
-    embed_plugin "$work_dir" "$goos" "$goarch" "$kind"
   fi
 
   copy_docs "$work_dir"
@@ -179,8 +139,6 @@ build_musl_one() {
   mkdir -p "$work_dir"
   image="$(detect_go_alpine_image)"
 
-  # Write into the same host work_dir via the /workspace mount.
-  # Prefer DIST_DIR if it is under ROOT; otherwise fall back to backend-relative dist.
   if [[ "$DIST_DIR" == "$ROOT"/* ]]; then
     docker_out="/workspace/${DIST_DIR#"$ROOT"/}/build/linux_${goarch}_musl/archive/CPA"
   else
@@ -190,7 +148,6 @@ build_musl_one() {
 
   echo "Building linux/${goarch} musl via docker image=$image platform=$platform"
   echo "docker output path: $docker_out"
-  echo "host expect path:   $host_out"
 
   docker run --rm --platform "$platform" \
     -v "$ROOT:/workspace" \
@@ -216,24 +173,18 @@ build_musl_one() {
 
   if [[ ! -s "$host_out" ]]; then
     echo "musl CPA binary missing for $goarch at $host_out" >&2
-    echo "listing dist build tree:" >&2
     find "$DIST_DIR/build" -maxdepth 4 -type f -print >&2 || true
     exit 1
   fi
-  embed_plugin "$work_dir" linux "$goarch" musl
   copy_docs "$work_dir"
   package_archive "$work_dir" linux "$goarch" "_musl"
 }
 
-# Linux plugin-capable (glibc)
-build_one linux amd64 1 gcc "" glibc
-build_one linux arm64 1 aarch64-linux-gnu-gcc "" glibc
+build_one linux amd64 1 gcc
+build_one linux arm64 1 aarch64-linux-gnu-gcc
+build_one linux amd64 0 "" "_no-plugin"
+build_one linux arm64 0 "" "_no-plugin"
 
-# Linux portable no-plugin (static / any libc when plugins are not needed)
-build_one linux amd64 0 "" "_no-plugin" none
-build_one linux arm64 0 "" "_no-plugin" none
-
-# Linux Alpine/musl plugin-capable
 if command -v docker >/dev/null 2>&1; then
   build_musl_one amd64
   build_musl_one arm64
@@ -241,8 +192,7 @@ else
   echo "warning: docker not available; skip musl CPA archives" >&2
 fi
 
-# Windows (plugins via LoadDLL; no CGO needed on host)
-build_one windows amd64 0 x86_64-w64-mingw32-gcc "" windows
+build_one windows amd64 0
 
 (
   cd "$DIST_DIR"
@@ -257,4 +207,4 @@ build_one windows amd64 0 x86_64-w64-mingw32-gcc "" windows
   ls -lh CPA_* checksums.txt 2>/dev/null || true
 )
 
-echo "CPA linux/windows archives ready in $DIST_DIR"
+echo "CPA archives ready in $DIST_DIR (grok-manager is built into binary; no plugin assets)"

@@ -25,7 +25,7 @@ opencode.json*
 CPA.exe
 build/
 cpa.back*
-up.cpa*
+#up.cpa*
 .codegraph/
 .codex/
 .gotest.*

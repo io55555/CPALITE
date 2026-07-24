@@ -1,0 +1,6 @@
+# 合并进 config.yaml
+plugins:
+  enabled: true
+  configs:
+    grok-manager:
+      enabled: true

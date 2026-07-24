@@ -71,7 +71,7 @@ build_glibc_one() {
     cd "$PLUGIN_SRC"
     GOOS="$goos" GOARCH="$goarch" CC="$cc" \
       go build -buildvcs=false -buildmode=c-shared -trimpath -ldflags="-s -w" \
-      -o "$out_file" .
+      -o "$out_file" ./plugin
   )
   rm -f "${out_file%.${ext}}.h" "$out_dir/grok-manager.h" || true
   publish_release_copies "$out_file" "$release_plain" "$release_ver"
@@ -113,7 +113,7 @@ build_musl_one() {
       mkdir -p "$(dirname "$DOCKER_OUT")"
       CGO_ENABLED=1 GOOS=linux GOARCH="${GOARCH_BUILD}" \
         go build -buildvcs=false -buildmode=c-shared -trimpath -ldflags="-s -w" \
-        -o "$DOCKER_OUT" .
+        -o "$DOCKER_OUT" ./plugin
       ls -lh "$DOCKER_OUT"
     '
   rm -f "${out_file%.so}.h" "$out_dir/grok-manager.h" || true

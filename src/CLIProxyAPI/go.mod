@@ -111,3 +111,7 @@ require (
 	google.golang.org/protobuf v1.34.1
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )
+
+require grok-manager v0.0.0
+
+replace grok-manager => ../grok-manager

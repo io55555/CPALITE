@@ -601,4 +601,6 @@ nonstream-keepalive-interval: 0
 #   dir: plugins
 #   configs:
 #     grok-manager:
+#       # Built into CPA (in-process). Works on Alpine/musl without loading .so.
+#       # Set CPA_GROK_MANAGER_BUILTIN=0 to force dynamic plugins/linux/<arch>/grok-manager.so.
 #       enabled: true

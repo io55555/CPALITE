@@ -220,6 +220,7 @@ func (h *Host) ApplyConfig(ctx context.Context, cfg *config.Config) {
 		return
 	}
 	files = h.withLoadedPluginFallbacks(files, rc.Items, desiredVersions)
+	files = injectBuiltinGrokManager(files, rc.Items)
 
 	records := make([]capabilityRecord, 0, len(files))
 	loadedFiles := make([]pluginFile, 0, len(files))
@@ -326,7 +327,15 @@ func (h *Host) ApplyConfig(ctx context.Context, cfg *config.Config) {
 }
 
 func (h *Host) load(file pluginFile) (*loadedPlugin, error) {
-	client, errOpen := h.loader.Open(file, h)
+	var (
+		client  pluginClient
+		errOpen error
+	)
+	if isBuiltinPluginPath(file.Path) {
+		client, errOpen = openBuiltinPlugin(file, h)
+	} else {
+		client, errOpen = h.loader.Open(file, h)
+	}
 	if errOpen != nil {
 		return nil, errOpen
 	}

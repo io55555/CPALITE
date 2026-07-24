@@ -1,0 +1,32 @@
+# 在 Alpine 宿主机上也可以跑；关键是「容器内」必须是 Debian/glibc，不能用 Alpine 容器装 grok-manager。
+#
+# 使用：
+#   cd <repo>
+#   CPA_VERSION=v7.2.97-5 TARGETARCH=arm64 docker compose -f docker/docker-compose.grok-manager.yml up -d --build
+#
+# 把下面 volumes 改成你的真实配置/认证目录。
+
+services:
+  cpa:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.grok-manager
+      args:
+        CPA_VERSION: ${CPA_VERSION:-latest}
+        TARGETARCH: ${TARGETARCH:-amd64}
+        REPO: ${CPA_RELEASE_REPO:-io55555/CPALITE}
+        GROK_MANAGER_VERSION: ${GROK_MANAGER_VERSION:-1.3.7}
+    image: ${CPA_IMAGE:-cpa-grok:local}
+    container_name: cpa
+    restart: unless-stopped
+    ports:
+      - "${CPA_PORT:-8317}:8317"
+    volumes:
+      # 你的业务配置（需包含 plugins.enabled=true，见 config.grok-manager.snippet.yaml）
+      - ${CPA_CONFIG_PATH:-./config.yaml}:/CLIProxyAPI/config.yaml:ro
+      - ${CPA_AUTH_PATH:-./auths}:/root/.cli-proxy-api
+      - ${CPA_LOG_PATH:-./logs}:/CLIProxyAPI/logs
+      # 如需热更新插件，可额外挂载：
+      # - ./plugins:/CLIProxyAPI/plugins
+    environment:
+      TZ: Asia/Shanghai

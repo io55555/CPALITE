@@ -18,7 +18,7 @@ go build \
   -trimpath \
   -ldflags="-s -w" \
   -o "$OUT" \
-  .
+  ./plugin
 
 if [[ "$ARCH" == "amd64" ]]; then
   cp -f "$OUT" dist/grok-manager.so
