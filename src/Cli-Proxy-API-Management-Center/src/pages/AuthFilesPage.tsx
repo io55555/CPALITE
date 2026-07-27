@@ -159,6 +159,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
     deleting,
     deletingAll,
     statusUpdating,
+    manualRefreshing,
     batchStatusUpdating,
     fileInputRef,
     loadFiles,
@@ -167,6 +168,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
     handleDelete,
     handleDeleteAll,
     handleDownload,
+    handleManualRefresh,
     handleStatusToggle,
     toggleSelect,
     selectAllVisible,
@@ -965,6 +967,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
                     disableControls={disableControls}
                     deleting={deleting}
                     statusUpdating={statusUpdating}
+                    manualRefreshing={manualRefreshing}
                     quotaFilterType={quotaFilterType}
                     statusBarCache={statusBarCache}
                     nowMs={nowMs}
@@ -981,6 +984,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
                     onClearCooldown={cooldownView ? handleClearCooldown : undefined}
                     onShowModels={showModels}
                     onDownload={handleDownload}
+                    onManualRefresh={handleManualRefresh}
                     onOpenPrefixProxyEditor={openPrefixProxyEditor}
                     onDelete={handleDelete}
                     onToggleStatus={handleStatusToggle}

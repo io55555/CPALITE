@@ -45,6 +45,13 @@ export const TRUTHY_TEXT_VALUES = new Set(['true', '1', 'yes', 'y', 'on']);
 export const FALSY_TEXT_VALUES = new Set(['false', '0', 'no', 'n', 'off']);
 export const AUTH_FILE_WEBSOCKET_PROVIDERS = new Set(['codex', 'xai']);
 export const AUTH_FILE_USING_API_PROVIDERS = new Set(['xai']);
+export const AUTH_FILE_MANUAL_REFRESH_PROVIDERS = new Set([
+  'antigravity',
+  'claude',
+  'codex',
+  'kimi',
+  'xai',
+]);
 
 // 标签类型颜色配置 — 基于各提供商 Logo 品牌色调配，确保彼此不重复
 export const TYPE_COLORS: Record<string, TypeColorSet> = {
@@ -183,6 +190,14 @@ export const getAuthFileIcon = (type: string, resolvedTheme: ResolvedTheme): str
       : iconEntry.light;
 };
 
+export const THEME_SURFACE_ICON_PROVIDERS = new Set(['kimi']);
+
+export const isThemeSurfaceIconProvider = (type: string): boolean =>
+  THEME_SURFACE_ICON_PROVIDERS.has(normalizeProviderKey(type));
+
+export const getThemeSurfaceIconBackground = (resolvedTheme: ResolvedTheme): string =>
+  resolvedTheme === 'dark' ? '#ffffff' : '#000000';
+
 export const parsePriorityValue = (value: unknown): number | undefined => {
   if (typeof value === 'number') {
     return Number.isInteger(value) ? value : undefined;
@@ -232,6 +247,9 @@ export const readCodexAuthFileWebsockets = (value: Record<string, unknown>): boo
 
 export const supportsAuthFileWebsockets = (providerKey: string): boolean =>
   AUTH_FILE_WEBSOCKET_PROVIDERS.has(normalizeProviderKey(providerKey));
+
+export const supportsAuthFileManualRefresh = (provider: unknown): boolean =>
+  AUTH_FILE_MANUAL_REFRESH_PROVIDERS.has(normalizeProviderKey(String(provider ?? '')));
 
 export const readAuthFileWebsockets = readCodexAuthFileWebsockets;
 

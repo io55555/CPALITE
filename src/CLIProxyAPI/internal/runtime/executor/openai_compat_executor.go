@@ -57,6 +57,26 @@ func NewOpenAICompatExecutor(provider string, cfg *config.Config) *OpenAICompatE
 }
 
 // Identifier implements cliproxyauth.ProviderExecutor.
+
+// openaiCompatClientResponseFormat resolves the client-facing schema for translation.
+// handlers may set ResponseFormat to the provider id (custom openai-compat name),
+// which is not a translator schema; fall back to SourceFormat like xAI path.
+func openaiCompatClientResponseFormat(opts cliproxyexecutor.Options) sdktranslator.Format {
+	if opts.SourceFormat != "" {
+		rf := opts.ResponseFormat
+		if rf == "" || rf == opts.SourceFormat {
+			return opts.SourceFormat
+		}
+		// Keep explicit client schema only when openai→client transformer exists.
+		// Registry keys response transforms as responses[client][upstream].
+		if sdktranslator.HasResponseTransformer(rf, sdktranslator.FromString("openai")) {
+			return rf
+		}
+		return opts.SourceFormat
+	}
+	return cliproxyexecutor.ResponseFormatOrSource(opts)
+}
+
 func (e *OpenAICompatExecutor) Identifier() string { return e.provider }
 
 // PrepareRequest injects OpenAI-compatible credentials into the outgoing HTTP request.
@@ -118,7 +138,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 
 	from := opts.SourceFormat
-	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
+	responseFormat := openaiCompatClientResponseFormat(opts)
 	to := sdktranslator.FromString("openai")
 	endpoint := "/chat/completions"
 	if opts.Alt == "responses/compact" {
@@ -386,7 +406,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}
 
 	from := opts.SourceFormat
-	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
+	responseFormat := openaiCompatClientResponseFormat(opts)
 	to := sdktranslator.FromString("openai")
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
@@ -706,7 +726,7 @@ func (e *OpenAICompatExecutor) CountTokens(ctx context.Context, auth *cliproxyau
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 
 	from := opts.SourceFormat
-	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
+	responseFormat := openaiCompatClientResponseFormat(opts)
 	to := sdktranslator.FromString("openai")
 	translated := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
 

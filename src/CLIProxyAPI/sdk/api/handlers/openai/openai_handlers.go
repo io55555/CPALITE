@@ -7,6 +7,7 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -447,6 +448,21 @@ func (h *OpenAIAPIHandler) handleNonStreamingResponse(c *gin.Context, rawJSON []
 	cliCancel()
 }
 
+
+// writeOpenAIChatSSEData writes one chat-completions SSE data frame.
+// Chunks are expected to be raw JSON; if a chunk is already SSE-framed with
+// a "data:" prefix (passthrough/translator miss), strip it to avoid "data: data:".
+func writeOpenAIChatSSEData(w http.ResponseWriter, chunk []byte) {
+	payload := bytes.TrimSpace(chunk)
+	if bytes.HasPrefix(payload, []byte("data:")) {
+		payload = bytes.TrimSpace(payload[len("data:"):])
+	}
+	if len(payload) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+}
+
 // handleStreamingResponse handles streaming responses for Gemini models.
 // It establishes a streaming connection with the backend service and forwards
 // the response chunks to the client in real-time using Server-Sent Events.
@@ -513,7 +529,7 @@ func (h *OpenAIAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON []byt
 			setSSEHeaders()
 			handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
 
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunk))
+			writeOpenAIChatSSEData(c.Writer, chunk)
 			flusher.Flush()
 
 			// Continue streaming the rest
@@ -622,7 +638,7 @@ func (h *OpenAIAPIHandler) handleCompletionsStreamingResponse(c *gin.Context, ra
 			// Write the first chunk
 			converted := convertChatCompletionsStreamChunkToCompletions(chunk)
 			if converted != nil {
-				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(converted))
+				writeOpenAIChatSSEData(c.Writer, converted)
 				flusher.Flush()
 			}
 
@@ -665,7 +681,7 @@ func (h *OpenAIAPIHandler) handleCompletionsStreamingResponse(c *gin.Context, ra
 func (h *OpenAIAPIHandler) handleStreamResult(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage) {
 	h.ForwardStream(c, flusher, cancel, data, errs, handlers.StreamForwardOptions{
 		WriteChunk: func(chunk []byte) {
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunk))
+			writeOpenAIChatSSEData(c.Writer, chunk)
 		},
 		WriteTerminalError: func(errMsg *interfaces.ErrorMessage) {
 			if errMsg == nil {

@@ -732,7 +732,7 @@ func (h *BaseAPIHandler) executeWithAuthManagerWithOptions(ctx context.Context, 
 		Alt:             alt,
 		OriginalRequest: rawJSON,
 		SourceFormat:    sdktranslator.FromString(handlerType),
-		ResponseFormat:  modelExecutionResponseFormat(execOptions.ResponseFormat, firstProvider(providers)),
+		ResponseFormat:  modelExecutionResponseFormat(execOptions.ResponseFormat, handlerType),
 		Headers:         headers,
 		Query:           modelExecutionQuery(ctx, execOptions.Query),
 	}
@@ -1156,7 +1156,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerWithOptions(ctx context.Con
 		Alt:             alt,
 		OriginalRequest: rawJSON,
 		SourceFormat:    sdktranslator.FromString(handlerType),
-		ResponseFormat:  modelExecutionResponseFormat(execOptions.ResponseFormat, firstProvider(providers)),
+		ResponseFormat:  modelExecutionResponseFormat(execOptions.ResponseFormat, handlerType),
 		Headers:         headers,
 		Query:           modelExecutionQuery(ctx, execOptions.Query),
 	}
