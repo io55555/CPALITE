@@ -487,13 +487,8 @@
   }
 
   .sidebar-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    flex: 1;
-    padding: 0 6px;
-    color: var(--text-primary);
+    // 本地侧栏缺少 .sidebar-header 包裹时 flex:1 会纵向撑满；按需求直接隐藏品牌区
+    display: none;
   }
 
   .sidebar-brand-logo {
