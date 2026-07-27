@@ -214,13 +214,12 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 			cacheXAIReasoningReplayFromCompleted(ctx, prepared.replayScope, completedData)
 			var param any
 			out := sdktranslator.TranslateNonStream(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, completedData, &param)
-			if xaiOpenWebUICompatEnabled(e.cfg) && prepared.responseFormat == sdktranslator.FormatOpenAI {
-				out = convertXAIResponsesPayloadToOpenAIChat(ctx, req.Model, prepared.originalPayload, prepared.body, out)
-				headers := httpResp.Header.Clone()
+			out = xaiEnsureOpenAIChatPayload(ctx, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, out)
+			headers := httpResp.Header.Clone()
+			if prepared.responseFormat == sdktranslator.FormatOpenAI {
 				headers.Set("Content-Type", "application/json")
-				return cliproxyexecutor.Response{Payload: out, Headers: headers}, nil
 			}
-			return cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}, nil
+			return cliproxyexecutor.Response{Payload: out, Headers: headers}, nil
 		}
 	}
 
@@ -685,8 +684,12 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 		var pendingEventLine []byte
 		emitTranslatedLine := func(translatedLine []byte) bool {
 			var chunks [][]byte
-			if xaiOpenWebUICompatEnabled(e.cfg) && prepared.responseFormat == sdktranslator.FormatOpenAI {
+			if prepared.responseFormat == sdktranslator.FormatOpenAI {
+				// Chat Completions clients (incl. OpenWebUI) need openai SSE chunks.
 				chunks = convertXAIStreamLineToOpenAIChat(ctx, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param)
+				if len(chunks) == 0 {
+					chunks = helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param, claudeInputTokens)
+				}
 			} else {
 				chunks = helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param, claudeInputTokens)
 			}
@@ -909,7 +912,7 @@ func (e *XAIExecutor) prepareResponsesRequest(ctx context.Context, req cliproxye
 func (e *XAIExecutor) prepareResponsesRequestTo(ctx context.Context, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, stream bool, to sdktranslator.Format) (*xaiPreparedRequest, error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 	from := opts.SourceFormat
-	responseFormat := xaiForceChatCompletionsFormat(e.cfg, cliproxyexecutor.ResponseFormatOrSource(opts))
+	responseFormat := xaiForceChatCompletionsFormat(e.cfg, xaiClientResponseFormat(opts))
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
 		originalPayloadSource = opts.OriginalRequest

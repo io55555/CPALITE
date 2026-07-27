@@ -8,6 +8,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	codexchat "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/codex/openai/chat-completions"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -21,6 +22,19 @@ func xaiGrokBuildHeaderDefaultsEnabled(cfg *config.Config) bool {
 	return cfg != nil && cfg.XAIGrokBuildHeaderDefaults
 }
 
+// xaiClientResponseFormat resolves the client-facing schema.
+// handlers often set ResponseFormat to the provider id ("xai") when no exit protocol
+// is specified; that is not a translator schema and must fall back to SourceFormat.
+func xaiClientResponseFormat(opts cliproxyexecutor.Options) sdktranslator.Format {
+	if opts.ResponseFormat != "" && opts.ResponseFormat != sdktranslator.FromString("xai") {
+		return opts.ResponseFormat
+	}
+	if opts.SourceFormat != "" {
+		return opts.SourceFormat
+	}
+	return cliproxyexecutor.ResponseFormatOrSource(opts)
+}
+
 func xaiForceChatCompletionsFormat(cfg *config.Config, responseFormat sdktranslator.Format) sdktranslator.Format {
 	if !xaiOpenWebUICompatEnabled(cfg) {
 		return responseFormat
@@ -30,6 +44,36 @@ func xaiForceChatCompletionsFormat(cfg *config.Config, responseFormat sdktransla
 		return sdktranslator.FormatOpenAI
 	}
 	return responseFormat
+}
+
+func xaiLooksLikeResponsesEvent(payload []byte) bool {
+	raw := bytes.TrimSpace(payload)
+	if len(raw) == 0 {
+		return false
+	}
+	typ := gjson.GetBytes(raw, "type").String()
+	if strings.HasPrefix(typ, "response.") {
+		return true
+	}
+	if gjson.GetBytes(raw, "object").String() == "response" {
+		return true
+	}
+	return gjson.GetBytes(raw, "response.output").Exists() && !gjson.GetBytes(raw, "choices").Exists()
+}
+
+// xaiEnsureOpenAIChatPayload guarantees Chat Completions JSON for openai clients.
+// TranslateNonStream should already convert; this is a residual safety net for
+// OpenWebUI and similar clients that only understand choices[].message.content.
+func xaiEnsureOpenAIChatPayload(ctx context.Context, responseFormat sdktranslator.Format, modelName string, originalPayload, requestBody, payload []byte) []byte {
+	if responseFormat != sdktranslator.FormatOpenAI {
+		return payload
+	}
+	if !xaiLooksLikeResponsesEvent(payload) {
+		if gjson.GetBytes(payload, "object").String() == "chat.completion" || gjson.GetBytes(payload, "choices").Exists() {
+			return payload
+		}
+	}
+	return convertXAIResponsesPayloadToOpenAIChat(ctx, modelName, originalPayload, requestBody, payload)
 }
 
 func convertXAIResponsesPayloadToOpenAIChat(ctx context.Context, modelName string, originalPayload, requestBody, payload []byte) []byte {

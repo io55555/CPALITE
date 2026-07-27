@@ -286,6 +286,10 @@ func packetFromAPIRequest(text string) string {
 	if text == "" {
 		return ""
 	}
+	text = latestAPIRequestSection(text)
+	if strings.Contains(text, "<missing>") && !strings.Contains(text, "Upstream URL:") {
+		return ""
+	}
 	if strings.HasPrefix(text, "POST ") || strings.HasPrefix(text, "GET ") || strings.HasPrefix(text, "PUT ") || strings.HasPrefix(text, "PATCH ") || strings.HasPrefix(text, "DELETE ") {
 		return text
 	}
@@ -294,22 +298,15 @@ func packetFromAPIRequest(text string) string {
 		method = "POST"
 	}
 	rawURL := extractLineValue(text, "Upstream URL:")
-	path := "/"
-	if idx := strings.Index(rawURL, "://"); idx >= 0 {
-		rest := rawURL[idx+3:]
-		if slash := strings.Index(rest, "/"); slash >= 0 {
-			path = rest[slash:]
-		}
-	} else if strings.HasPrefix(rawURL, "/") {
-		path = rawURL
-	}
+	path := pathFromUpstreamURL(rawURL)
 	headers := strings.TrimSpace(sectionBetween(text, "Headers:", "Body:"))
-	body := strings.TrimSpace(afterMarker(text, "Body:"))
+	body := strings.TrimSpace(bodyAfterAPIRequestMarker(text))
 	if body == "<empty>" {
 		body = ""
 	}
 	return strings.TrimSpace(method + " " + path + " HTTP/1.1\n" + headers + "\n\n" + body)
 }
+
 
 func packetFromAPIResponse(text string) string {
 	text = strings.TrimSpace(text)
@@ -333,6 +330,52 @@ func packetFromAPIResponse(text string) string {
 		return strings.TrimSpace("HTTP/1.1 502 Bad Gateway\n" + headers + "\n\n" + body)
 	}
 	return strings.TrimSpace("HTTP/1.1 " + status + " " + http.StatusText(atoi(status)) + "\n" + headers + "\n\n" + body)
+}
+
+
+func latestAPIRequestSection(text string) string {
+	marker := "=== API REQUEST"
+	idx := strings.LastIndex(text, marker)
+	if idx < 0 {
+		return text
+	}
+	section := text[idx:]
+	if next := strings.Index(section[len(marker):], "\n=== API "); next >= 0 {
+		section = section[:len(marker)+next]
+	}
+	return strings.TrimSpace(section)
+}
+
+func pathFromUpstreamURL(rawURL string) string {
+	path := "/"
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" || rawURL == "<unknown>" {
+		return path
+	}
+	if idx := strings.Index(rawURL, "://"); idx >= 0 {
+		rest := rawURL[idx+3:]
+		if slash := strings.Index(rest, "/"); slash >= 0 {
+			path = rest[slash:]
+		}
+	} else if strings.HasPrefix(rawURL, "/") {
+		path = rawURL
+	}
+	return path
+}
+
+func bodyAfterAPIRequestMarker(text string) string {
+	idx := strings.Index(text, "Body:")
+	if idx < 0 {
+		return ""
+	}
+	body := text[idx+len("Body:"):]
+	// Stop at the next API REQUEST/RESPONSE section if present.
+	for _, marker := range []string{"\n=== API REQUEST", "\n=== API RESPONSE"} {
+		if cut := strings.Index(body, marker); cut >= 0 {
+			body = body[:cut]
+		}
+	}
+	return body
 }
 
 func extractLineValue(text, prefix string) string {

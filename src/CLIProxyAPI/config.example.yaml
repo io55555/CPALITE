@@ -583,7 +583,8 @@ nonstream-keepalive-interval: 0
 #   cooldown-log: true
 #   filter-rules: []
 
-# Enable xAI Responses -> OpenAI Chat Completions conversion for OpenWebUI (default false).
+# Force xAI client schema to OpenAI Chat Completions (useful for OpenWebUI).
+# Chat Completions clients already get chat.completion JSON by default; enable this to also coerce openai-response style clients.
 # xai-openwebui-compat: false
 
 # Enable fixed Grok Build header defaults for xAI auth-file requests (default false).

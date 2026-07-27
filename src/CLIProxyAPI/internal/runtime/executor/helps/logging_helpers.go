@@ -219,9 +219,11 @@ func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequ
 	if ginCtx == nil {
 		return
 	}
+	// Always materialize API_REQUEST for packet-capture/usage even when request-log is off.
+	// request-log=false previously only deferred bodies, so response recording created a
+	// "<missing>" stub that packet UI rendered as bare "POST / HTTP/1.1".
 	if !cfg.RequestLog {
 		deferAPIRequest(ginCtx, info)
-		return
 	}
 
 	attempts := getAttempts(ginCtx)
@@ -260,6 +262,7 @@ func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequ
 	ginCtx.Set(apiAttemptsKey, attempts)
 	updateAggregatedRequest(ginCtx, attempts)
 }
+
 
 func deferAPIRequest(ginCtx *gin.Context, info UpstreamRequestLog) {
 	if ginCtx == nil {

@@ -698,3 +698,24 @@ func TestApplyRulesReturnClean404ModelNotSupport(t *testing.T) {
 		t.Fatalf("body = %s", blockErr.Error())
 	}
 }
+
+func TestPacketFromAPIRequestBuildsFullHTTPPacket(t *testing.T) {
+	raw := "=== API REQUEST 1 ===\nTimestamp: 2026-07-27T00:00:00Z\nUpstream URL: https://grok.example/v1/responses\nHTTP Method: POST\nAuth: provider=xai\n\nHeaders:\nAuthorization: Bearer xxx\nContent-Type: application/json\n\nBody:\n{\"model\":\"grok-4.5\"}\n"
+	got := packetFromAPIRequest(raw)
+	if !strings.HasPrefix(got, "POST /v1/responses HTTP/1.1\n") {
+		t.Fatalf("packet start = %q", got)
+	}
+	if !strings.Contains(got, "Authorization: Bearer xxx") {
+		t.Fatalf("missing auth header: %s", got)
+	}
+	if !strings.Contains(got, `{"model":"grok-4.5"}`) {
+		t.Fatalf("missing body: %s", got)
+	}
+}
+
+func TestPacketFromAPIRequestIgnoresMissingStub(t *testing.T) {
+	got := packetFromAPIRequest("=== API REQUEST 1 ===\n<missing>\n\n")
+	if got != "" {
+		t.Fatalf("got %q, want empty for missing stub", got)
+	}
+}
