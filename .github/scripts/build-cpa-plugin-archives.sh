@@ -185,11 +185,16 @@ build_one linux arm64 1 aarch64-linux-gnu-gcc
 build_one linux amd64 0 "" "_no-plugin"
 build_one linux arm64 0 "" "_no-plugin"
 
-if command -v docker >/dev/null 2>&1; then
-  build_musl_one amd64
-  build_musl_one arm64
+BUILD_PROFILE="${BUILD_PROFILE:-fast}"
+if [[ "$BUILD_PROFILE" == "full" ]]; then
+  if command -v docker >/dev/null 2>&1; then
+    build_musl_one amd64
+    build_musl_one arm64
+  else
+    echo "warning: docker not available; skip musl CPA archives" >&2
+  fi
 else
-  echo "warning: docker not available; skip musl CPA archives" >&2
+  echo "BUILD_PROFILE=$BUILD_PROFILE: skip musl docker/qemu builds (use full for Alpine musl archives)"
 fi
 
 build_one windows amd64 0

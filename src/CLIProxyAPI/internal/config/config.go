@@ -398,6 +398,9 @@ type CodexHeaderDefaults struct {
 
 // CodexConfig configures provider-wide Codex request behavior.
 type CodexConfig struct {
+
+	// OptimizeMultiAgentV2 optimizes official Codex multi-agent requests.
+	OptimizeMultiAgentV2 bool `yaml:"optimize-multi-agent-v2" json:"optimize-multi-agent-v2"`
 	IdentityConfuse bool `yaml:"identity-confuse" json:"identity-confuse"`
 }
 
@@ -1229,6 +1232,7 @@ func (cfg *Config) SanitizeCodexHeaderDefaults() {
 	}
 	cfg.CodexHeaderDefaults.UserAgent = strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
 	cfg.CodexHeaderDefaults.BetaFeatures = strings.TrimSpace(cfg.CodexHeaderDefaults.BetaFeatures)
+	cfg.CodexOptimizeMultiAgentV2 = cfg.Codex.OptimizeMultiAgentV2
 }
 
 // SanitizeClaudeHeaderDefaults trims surrounding whitespace from the

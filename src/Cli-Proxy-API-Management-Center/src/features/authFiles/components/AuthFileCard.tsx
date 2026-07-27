@@ -27,11 +27,14 @@ import {
   formatModified,
   getAuthFileIcon,
   getAuthFileStatusMessage,
+  getThemeSurfaceIconBackground,
   getTypeColor,
   getTypeLabel,
   isRuntimeOnlyAuthFile,
+  isThemeSurfaceIconProvider,
   normalizeProviderKey,
   parsePriorityValue,
+  supportsAuthFileManualRefresh,
   type QuotaProviderType,
   type ResolvedTheme,
 } from '@/features/authFiles/constants';
@@ -50,10 +53,12 @@ export type AuthFileCardProps = {
   disableControls: boolean;
   deleting: string | null;
   statusUpdating: Record<string, boolean>;
+  manualRefreshing: Record<string, boolean>;
   quotaFilterType: QuotaProviderType | null;
   statusBarCache: Map<string, AuthFileStatusBarData>;
   onShowModels: (file: AuthFileItem) => void;
   onDownload: (name: string) => void;
+  onManualRefresh: (file: AuthFileItem) => void;
   onOpenPrefixProxyEditor: (file: AuthFileItem) => void;
   onDelete: (name: string) => void;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
@@ -121,10 +126,12 @@ export function AuthFileCard(props: AuthFileCardProps) {
     disableControls,
     deleting,
     statusUpdating,
+    manualRefreshing,
     quotaFilterType,
     statusBarCache,
     onShowModels,
     onDownload,
+    onManualRefresh,
     onOpenPrefixProxyEditor,
     onDelete,
     onToggleStatus,
@@ -143,9 +150,13 @@ export function AuthFileCard(props: AuthFileCardProps) {
   const providerKey = normalizeProviderKey(String(file.type ?? file.provider ?? 'unknown'));
   const isAistudio = providerKey === 'aistudio';
   const showModelsButton = !isRuntimeOnly || isAistudio;
+  const showManualRefreshButton = !isRuntimeOnly && supportsAuthFileManualRefresh(providerKey);
+  const isManualRefreshing = manualRefreshing[file.name] === true;
   const typeColor = getTypeColor(providerKey, resolvedTheme);
   const typeLabel = getTypeLabel(t, providerKey);
   const providerIcon = getAuthFileIcon(providerKey, resolvedTheme);
+  // 与 AI 提供商界面一致：Kimi 图标底座随主题切换颜色
+  const useThemeSurfaceIcon = isThemeSurfaceIconProvider(providerKey);
 
   const quotaType =
     quotaFilterType && resolveQuotaType(file) === quotaFilterType ? quotaFilterType : null;
@@ -218,11 +229,18 @@ export function AuthFileCard(props: AuthFileCardProps) {
             )}
             <div
               className={styles.providerAvatar}
-              style={{
-                backgroundColor: typeColor.bg,
-                color: typeColor.text,
-                ...(typeColor.border ? { border: typeColor.border } : {}),
-              }}
+              style={
+                useThemeSurfaceIcon
+                  ? {
+                      backgroundColor: getThemeSurfaceIconBackground(resolvedTheme),
+                      color: typeColor.text,
+                    }
+                  : {
+                      backgroundColor: typeColor.bg,
+                      color: typeColor.text,
+                      ...(typeColor.border ? { border: typeColor.border } : {}),
+                    }
+              }
             >
               {providerIcon ? (
                 <img src={providerIcon} alt="" className={styles.providerAvatarImage} />
@@ -368,6 +386,27 @@ export function AuthFileCard(props: AuthFileCardProps) {
               )}
               {!isRuntimeOnly && (
                 <div className={styles.cardUtilityActions}>
+                  {showManualRefreshButton && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onManualRefresh(file)}
+                      className={styles.iconButton}
+                      title={t('auth_files.manual_refresh_button')}
+                      disabled={
+                        disableControls ||
+                        file.disabled ||
+                        statusUpdating[file.name] === true ||
+                        isManualRefreshing
+                      }
+                    >
+                      {isManualRefreshing ? (
+                        <LoadingSpinner size={14} />
+                      ) : (
+                        <IconRefreshCw className={styles.actionIcon} size={16} />
+                      )}
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -384,7 +423,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
                     onClick={() => onOpenPrefixProxyEditor(file)}
                     className={styles.iconButton}
                     title={t('auth_files.prefix_proxy_button')}
-                    disabled={disableControls}
+                    disabled={disableControls || isManualRefreshing}
                   >
                     <IconSettings className={styles.actionIcon} size={16} />
                   </Button>
@@ -394,7 +433,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
                     onClick={() => onDelete(file.name)}
                     className={styles.iconButton}
                     title={t('auth_files.delete_button')}
-                    disabled={disableControls || deleting === file.name}
+                    disabled={disableControls || deleting === file.name || isManualRefreshing}
                   >
                     {deleting === file.name ? (
                       <LoadingSpinner size={14} />
@@ -413,7 +452,9 @@ export function AuthFileCard(props: AuthFileCardProps) {
                 <ToggleSwitch
                   ariaLabel={t('auth_files.status_toggle_label')}
                   checked={!file.disabled}
-                  disabled={disableControls || statusUpdating[file.name] === true}
+                  disabled={
+                    disableControls || statusUpdating[file.name] === true || isManualRefreshing
+                  }
                   onChange={(value) => onToggleStatus(file, value)}
                 />
               </div>

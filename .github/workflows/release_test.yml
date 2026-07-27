@@ -15,6 +15,19 @@ on:
         description: "Optional commit or branch to build"
         required: false
         type: string
+      build_profile:
+        description: "full=all archives; fast=skip musl+qemu (much faster CI)"
+        required: false
+        type: choice
+        default: fast
+        options:
+          - fast
+          - full
+      skip_publish:
+        description: "Build only, do not create/push GitHub release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,6 +40,10 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref || github.sha }}
       FRONTEND_DIR: src/Cli-Proxy-API-Management-Center
       BACKEND_DIR: src/CLIProxyAPI
+      BUILD_PROFILE: ${{ inputs.build_profile || 'fast' }}
+      SKIP_PUBLISH: ${{ inputs.skip_publish && '1' || '0' }}
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,10 +61,12 @@ jobs:
           GO_VER="$(printf '%s\n' "$GO_VER" | awk -F. '{print $1"."$2}')"
           echo "GO_ALPINE_IMAGE=golang:${GO_VER}-alpine" >> "$GITHUB_ENV"
 
-      - name: Setup QEMU (for alpine arm64 musl builds)
+      - name: Setup QEMU (musl arm64 only in full profile)
+        if: ${{ env.BUILD_PROFILE == 'full' }}
         uses: docker/setup-qemu-action@v3
 
       - name: Setup Docker Buildx
+        if: ${{ env.BUILD_PROFILE == 'full' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Setup Node.js
@@ -57,10 +76,22 @@ jobs:
           cache: npm
           cache-dependency-path: ${{ env.FRONTEND_DIR }}/package-lock.json
 
+      - name: Cache frontend node_modules
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.FRONTEND_DIR }}/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles(format('{0}/package-lock.json', env.FRONTEND_DIR)) }}
+          restore-keys: |
+            node-modules-${{ runner.os }}-
+
       - name: Build management panel
         working-directory: ${{ env.FRONTEND_DIR }}
         run: |
-          npm ci
+          if [[ -d node_modules ]]; then
+            npm ci --prefer-offline --no-audit --no-fund
+          else
+            npm ci --no-audit --no-fund
+          fi
           VITE_VERSION="$VERSION" npm run build
           cp dist/index.html "$GITHUB_WORKSPACE/management.html"
 
@@ -68,12 +99,26 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: ${{ env.BACKEND_DIR }}/go.mod
+          cache: true
           cache-dependency-path: ${{ env.BACKEND_DIR }}/go.sum
+
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: go-build-${{ runner.os }}-${{ hashFiles(format('{0}/go.sum', env.BACKEND_DIR)) }}-${{ hashFiles(format('{0}/**/*.go', env.BACKEND_DIR)) }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ hashFiles(format('{0}/go.sum', env.BACKEND_DIR)) }}-
+            go-build-${{ runner.os }}-
 
       - name: Install CGO toolchains
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          set -euo pipefail
+          # Avoid full apt upgrade; install only required packages.
+          sudo apt-get update -o Acquire::Retries=3
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             gcc g++ \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
             zip unzip binutils
@@ -146,15 +191,16 @@ jobs:
 
       - name: Build Linux/Windows CPA archives (glibc + musl + no-plugin)
         run: |
+          set -euo pipefail
           # Keep paths relative to repo root; the script normalizes them.
-          # Do NOT pre-expand GITHUB_WORKSPACE into BACKEND_DIR and then again into DIST_DIR
-          # (bash left-to-right env assignments would double the absolute path).
-          VERSION="$VERSION_NUM" \
-          COMMIT="$COMMIT" \
-          BUILD_DATE="$BUILD_DATE" \
-          BACKEND_DIR="$BACKEND_DIR" \
-          DIST_DIR="$BACKEND_DIR/dist" \
-          GO_ALPINE_IMAGE="$GO_ALPINE_IMAGE" \
+          export VERSION="$VERSION_NUM"
+          export COMMIT="$COMMIT"
+          export BUILD_DATE="$BUILD_DATE"
+          export BACKEND_DIR="$BACKEND_DIR"
+          export DIST_DIR="$BACKEND_DIR/dist"
+          export GO_ALPINE_IMAGE="$GO_ALPINE_IMAGE"
+          export BUILD_PROFILE="${BUILD_PROFILE:-fast}"
+          # GOCACHE/GOMODCACHE already set at job env for cross-run reuse.
           bash .github/scripts/build-cpa-plugin-archives.sh
       - name: Verify release archives
         run: |
@@ -196,21 +242,26 @@ jobs:
 
           check_tar "$DIST/CPA_${VERSION_NUM}_linux_amd64.tar.gz" 1 0
           check_tar "$DIST/CPA_${VERSION_NUM}_linux_arm64.tar.gz" 1 0
-          check_tar "$DIST/CPA_${VERSION_NUM}_linux_amd64_musl.tar.gz" 1 1
-          check_tar "$DIST/CPA_${VERSION_NUM}_linux_arm64_musl.tar.gz" 1 1
           check_tar "$DIST/CPA_${VERSION_NUM}_linux_amd64_no-plugin.tar.gz" 0 0
           check_tar "$DIST/CPA_${VERSION_NUM}_linux_arm64_no-plugin.tar.gz" 0 0
+          if [[ "${BUILD_PROFILE:-fast}" == "full" ]]; then
+            check_tar "$DIST/CPA_${VERSION_NUM}_linux_amd64_musl.tar.gz" 1 1
+            check_tar "$DIST/CPA_${VERSION_NUM}_linux_arm64_musl.tar.gz" 1 1
+          else
+            echo "fast profile: skip musl archive checks"
+          fi
           [[ -f "$DIST/CPA_${VERSION_NUM}_windows_amd64.zip" ]] || { echo "windows zip missing" >&2; exit 1; }
           echo "archive verification passed"
 
       - name: Create tag when missing
-
+        if: ${{ env.SKIP_PUBLISH != '1' }}
         run: |
           if ! git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
             git push origin "$VERSION"
           fi
 
       - name: Publish GitHub release
+        if: ${{ env.SKIP_PUBLISH != '1' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
@@ -223,6 +274,7 @@ jobs:
             ${{ env.BACKEND_DIR }}/dist/checksums.txt
 
       - name: Keep only latest 10 releases
+        if: ${{ env.SKIP_PUBLISH != '1' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
