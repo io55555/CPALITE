@@ -688,11 +688,11 @@ func runSSOImport(ctx context.Context, items []ssoCookieItem, outDir string, wor
 }
 
 func convertOneSSO(ctx context.Context, item ssoCookieItem, outDir string, maxRetries int) (string, string, error) {
-	token, err := ssoToToken(ctx, item.SSO, maxRetries)
+	token, err := ssoToToken(ctx, item.SSO, "", maxRetries)
 	if err != nil {
 		return "", item.Email, err
 	}
-	filename, entry, err := tokenToCliproxyEntry(token, item.Email)
+	filename, entry, err := tokenToCliproxyEntry(token, item.Email, item.SSO)
 	if err != nil {
 		return "", item.Email, err
 	}
@@ -717,7 +717,7 @@ type oauthToken struct {
 	Email        string `json:"_email,omitempty"`
 }
 
-func ssoToToken(ctx context.Context, sso string, maxRetries int) (*oauthToken, error) {
+func ssoToToken(ctx context.Context, sso string, authProxy string, maxRetries int) (*oauthToken, error) {
 	if maxRetries < 1 {
 		maxRetries = ssoDefaultMaxRetries
 	}
@@ -735,7 +735,7 @@ func ssoToToken(ctx context.Context, sso string, maxRetries int) (*oauthToken, e
 		})
 	}
 	// SSO 转换/401 重刷：优先 CPA proxy-url，否则直连
-	client := newHTTPClientWithProxy("", 45*time.Second, 8)
+	client := newHTTPClientWithProxy(authProxy, 45*time.Second, 8)
 	client.Jar = jar
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 12 {
@@ -996,7 +996,7 @@ func fetchUserinfoEmail(ctx context.Context, client *http.Client, accessToken st
 	return strings.TrimSpace(email), nil
 }
 
-func tokenToCliproxyEntry(token *oauthToken, emailHint string) (string, map[string]any, error) {
+func tokenToCliproxyEntry(token *oauthToken, emailHint, ssoCookie string) (string, map[string]any, error) {
 	if token == nil || token.AccessToken == "" {
 		return "", nil, fmt.Errorf("empty access_token")
 	}
@@ -1056,6 +1056,15 @@ func tokenToCliproxyEntry(token *oauthToken, emailHint string) (string, map[stri
 			"x-grok-client-identifier": "grok-shell",
 			"User-Agent":               "grok-shell/0.2.93 (linux; x86_64)",
 		},
+	}
+	// Persist sso for CPA packet-filter xai_sso_revive.
+	if s := strings.TrimSpace(ssoCookie); s != "" {
+		if strings.HasPrefix(strings.ToLower(s), "sso=") {
+			s = strings.TrimSpace(s[4:])
+		}
+		if s != "" {
+			entry["sso"] = s
+		}
 	}
 	filename := cliproxyFilename(email, sub)
 	return filename, entry, nil

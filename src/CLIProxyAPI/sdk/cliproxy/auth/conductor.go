@@ -7794,6 +7794,10 @@ func (m *Manager) ApplyPacketFilterAction(ctx context.Context, authID, authIndex
 	}
 	model = strings.TrimSpace(model)
 	ruleName = strings.TrimSpace(ruleName)
+	// xAI SSO 复活：异步读取认证文件 sso/SSOcookie 并刷新 Token。
+	if IsXAISSOReviveAction(action) {
+		return m.QueueXAISSORevive(ctx, authID, authIndex, provider, ruleName, identities...)
+	}
 	if seconds <= 0 {
 		seconds = 300
 	}
@@ -7927,6 +7931,9 @@ func forceApplyPacketFilterAction(auth *Auth, action, model string, seconds int,
 			state.NextRetryAfter = time.Time{}
 			state.UpdatedAt = now
 		}
+	case packetFilterActionXAISSORevive:
+		// 异步复活由 QueueXAISSORevive 处理；此处不改运行时状态。
+		return
 	default:
 		if seconds <= 0 {
 			seconds = 300

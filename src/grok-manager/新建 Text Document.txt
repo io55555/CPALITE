@@ -1,0 +1,127 @@
+• 结论先说清楚：grok-manager 的 【401 重刷】 不是 用 refresh_token 去调 /oauth2/token 刷新；
+  而是：测活发现 401 后，用 SSO 库里的 cookie 重新走 xAI Device Flow，再写出新的 CPA 认证文件。
+
+  ———
+
+  ## 它怎么认定 401
+
+  测活 probeOne 对 xAI 认证文件发真实请求（Bearer access_token）：
+
+  - HTTP 2xx → OK / healthy
+  - HTTP 401 → unauthorized，通常进删除候选（默认删除码含 401）
+  - 同时用 email 对 SSO vault 打标：
+      - has_vault_sso=true → 401 有库（可重刷）
+      - 否则 → 401 无库（库里没有对应 SSO，刷不了）
+
+  ———
+
+  ## 三条触发路径
+
+  ### 1. 面板按钮「重刷 401」
+
+  html.go → POST /sso-refresh-401 → handleRefresh401
+
+  按钮 refresh401()
+    → /sso-refresh-401
+    → vaultItemsForImport(only401=true)   // 只取 vault 中“上次扫描为 401”的账号
+    → Force=true, SkipIfOK=false, Only401=true, FromVault=true
+    → handleStartSSOImport(...)
+
+  要点：
+
+  - 数据源固定是 sso-vault.json，不是输入框文本
+  - 必须先做过「导入并保存 SSO 到历史库」
+  - vault 里没有可匹配的 401 → 直接报 no_vault_401
+
+  ### 2. 测活勾选「401 重刷」（默认开）
+
+  扫完后自动：
+
+  全量测活结束
+    → auto_refresh_401=true（默认）
+    → go autoRefresh401FromVault(workers)
+        收集本次结果 HTTPStatus==401 的 email
+        到 vault 按 email 取 SSO
+        SkipIfOK=false, Force=true 强制重转
+        handleStartSSOImport(...)
+
+  有 401 但 vault 无对应 email → 只打日志，不启动导入。
+  SSO 任务正忙 → 跳过，避免冲突。
+
+  ### 3. 定时任务 pipeline
+
+  schedule.go：scan → refresh401 → recheck
+
+  1) 全量 scan（可带 AutoRefresh401）
+  2) 等 scan 结束
+  3) 若 AutoRefresh401：
+     - 已有 autoRefresh 在跑 → 等 SSO 结束
+     - 否则若结果里有 401 → 再显式 handleRefresh401({})
+  4) 若 RecheckAfter401 → 再扫一次（这次关闭 auto_refresh，防循环）
+
+  ———
+
+  ## 真正“重刷”在干什么（核心）
+
+  统一进 runSSOImport → convertOneSSO → ssoToToken：
+
+  1. 把 vault 的 SSO cookie 种到 x.ai 域
+  2. 访问 accounts.x.ai 校验会话（跳登录页则 SSO 失效）
+  3. xAI OAuth Device Flow：
+      - device/code
+      - 带 SSO 打开 verification_uri_complete
+      - device/verify / device/approve
+      - pollDeviceToken 拿新 access_token + refresh_token
+
+  4. tokenToCliproxyEntry 写成 CPA 的 xAI 认证 JSON
+  5. 写到 auth 目录（覆盖/更新凭证文件）
+  6. noteSSOSuccess：去掉运行时隔离，让号重新可被调度
+
+  代理策略（转换/重刷）：
+
+  - 优先 CPA 的 proxy-url
+  - 没有再直连
+    （测活探针则是：认证文件代理 → CPA 代理 → 直连）
+
+  ———
+
+  ## 运行逻辑简图
+
+  测活 probe
+    ├─ 200 健康
+    ├─ 401 + vault 有 SSO  → 可重刷
+    └─ 401 + vault 无 SSO  → 只能删/隔离，刷不了
+
+  重刷入口（按钮 / 扫后自动 / 定时）
+    → 从 sso-vault 取 cookie
+    → Device Flow 重新换 token
+    → 写回 xai-*.json 认证文件
+    → 解除 isolation
+    → （定时可选）再测活确认
+
+  ———
+
+  ## 和“普通 token 刷新”的区别
+
+   项目        grok-manager 401 重刷     CPA 常规 refresh
+  ━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   触发        测活 401 / 手动 / 定时    token 到期或 refresh 队列
+  ──────────  ────────────────────────  ───────────────────────────────────
+   材料        SSO cookie（vault）       认证文件里的 refresh_token
+  ──────────  ────────────────────────  ───────────────────────────────────
+   动作        整段 Device Flow 重登     /oauth2/token 换新 token
+  ──────────  ────────────────────────  ───────────────────────────────────
+   失败含义    SSO 失效、无库、限流      refresh 被吊销、401/invalid_grant
+
+  所以面板上的「401 有库 / 401 无库」很关键：
+
+  - 有库 = 有 cookie 可重走登录流
+  - 无库 = 只能当坏号处理，重刷入口帮不上
+
+  ———
+
+  ## 小结
+
+  【401 重刷】= 用历史 SSO 库，对测活 401 的号重新 Device Flow 换证并写回 auth 文件。
+  前置条件：SSO 已入库、email 能对上、cookie 仍有效。
+  它不修“refresh_token 被 revoke 后的原地刷新”，而是 整号重登换新凭证。

@@ -81,6 +81,7 @@ const actionOptions = [
   { value: 'redact', label: '脱敏替换' },
   { value: 'cooldown', label: '冷却目标(*s/*h/*d见秒数)' },
   { value: 'disable', label: '禁用目标' },
+  { value: 'xai_sso_revive', label: '[xAI专用]读认证文件中的SSOcookie并刷新Token' },
   { value: 'return_clean_400', label: '返回客户端纯净400' },
   { value: 'return_clean_401', label: '返回客户端纯净401' },
   { value: 'return_clean_404', label: '返回客户端纯净404' },
@@ -238,6 +239,30 @@ const ruleTemplates: RuleTemplate[] = [
         { type: 'disable', packet: 'upstream_response', target: 'auth' },
       ],
       notes: 'Codex服务端返回401且error.message包含Your authentication token has been invalidated时，禁用本次使用的认证文件。',
+    },
+  },
+  {
+    value: 'xai-auth-file-401-disable-sso-revive',
+    label: '[运营商到CPA]xai-auth-file响应码401停用+用SSO复活',
+    rule: {
+      name: '[运营商到CPA]xai-auth-file响应码401停用+用SSO复活',
+      provider: 'xai-auth-file',
+      packet: 'upstream_response',
+      part: 'status',
+      operator: 'num_eq',
+      value_number: 401,
+      action: 'disable',
+      target: 'auth',
+      match_logic: 'all',
+      conditions: [
+        { packet: 'upstream_response', part: 'status', operator: 'num_eq', value_number: 401 },
+      ],
+      actions: [
+        { type: 'disable', packet: 'upstream_response', target: 'auth' },
+        { type: 'xai_sso_revive', packet: 'upstream_response', target: 'auth' },
+        { type: 'return_clean_401', packet: 'upstream_response', target: 'response' },
+      ],
+      notes: 'xAI认证文件上游401时：立即停用该认证文件并返回纯净401避免阻塞；若认证文件含sso/sso_cookie/SSOcookie字段则异步用SSO刷新Token，成功后恢复可用。代理优先认证文件，其次CPA，最后直连。无SSO字段则只停用不复活。',
     },
   },
   {
