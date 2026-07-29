@@ -22,6 +22,24 @@ var exchangeSSOCookieFn = xaiauth.ExchangeSSOCookie
 
 var xaiSSOReviveInflight sync.Map // authID -> struct{}
 
+// triggerDetailUpdater 由 packetcapture 侧注入，避免 auth->packetcapture 循环依赖。
+var triggerDetailUpdater func(ctx context.Context, authID, action, detail string)
+
+// SetPacketFilterTriggerDetailUpdater registers async action result writer for trigger history.
+func SetPacketFilterTriggerDetailUpdater(fn func(ctx context.Context, authID, action, detail string)) {
+	triggerDetailUpdater = fn
+}
+
+func writeTriggerDetail(ctx context.Context, authID, action, detail string) {
+	if triggerDetailUpdater == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	triggerDetailUpdater(ctx, authID, action, detail)
+}
+
 // IsXAISSOReviveAction reports whether the packet-filter action is the xAI SSO revive action.
 func IsXAISSOReviveAction(action string) bool {
 	return strings.EqualFold(strings.TrimSpace(action), packetFilterActionXAISSORevive)
@@ -48,20 +66,27 @@ func (m *Manager) QueueXAISSORevive(ctx context.Context, authID, authIndex, prov
 	bg := context.WithoutCancel(ctx)
 	go func() {
 		defer xaiSSOReviveInflight.Delete(resolvedAuthID)
-		if err := m.runXAISSORevive(bg, resolvedAuthID, ruleName); err != nil {
+		result, err := m.runXAISSORevive(bg, resolvedAuthID, ruleName)
+		if err != nil {
 			log.Warnf("xai sso revive failed: auth=%s rule=%s err=%v", resolvedAuthID, strings.TrimSpace(ruleName), err)
+			writeTriggerDetail(bg, resolvedAuthID, packetFilterActionXAISSORevive, "复活失败: "+err.Error())
+			return
 		}
+		if strings.TrimSpace(result) == "" {
+			result = "复活成功"
+		}
+		writeTriggerDetail(bg, resolvedAuthID, packetFilterActionXAISSORevive, result)
 	}()
 	return true
 }
 
-func (m *Manager) runXAISSORevive(ctx context.Context, authID, ruleName string) error {
+func (m *Manager) runXAISSORevive(ctx context.Context, authID, ruleName string) (string, error) {
 	if m == nil || strings.TrimSpace(authID) == "" {
-		return fmt.Errorf("nil manager or empty auth id")
+		return "", fmt.Errorf("nil manager or empty auth id")
 	}
 	auth, ok := m.GetByID(authID)
 	if !ok || auth == nil {
-		return fmt.Errorf("auth not found: %s", authID)
+		return "", fmt.Errorf("auth not found: %s", authID)
 	}
 	if !strings.EqualFold(strings.TrimSpace(auth.Provider), "xai") &&
 		!strings.Contains(strings.ToLower(strings.TrimSpace(auth.Provider)), "xai") {
@@ -71,7 +96,7 @@ func (m *Manager) runXAISSORevive(ctx context.Context, authID, ruleName string) 
 			typeName, _ = auth.Metadata["type"].(string)
 		}
 		if !strings.EqualFold(strings.TrimSpace(typeName), "xai") {
-			return fmt.Errorf("not an xai auth: provider=%s", auth.Provider)
+			return "", fmt.Errorf("not an xai auth: provider=%s", auth.Provider)
 		}
 	}
 
@@ -79,7 +104,7 @@ func (m *Manager) runXAISSORevive(ctx context.Context, authID, ruleName string) 
 	if ssoCookie == "" {
 		log.Infof("xai sso revive skipped (no sso cookie in auth file): auth=%s file=%s rule=%s",
 			authID, strings.TrimSpace(auth.FileName), strings.TrimSpace(ruleName))
-		return nil
+		return "复活跳过: 认证文件无SSO cookie", nil
 	}
 
 	authProxy := strings.TrimSpace(auth.ProxyURL)
@@ -104,10 +129,10 @@ func (m *Manager) runXAISSORevive(ctx context.Context, authID, ruleName string) 
 
 	token, err := exchangeSSOCookieFn(ctx, ssoCookie, proxyURL, 6)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if token == nil || strings.TrimSpace(token.AccessToken) == "" {
-		return fmt.Errorf("empty access_token from sso exchange")
+		return "", fmt.Errorf("empty access_token from sso exchange")
 	}
 
 	now := time.Now()
@@ -116,7 +141,7 @@ func (m *Manager) runXAISSORevive(ctx context.Context, authID, ruleName string) 
 	current := m.auths[authID]
 	if current == nil {
 		m.mu.Unlock()
-		return fmt.Errorf("auth disappeared during revive: %s", authID)
+		return "", fmt.Errorf("auth disappeared during revive: %s", authID)
 	}
 	if current.Metadata == nil {
 		current.Metadata = make(map[string]any)
@@ -167,7 +192,7 @@ func (m *Manager) runXAISSORevive(ctx context.Context, authID, ruleName string) 
 	}
 	log.Infof("xai sso revive success: auth=%s file=%s email=%s rule=%s",
 		authID, strings.TrimSpace(snapshot.FileName), strings.TrimSpace(fmt.Sprint(snapshot.Metadata["email"])), strings.TrimSpace(ruleName))
-	return nil
+	return "复活成功", nil
 }
 
 func redactProxyForLog(raw string) string {

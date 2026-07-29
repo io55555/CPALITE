@@ -2,6 +2,7 @@ export const AUTH_FILES_SORT_MODES = ['default', 'az', 'priority'] as const;
 export const AUTH_FILES_STATUS_FILTER_MODES = [
   'all',
   'enabled',
+  'enabled_ok',
   'disabled',
   'problem',
 ] as const;

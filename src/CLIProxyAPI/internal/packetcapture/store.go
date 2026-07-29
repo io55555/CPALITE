@@ -583,6 +583,38 @@ func (s *Store) DeleteRule(ctx context.Context, id string) error {
 	return err
 }
 
+func (s *Store) UpdateTriggerDetail(ctx context.Context, id, detail string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE trigger_records SET detail = ? WHERE id = ?`, strings.TrimSpace(detail), id)
+	return err
+}
+
+func (s *Store) UpdateLatestTriggerDetailByAuthAction(ctx context.Context, authID, action, detail string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	authID = strings.TrimSpace(authID)
+	action = strings.TrimSpace(action)
+	if authID == "" || action == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE trigger_records
+SET detail = ?
+WHERE id = (
+  SELECT id FROM trigger_records
+  WHERE action = ? AND (auth_id = ? OR auth_label = ? OR account = ?)
+  ORDER BY timestamp DESC, id DESC
+  LIMIT 1
+)`, strings.TrimSpace(detail), action, authID, authID, authID)
+	return err
+}
+
 func (s *Store) InsertTrigger(ctx context.Context, trigger TriggerRecord) error {
 	if strings.TrimSpace(trigger.ID) == "" {
 		trigger.ID = uuid.NewString()

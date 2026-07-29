@@ -2,15 +2,15 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: 8423cce2d1004e80948a9e2c60ee69354c0aabc3
-- tag: v7.2.102
-- note: selective merge from v7.2.97..v7.2.102: applied safe updates + pure new modules (codex models/multi-agent helpers, postgres cooldown store, session identity, signature carrier); skipped upstream structural file-splits of heavily customized monoliths (server/config/handlers/conductor/xai/codex/claude/antigravity/service) to preserve local enhancement chains (packet/filter/cooldown/OpenWebUI/Grok Manager/quota/auth-files); Codex Live media relay not adopted (depends on full config/service split).
+- commit: c9417c8ae9b16fabc0386ca35d36f13bf8b1d678
+- tag: v7.2.104
+- note: selective merge from v7.2.102..v7.2.104: safe updates + pure new modules (request-lifecycle plugin, credential weight helpers/validation fields, home session alias, antigravity provenance/replay snapshot upgrade skipped to keep local antigravity executor chain, models/signature/translator fixes); kept local monoliths (conductor/selector/scheduler/auth_files/server/config/executors/handlers) to preserve packet/filter/cooldown/OpenWebUI/Grok Manager/quota chains; full weighted-RR scheduler path not force-ported into local selector/scheduler; management weight PATCH API partially not wired into local config_lists.
 
 ## Cli-Proxy-API-Management-Center
 - branch: main
-- commit: 21af57620b45f5e159e5450bc7e702498b664639
-- tag: v1.19.3
-- note: selective merge from v1.18.6..v1.19.3: safe updates + new apiError/authFilesEvents/tests; three-way merged non-protected pages; kept local AuthFiles/quota/visual-config/packet-related surfaces on conflict to preserve cooldown UI and provider-class enhancements; upstream OAuth manual-refresh UI partially not ported into local AuthFilesPage.
+- commit: 1708314bc7a27e0ad9ef86b083e28e4e00aceeb1
+- tag: v1.20.0
+- note: selective merge from v1.19.3..v1.20.0: adopted dashboard feature rewrite + Claude Fable weekly quota display; merged i18n/format/quota helpers; kept local AuthFiles/packet/visual-config surfaces; added local first/last pagination and enabled_ok status filter on auth-files pages.
 
 ## CLIProxyAPI-Pro
 - repository: https://github.com/ssfun/CLIProxyAPI-Pro

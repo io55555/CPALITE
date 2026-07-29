@@ -33,6 +33,9 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 
+	if errValidate := validateCredentialWeightYAML(data); errValidate != nil {
+		return nil, errValidate
+	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config payload: %w", err)
 	}
@@ -75,6 +78,9 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 		cfg.MaxRetryCredentials = 10
 	}
 	normalizeProviderQuotaCooldowns(&cfg)
+	if errValidate := cfg.ValidateCredentialWeights(); errValidate != nil {
+		return nil, errValidate
+	}
 	if cfg.ProxyFailureCooldownSeconds <= 0 {
 		cfg.ProxyFailureCooldownSeconds = 180
 	}

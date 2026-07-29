@@ -242,6 +242,7 @@ type Manager struct {
 	homeRuntimeAuthOwners map[string]map[string]*HomeDispatchSelection
 	// homeSessionSelections owns retained Home selections for websocket sessions.
 	homeSessionSelections map[string]map[homeSessionSelectionKey]*HomeDispatchSelection
+	homeSessionAliases    homeSessionAliasCache
 	homeSessionLocks      sync.Map
 	// providerOffsets tracks per-model provider rotation state for multi-provider routing.
 	providerOffsets             map[string]int

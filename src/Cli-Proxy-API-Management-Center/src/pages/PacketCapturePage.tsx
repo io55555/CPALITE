@@ -450,6 +450,15 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / 1024).toFixed(1)} KB`;
 };
 
+const looksLikeAuthFileName = (value: string) => {
+  const raw = value.trim();
+  if (!raw) return false;
+  const base = raw.replace(/\\/g, '/').split('/').pop() || raw;
+  return /\.(json|txt|yaml|yml)$/i.test(base) || /^[a-z0-9._-]+-\d{8}-/i.test(base);
+};
+
+const looksLikeEmail = (value: string) => /.+@.+\..+/.test(value.trim());
+
 const triggerIdentity = (item: PacketTrigger) => {
   const providerParts = [
     item.provider || '',
@@ -462,25 +471,56 @@ const triggerIdentity = (item: PacketTrigger) => {
   const apiKey = String(item.api_key || '').trim();
   const authIndex = String(item.auth_index || '').trim();
   const authID = String(item.auth_id || '').trim();
-  if (authType === 'api-key') {
+  if (authType === 'api-key' || authType === 'apikey') {
     return {
       primary: providerParts.join(' / ') || '-',
       lines: ['apikey', apiKey || account || authIndex || authID].filter(Boolean),
     };
   }
 
-  const fileName = authLabel || authID || authIndex;
+  // 优先完整认证文件名（auth_id/auth_label 中带扩展名或时间戳前缀的值），邮箱仅作为账号展示
+  const candidates = [authID, authLabel, authIndex, account].map((v) => v.trim()).filter(Boolean);
+  const fileName =
+    candidates.find((value) => looksLikeAuthFileName(value)) ||
+    candidates.find((value) => !looksLikeEmail(value)) ||
+    '';
   const accountName =
-    account && account !== fileName && !account.startsWith(`${fileName} `)
-      ? account
-      : authIndex && authIndex !== fileName
-        ? authIndex
-        : '';
+    [account, authLabel, authIndex]
+      .map((value) => value.trim())
+      .find(
+        (value) =>
+          value &&
+          value !== fileName &&
+          !value.startsWith(`${fileName} `) &&
+          (looksLikeEmail(value) || !looksLikeAuthFileName(value))
+      ) || '';
 
   return {
     primary: providerParts.join(' / ') || '-',
     lines: ['认证文件', fileName ? `文件名 ${fileName}` : '', accountName ? `账号 ${accountName}` : ''].filter(Boolean),
   };
+};
+
+const triggerReviveResult = (item: PacketTrigger) => {
+  if (String(item.action || '').trim() !== 'xai_sso_revive') return null;
+  const detail = String(item.detail || '').trim();
+  if (!detail) {
+    return { text: '复活结果: 处理中/未知', failed: false };
+  }
+  const lower = detail.toLowerCase();
+  if (lower.includes('success') || detail.includes('复活成功')) {
+    return { text: detail.includes('复活') ? detail : `复活成功: ${detail}`, failed: false };
+  }
+  if (
+    lower.includes('fail') ||
+    lower.includes('error') ||
+    lower.includes('skip') ||
+    detail.includes('失败') ||
+    detail.includes('跳过')
+  ) {
+    return { text: detail.includes('复活') ? detail : `复活失败: ${detail}`, failed: true };
+  }
+  return { text: `复活结果: ${detail}`, failed: false };
 };
 
 const triggerCooldown = (item: PacketTrigger) => {
@@ -1079,6 +1119,18 @@ export function PacketCapturePage() {
                 <strong>{item.rule_name}</strong>
                 <span>{item.action}</span>
                 <span>{[item.target || '-', triggerCooldown(item)].filter(Boolean).join(' / ')}</span>
+                {(() => {
+                  const revive = triggerReviveResult(item);
+                  if (!revive) return null;
+                  return (
+                    <span
+                      className={revive.failed ? styles.triggerReviveFailed : styles.triggerReviveOk}
+                      title={revive.text}
+                    >
+                      {revive.text}
+                    </span>
+                  );
+                })()}
                 <span className={styles.triggerIdentity}>
                   <span>{identity.primary}</span>
                   {identity.lines.map((line, index) => (

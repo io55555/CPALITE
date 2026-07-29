@@ -10,9 +10,16 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
-type schedulerTestExecutor struct{}
+type schedulerTestExecutor struct {
+	provider string
+}
 
-func (schedulerTestExecutor) Identifier() string { return "test" }
+func (e schedulerTestExecutor) Identifier() string {
+	if e.provider != "" {
+		return e.provider
+	}
+	return "test"
+}
 
 func (schedulerTestExecutor) Execute(ctx context.Context, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
 	return cliproxyexecutor.Response{}, nil

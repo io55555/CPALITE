@@ -77,6 +77,7 @@ const DEFAULT_COMPACT_PAGE_SIZE = 12;
 const STATUS_FILTER_LABELS: Record<AuthFilesStatusFilterMode, string> = {
   all: '全部',
   enabled: '已启用',
+  enabled_ok: '已启用+无异常',
   disabled: '已禁用',
   problem: '异常',
 };
@@ -232,7 +233,8 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   const pageSize = compactMode ? pageSizeByMode.compact : pageSizeByMode.regular;
   const problemOnly = statusFilterMode === 'problem';
   const disabledOnly = statusFilterMode === 'disabled';
-  const enabledOnly = statusFilterMode === 'enabled';
+  const enabledOnly = statusFilterMode === 'enabled' || statusFilterMode === 'enabled_ok';
+  const enabledOkOnly = statusFilterMode === 'enabled_ok';
 
   useInterval(
     () => {
@@ -469,13 +471,14 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
         if (enabledOnly && file.disabled === true) return false;
         if (disabledOnly && file.disabled !== true) return false;
         if (problemOnly && !hasAuthFileStatusMessage(file)) return false;
+        if (enabledOkOnly && (file.disabled === true || hasAuthFileStatusMessage(file))) return false;
         if (cooldownOnly) {
           const untilMs = getAuthFileCooldownUntilMs(file);
           if (untilMs === null || untilMs <= nowMs) return false;
         }
         return true;
       }),
-    [cooldownOnly, disabledOnly, enabledOnly, files, nowMs, problemOnly]
+    [cooldownOnly, disabledOnly, enabledOkOnly, enabledOnly, files, nowMs, problemOnly]
   );
 
   const statusFilterOptions = useMemo(
@@ -489,6 +492,12 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
           value: 'enabled',
           label: t('auth_files.problem_filter_enabled', {
             defaultValue: STATUS_FILTER_LABELS.enabled,
+          }),
+        },
+        {
+          value: 'enabled_ok',
+          label: t('auth_files.problem_filter_enabled_ok', {
+            defaultValue: STATUS_FILTER_LABELS.enabled_ok,
           }),
         },
         {
@@ -999,6 +1008,14 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
                 <Button
                   variant="secondary"
                   size="sm"
+                  onClick={() => setPage(1)}
+                  disabled={currentPage <= 1}
+                >
+                  {t('auth_files.pagination_first', { defaultValue: '首页' })}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setPage(Math.max(1, currentPage - 1))}
                   disabled={currentPage <= 1}
                 >
@@ -1018,6 +1035,14 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
                   disabled={currentPage >= totalPages}
                 >
                   {t('auth_files.pagination_next')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setPage(totalPages)}
+                  disabled={currentPage >= totalPages}
+                >
+                  {t('auth_files.pagination_last', { defaultValue: '尾页' })}
                 </Button>
               </div>
             )}

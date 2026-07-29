@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 type Service struct {
@@ -61,6 +62,7 @@ func Default() *Service {
 }
 
 func DefaultStore() *Store {
+	ensureTriggerDetailUpdaterWired()
 	if service := Default(); service != nil {
 		return service.store
 	}
@@ -595,6 +597,15 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 				continue
 			}
 			actionRule := ruleForAction(rule, action)
+			authLabel := preferAuthFileLabel(meta)
+			triggerDetail := detail
+			if strings.EqualFold(strings.TrimSpace(actionRule.Action), "xai_sso_revive") {
+				if strings.TrimSpace(triggerDetail) == "" {
+					triggerDetail = "复活排队中"
+				} else if !strings.Contains(triggerDetail, "复活") {
+					triggerDetail = "复活排队中; " + triggerDetail
+				}
+			}
 			trigger := TriggerRecord{
 				ID:              uuid.NewString(),
 				RuleID:          rule.ID,
@@ -605,7 +616,7 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 				Target:          actionRule.Target,
 				Account:         triggerAccount(meta),
 				AuthID:          strings.TrimSpace(meta.AuthID),
-				AuthLabel:       strings.TrimSpace(meta.AuthLabel),
+				AuthLabel:       authLabel,
 				AuthType:        strings.TrimSpace(meta.AuthType),
 				AuthIndex:       strings.TrimSpace(meta.AuthIndex),
 				APIKey:          strings.TrimSpace(meta.APIKey),
@@ -614,7 +625,7 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 				Model:           strings.TrimSpace(meta.Model),
 				Packet:          current,
 				PacketName:      packetName,
-				Detail:          detail,
+				Detail:          triggerDetail,
 				CooldownSeconds: actionRule.CooldownSeconds,
 			}
 			triggers = append(triggers, trigger)
@@ -637,6 +648,34 @@ func ApplyRules(ctx context.Context, meta Record, packetName string, packet stri
 	return current, nil, triggers
 }
 
+func preferAuthFileLabel(meta Record) string {
+	candidates := []string{
+		strings.TrimSpace(meta.AuthID),
+		strings.TrimSpace(meta.AuthLabel),
+		strings.TrimSpace(meta.AuthIndex),
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		base := candidate
+		if i := strings.LastIndexAny(candidate, "\\/"); i >= 0 && i+1 < len(candidate) {
+			base = candidate[i+1:]
+		}
+		lower := strings.ToLower(base)
+		if strings.HasSuffix(lower, ".json") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") {
+			return base
+		}
+	}
+	if value := strings.TrimSpace(meta.AuthLabel); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(meta.AuthID); value != "" {
+		return value
+	}
+	return strings.TrimSpace(meta.AuthIndex)
+}
+
 func triggerAccount(meta Record) string {
 	if value := strings.TrimSpace(meta.AuthLabel); value != "" {
 		if meta.AuthIndex != "" {
@@ -654,6 +693,24 @@ func triggerAccount(meta Record) string {
 		return value
 	}
 	return strings.TrimSpace(meta.UserToken)
+}
+
+// UpdateTriggerDetailByAuthAction 更新最近一条匹配的规则触发详情（用于异步动作结果回写）。
+
+func ensureTriggerDetailUpdaterWired() {
+	cliproxyauth.SetPacketFilterTriggerDetailUpdater(func(ctx context.Context, authID, action, detail string) {
+		_ = UpdateTriggerDetailByAuthAction(ctx, authID, action, detail)
+	})
+}
+func UpdateTriggerDetailByAuthAction(ctx context.Context, authID, action, detail string) error {
+	store := DefaultStore()
+	if store == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return store.UpdateLatestTriggerDetailByAuthAction(ctx, authID, action, detail)
 }
 
 func enabledRules(ctx context.Context, store *Store) ([]Rule, error) {

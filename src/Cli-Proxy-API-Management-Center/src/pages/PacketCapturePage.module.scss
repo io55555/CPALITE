@@ -485,3 +485,15 @@
     grid-column: 2 / -1;
   }
 }
+
+.triggerReviveOk {
+  color: var(--success, #16a34a);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.triggerReviveFailed {
+  color: var(--danger, #dc2626);
+  font-weight: 700;
+  white-space: nowrap;
+}

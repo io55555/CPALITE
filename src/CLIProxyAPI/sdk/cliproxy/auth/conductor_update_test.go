@@ -486,7 +486,7 @@ func TestManagerWrapStreamResult_AppliesRetryAfterFromChunkError(t *testing.T) {
 	chunks <- cliproxyexecutor.StreamChunk{Err: &retryAfterStatusError{status: http.StatusTooManyRequests, message: "free usage exhausted", retryAfter: retryAfter}}
 	close(chunks)
 
-	result := m.wrapStreamResult(context.Background(), &Auth{ID: "xai-auth", Provider: "xai"}, "xai", "grok-4.5-build-free", nil, nil, chunks, OAuthModelAliasResult{})
+	result := m.wrapStreamResult(context.Background(), &Auth{ID: "xai-auth", Provider: "xai"}, "xai", "grok-4.5-build-free", nil, nil, chunks, OAuthModelAliasResult{}, false)
 	for range result.Chunks {
 	}
 
