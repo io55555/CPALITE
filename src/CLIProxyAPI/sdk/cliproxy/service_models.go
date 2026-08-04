@@ -491,7 +491,34 @@ func (s *Service) resolveConfigXAIKey(auth *coreauth.Auth) *config.XAIKey {
 	if s == nil || s.cfg == nil {
 		return nil
 	}
-	return resolveConfigCodexStyleKey(auth, s.cfg.XAIKey, false)
+	if auth == nil {
+		return nil
+	}
+	var attrKey, attrBase string
+	if auth.Attributes != nil {
+		attrKey = strings.TrimSpace(auth.Attributes["api_key"])
+		attrBase = strings.TrimSpace(auth.Attributes["base_url"])
+	}
+	matchesCredentials := func(entry *config.XAIKey) bool {
+		if entry == nil {
+			return false
+		}
+		cfgKey := strings.TrimSpace(entry.APIKey)
+		cfgBase := strings.TrimSpace(entry.BaseURL)
+		if attrKey != "" {
+			return strings.EqualFold(cfgKey, attrKey) && (cfgBase == "" || strings.EqualFold(cfgBase, attrBase))
+		}
+		return attrBase != "" && strings.EqualFold(cfgBase, attrBase)
+	}
+	if entry := configEntryForAuthIndex(auth, s.cfg.XAIKey); entry != nil {
+		return entry
+	}
+	for i := range s.cfg.XAIKey {
+		if entry := &s.cfg.XAIKey[i]; matchesCredentials(entry) {
+			return entry
+		}
+	}
+	return nil
 }
 
 func resolveConfigCodexStyleKey(auth *coreauth.Auth, entries []config.CodexKey, validateIndexCredentials bool) *config.CodexKey {

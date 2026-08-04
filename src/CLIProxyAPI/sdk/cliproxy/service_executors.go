@@ -276,7 +276,7 @@ func (s *Service) registerExecutorForAuth(a *coreauth.Auth, forceReplace bool) {
 	case constant.Gemini:
 		s.coreManager.RegisterExecutor(executor.NewGeminiExecutor(cfg))
 	case constant.GeminiInteractions:
-		s.coreManager.RegisterExecutor(executor.NewGeminiInteractionsExecutor(cfg))
+		s.coreManager.RegisterExecutor(executor.NewGeminiExecutor(cfg))
 	case "vertex":
 		s.coreManager.RegisterExecutor(executor.NewGeminiVertexExecutor(cfg))
 	case "aistudio":

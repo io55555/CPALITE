@@ -1078,6 +1078,11 @@ func (h *Host) ownsExecutor(executor coreauth.ProviderExecutor) bool {
 	return okAdapter && adapter != nil && adapter.host == h
 }
 
+// OwnsExecutor reports whether the executor was registered by this plugin host.
+func (h *Host) OwnsExecutor(executor coreauth.ProviderExecutor) bool {
+	return h.ownsExecutor(executor)
+}
+
 func (h *Host) modelProvider(pluginID string) string {
 	if h == nil {
 		return ""
