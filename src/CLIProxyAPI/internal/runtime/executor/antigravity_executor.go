@@ -2239,18 +2239,7 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 		requestBody []byte
 	)
 	if antigravityRequestNeedsSchemaSanitization(payload) {
-		payloadStr := string(payload)
-		paths := make([]string, 0)
-		util.Walk(gjson.Parse(payloadStr), "", "parametersJsonSchema", &paths)
-		for _, p := range paths {
-			payloadStr, _ = util.RenameKey(payloadStr, p, p[:len(p)-len("parametersJsonSchema")]+"parameters")
-		}
-
-		if useAntigravitySchema {
-			payloadStr = util.CleanJSONSchemaForAntigravity(payloadStr)
-		} else {
-			payloadStr = util.CleanJSONSchemaForGemini(payloadStr)
-		}
+		payloadStr := sanitizeAntigravityRequestSchemas(string(payload), useAntigravitySchema)
 
 		if strings.Contains(modelName, "claude") {
 			updated, _ := sjson.SetBytes([]byte(payloadStr), "request.toolConfig.functionCallingConfig.mode", "VALIDATED")
@@ -2388,11 +2377,12 @@ func antigravityRequestNeedsSchemaSanitization(payload []byte) bool {
 	if gjson.GetBytes(payload, "request.tools.0").Exists() {
 		return true
 	}
-	if gjson.GetBytes(payload, "request.generationConfig.responseJsonSchema").Exists() {
-		return true
-	}
-	if gjson.GetBytes(payload, "request.generationConfig.responseSchema").Exists() {
-		return true
+	for _, container := range antigravityGenerationConfigContainers {
+		for _, key := range antigravityGenerationSchemaKeys {
+			if gjson.GetBytes(payload, container+"."+key).Exists() {
+				return true
+			}
+		}
 	}
 	return false
 }

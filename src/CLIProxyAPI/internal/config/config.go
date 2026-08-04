@@ -388,6 +388,7 @@ type ClaudeHeaderDefaults struct {
 	OS                     string `yaml:"os" json:"os"`
 	Arch                   string `yaml:"arch" json:"arch"`
 	Timeout                string `yaml:"timeout" json:"timeout"`
+	Timezone               string `yaml:"timezone" json:"timezone"`
 	StabilizeDeviceProfile *bool  `yaml:"stabilize-device-profile,omitempty" json:"stabilize-device-profile,omitempty"`
 }
 
@@ -404,7 +405,7 @@ type CodexConfig struct {
 
 	// OptimizeMultiAgentV2 optimizes official Codex multi-agent requests.
 	OptimizeMultiAgentV2 bool `yaml:"optimize-multi-agent-v2" json:"optimize-multi-agent-v2"`
-	IdentityConfuse bool `yaml:"identity-confuse" json:"identity-confuse"`
+	IdentityConfuse      bool `yaml:"identity-confuse" json:"identity-confuse"`
 }
 
 // TLSConfig holds HTTPS server settings.
@@ -686,14 +687,22 @@ type ClaudeModel struct {
 	// DisplayName is the optional human-readable name shown in model catalogs.
 	DisplayName string `yaml:"display-name,omitempty" json:"display-name,omitempty"`
 
+	// MaxContextLength overrides the context window advertised to clients.
+	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
+
 	// ForceMapping rewrites upstream response model fields back to Alias.
 	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+
+	// Thinking configures the thinking/reasoning capability for this model.
+	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
-func (m ClaudeModel) GetName() string        { return m.Name }
-func (m ClaudeModel) GetAlias() string       { return m.Alias }
-func (m ClaudeModel) GetDisplayName() string { return m.DisplayName }
-func (m ClaudeModel) GetForceMapping() bool  { return m.ForceMapping }
+func (m ClaudeModel) GetName() string                        { return m.Name }
+func (m ClaudeModel) GetAlias() string                       { return m.Alias }
+func (m ClaudeModel) GetDisplayName() string                 { return m.DisplayName }
+func (m ClaudeModel) GetMaxContextLength() int               { return m.MaxContextLength }
+func (m ClaudeModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m ClaudeModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // CodexKey represents the configuration for a Codex API key,
 // including the API key itself and an optional base URL for the API endpoint.
@@ -733,6 +742,9 @@ type CodexKey struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// AlphaSearch enables the Codex alpha search request path for this credential.
+	AlphaSearch bool `yaml:"alpha-search,omitempty" json:"alpha-search,omitempty"`
 }
 
 func (k CodexKey) GetAPIKey() string  { return k.APIKey }
@@ -749,14 +761,22 @@ type CodexModel struct {
 	// DisplayName is the optional human-readable name shown in model catalogs.
 	DisplayName string `yaml:"display-name,omitempty" json:"display-name,omitempty"`
 
+	// MaxContextLength overrides the context window advertised to clients.
+	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
+
 	// ForceMapping rewrites upstream response model fields back to Alias.
 	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+
+	// Thinking configures the thinking/reasoning capability for this model.
+	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
-func (m CodexModel) GetName() string        { return m.Name }
-func (m CodexModel) GetAlias() string       { return m.Alias }
-func (m CodexModel) GetDisplayName() string { return m.DisplayName }
-func (m CodexModel) GetForceMapping() bool  { return m.ForceMapping }
+func (m CodexModel) GetName() string                        { return m.Name }
+func (m CodexModel) GetAlias() string                       { return m.Alias }
+func (m CodexModel) GetDisplayName() string                 { return m.DisplayName }
+func (m CodexModel) GetMaxContextLength() int               { return m.MaxContextLength }
+func (m CodexModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m CodexModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // XAIConfig holds native xAI request behavior toggles.
 type XAIConfig struct {
@@ -764,8 +784,24 @@ type XAIConfig struct {
 	InjectXSearch bool `yaml:"inject-x-search" json:"inject-x-search"`
 }
 
-// XAIKey uses the Codex API key structure for native xAI execution.
-type XAIKey = CodexKey
+// XAIKey mirrors Codex-style API-key routing for native xAI execution.
+type XAIKey struct {
+	APIKey         string            `yaml:"api-key" json:"api-key"`
+	Priority       int               `yaml:"priority,omitempty" json:"priority,omitempty"`
+	Weight         *int              `yaml:"weight,omitempty" json:"weight,omitempty"`
+	Prefix         string            `yaml:"prefix,omitempty" json:"prefix,omitempty"`
+	BaseURL        string            `yaml:"base-url" json:"base-url"`
+	Websockets     bool              `yaml:"websockets,omitempty" json:"websockets,omitempty"`
+	ProxyURL       string            `yaml:"proxy-url" json:"proxy-url"`
+	Models         []XAIModel        `yaml:"models" json:"models"`
+	Headers        map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	ExcludedModels []string          `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
+	DisableCooling bool              `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+	AlphaSearch    bool              `yaml:"alpha-search,omitempty" json:"alpha-search,omitempty"`
+}
+
+func (k XAIKey) GetAPIKey() string  { return k.APIKey }
+func (k XAIKey) GetBaseURL() string { return k.BaseURL }
 
 // XAIModel uses the Codex model mapping structure for xAI models.
 type XAIModel = CodexModel
@@ -823,14 +859,22 @@ type GeminiModel struct {
 	// DisplayName is the optional human-readable name shown in model catalogs.
 	DisplayName string `yaml:"display-name,omitempty" json:"display-name,omitempty"`
 
+	// MaxContextLength overrides the context window advertised to clients.
+	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
+
 	// ForceMapping rewrites upstream response model fields back to Alias.
 	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+
+	// Thinking configures the thinking/reasoning capability for this model.
+	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
-func (m GeminiModel) GetName() string        { return m.Name }
-func (m GeminiModel) GetAlias() string       { return m.Alias }
-func (m GeminiModel) GetDisplayName() string { return m.DisplayName }
-func (m GeminiModel) GetForceMapping() bool  { return m.ForceMapping }
+func (m GeminiModel) GetName() string                        { return m.Name }
+func (m GeminiModel) GetAlias() string                       { return m.Alias }
+func (m GeminiModel) GetDisplayName() string                 { return m.DisplayName }
+func (m GeminiModel) GetMaxContextLength() int               { return m.MaxContextLength }
+func (m GeminiModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m GeminiModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // OpenAICompatibility represents the configuration for OpenAI API compatibility
 // with external providers, allowing model aliases to be routed through OpenAI API format.
@@ -859,6 +903,9 @@ type OpenAICompatibility struct {
 
 	// Headers optionally adds extra HTTP headers for requests sent to this provider.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+
+	// SupportPromptCacheKey enables prompt cache key handling for this provider.
+	SupportPromptCacheKey bool `yaml:"support-prompt-cache-key,omitempty" json:"support-prompt-cache-key,omitempty"`
 
 	// StatusRulers defines response rules that disable or cool down API keys.
 	StatusRulers []OpenAICompatibilityStatusRuler `yaml:"status-rulers,omitempty" json:"status-rulers,omitempty"`
@@ -911,6 +958,9 @@ type OpenAICompatibilityModel struct {
 	// DisplayName is the optional human-readable name shown in model catalogs.
 	DisplayName string `yaml:"display-name,omitempty" json:"display-name,omitempty"`
 
+	// MaxContextLength overrides the context window advertised to clients.
+	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
+
 	// ForceMapping rewrites upstream response model fields back to Alias.
 	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
 
@@ -929,10 +979,12 @@ type OpenAICompatibilityModel struct {
 	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
-func (m OpenAICompatibilityModel) GetName() string        { return m.Name }
-func (m OpenAICompatibilityModel) GetAlias() string       { return m.Alias }
-func (m OpenAICompatibilityModel) GetDisplayName() string { return m.DisplayName }
-func (m OpenAICompatibilityModel) GetForceMapping() bool  { return m.ForceMapping }
+func (m OpenAICompatibilityModel) GetName() string                        { return m.Name }
+func (m OpenAICompatibilityModel) GetAlias() string                       { return m.Alias }
+func (m OpenAICompatibilityModel) GetDisplayName() string                 { return m.DisplayName }
+func (m OpenAICompatibilityModel) GetMaxContextLength() int               { return m.MaxContextLength }
+func (m OpenAICompatibilityModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m OpenAICompatibilityModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // LoadConfig reads a YAML configuration file from the given path,
 // unmarshals it into a Config struct, applies environment variable overrides,
@@ -952,21 +1004,28 @@ func LoadConfig(configFile string) (*Config, error) {
 // If optional is true and the file is missing, it returns an empty Config.
 // If optional is true and the file is empty or invalid, it returns an empty Config.
 func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
+	defaultOptionalConfig := func() *Config {
+		return &Config{
+			ConfigFilePath:     configFile,
+			CredentialInFlight: DefaultCredentialInFlightConfig(),
+		}
+	}
+
 	// Read the entire configuration file into memory.
 	data, err := os.ReadFile(configFile)
 	if err != nil {
 		if optional {
 			if os.IsNotExist(err) || errors.Is(err, syscall.EISDIR) {
 				// Missing and optional: return empty config (cloud deploy standby).
-				return &Config{}, nil
+				return defaultOptionalConfig(), nil
 			}
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	// In cloud deploy mode (optional=true), if file is empty or contains only whitespace, return empty config.
-	if optional && len(data) == 0 {
-		return &Config{}, nil
+	if optional && strings.TrimSpace(string(data)) == "" {
+		return defaultOptionalConfig(), nil
 	}
 
 	// Unmarshal the YAML data into the Config struct.
@@ -993,10 +1052,11 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.AmpCode.RestrictManagementToLocalhost = false // Default to false: API key auth is sufficient
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
+	cfg.CredentialInFlight = DefaultCredentialInFlightConfig()
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		if optional {
 			// In cloud deploy mode, if YAML parsing fails, return empty config instead of error.
-			return &Config{}, nil
+			return defaultOptionalConfig(), nil
 		}
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
@@ -1272,6 +1332,7 @@ func (cfg *Config) SanitizeClaudeHeaderDefaults() {
 	cfg.ClaudeHeaderDefaults.OS = strings.TrimSpace(cfg.ClaudeHeaderDefaults.OS)
 	cfg.ClaudeHeaderDefaults.Arch = strings.TrimSpace(cfg.ClaudeHeaderDefaults.Arch)
 	cfg.ClaudeHeaderDefaults.Timeout = strings.TrimSpace(cfg.ClaudeHeaderDefaults.Timeout)
+	cfg.ClaudeHeaderDefaults.Timezone = strings.TrimSpace(cfg.ClaudeHeaderDefaults.Timezone)
 }
 
 // SanitizeOAuthModelAlias normalizes and deduplicates global OAuth model name aliases.
@@ -1356,7 +1417,7 @@ func (cfg *Config) SanitizeXAIKeys() {
 	if cfg == nil {
 		return
 	}
-	cfg.XAIKey = sanitizeCodexKeyEntries(cfg.XAIKey)
+	cfg.XAIKey = sanitizeXAIKeyEntries(cfg.XAIKey)
 }
 
 func sanitizeCodexKeyEntries(entries []CodexKey) []CodexKey {
@@ -1370,6 +1431,26 @@ func sanitizeCodexKeyEntries(entries []CodexKey) []CodexKey {
 		e.BaseURL = strings.TrimSpace(e.BaseURL)
 		e.Headers = NormalizeHeaders(e.Headers)
 		e.ExcludedModels = NormalizeExcludedModels(e.ExcludedModels)
+		if e.BaseURL == "" {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func sanitizeXAIKeyEntries(entries []XAIKey) []XAIKey {
+	if len(entries) == 0 {
+		return entries
+	}
+	out := make([]XAIKey, 0, len(entries))
+	for i := range entries {
+		e := entries[i]
+		e.Prefix = normalizeModelPrefix(e.Prefix)
+		e.BaseURL = strings.TrimSpace(e.BaseURL)
+		e.Headers = NormalizeHeaders(e.Headers)
+		e.ExcludedModels = NormalizeExcludedModels(e.ExcludedModels)
+		e.AlphaSearch = false
 		if e.BaseURL == "" {
 			continue
 		}

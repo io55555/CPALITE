@@ -654,6 +654,42 @@ export function VisualConfigEditor({
     </FieldAnchor>
   );
 
+  const xaiGrokBuildHeaderDefaultsToggle = (
+    <FieldAnchor fieldId="xaiGrokBuildHeaderDefaults">
+      <ToggleRow
+        title={t('config_management.visual.sections.headers.xai_grok_build_defaults')}
+        description={t('config_management.visual.sections.headers.xai_grok_build_defaults_desc')}
+        checked={values.xaiGrokBuildHeaderDefaults}
+        disabled={disabled}
+        onChange={(xaiGrokBuildHeaderDefaults) => onChange({ xaiGrokBuildHeaderDefaults })}
+      />
+    </FieldAnchor>
+  );
+
+  const xaiOpenWebUICompatToggle = (
+    <FieldAnchor fieldId="xaiOpenWebUICompat">
+      <ToggleRow
+        title={t('config_management.visual.sections.headers.xai_openwebui_compat')}
+        description={t('config_management.visual.sections.headers.xai_openwebui_compat_desc')}
+        checked={values.xaiOpenWebUICompat}
+        disabled={disabled}
+        onChange={(xaiOpenWebUICompat) => onChange({ xaiOpenWebUICompat })}
+      />
+    </FieldAnchor>
+  );
+
+  const xaiInjectXSearchToggle = (
+    <FieldAnchor fieldId="xaiInjectXSearch">
+      <ToggleRow
+        title={t('config_management.visual.sections.headers.xai_inject_x_search')}
+        description={t('config_management.visual.sections.headers.xai_inject_x_search_desc')}
+        checked={values.xaiInjectXSearch}
+        disabled={disabled}
+        onChange={(xaiInjectXSearch) => onChange({ xaiInjectXSearch })}
+      />
+    </FieldAnchor>
+  );
+
   const navContent = (
     <div className={styles.navList}>
       {sections.map((section, index) => {
@@ -862,6 +898,9 @@ export function VisualConfigEditor({
             {loggingToFileToggle}
             {quotaSwitchProjectToggle}
             {quotaSwitchPreviewModelToggle}
+            {xaiGrokBuildHeaderDefaultsToggle}
+            {xaiOpenWebUICompatToggle}
+            {xaiInjectXSearchToggle}
           </div>
 
           <button
@@ -1728,29 +1767,18 @@ export function VisualConfigEditor({
                           onChange={(codexIdentityConfuse) => onChange({ codexIdentityConfuse })}
                         />
                       </FieldAnchor>
-                    
+                    </SectionGrid>
+                    <Divider />
                     <div className={styles.subsectionHeader}>
-                      <h4>{t('config_management.visual.sections.headers.xai_title')}</h4>
+                      <h3 className={styles.subsectionTitle}>
+                        {t('config_management.visual.sections.headers.xai_title')}
+                      </h3>
                     </div>
-                    <div className={styles.fieldGrid}>
-                      <FieldAnchor fieldId="xaiGrokBuildHeaderDefaults">
-                        <ToggleRow
-                          title={t('config_management.visual.sections.headers.xai_grok_build_defaults')}
-                          description={t('config_management.visual.sections.headers.xai_grok_build_defaults_desc')}
-                          checked={values.xaiGrokBuildHeaderDefaults}
-                          onChange={(xaiGrokBuildHeaderDefaults) => onChange({ xaiGrokBuildHeaderDefaults })}
-                        />
-                      </FieldAnchor>
-                      <FieldAnchor fieldId="xaiOpenWebUICompat">
-                        <ToggleRow
-                          title={t('config_management.visual.sections.headers.xai_openwebui_compat')}
-                          description={t('config_management.visual.sections.headers.xai_openwebui_compat_desc')}
-                          checked={values.xaiOpenWebUICompat}
-                          onChange={(xaiOpenWebUICompat) => onChange({ xaiOpenWebUICompat })}
-                        />
-                      </FieldAnchor>
-                    </div>
-</SectionGrid>
+                    <SectionGrid>
+                      {xaiGrokBuildHeaderDefaultsToggle}
+                      {xaiOpenWebUICompatToggle}
+                      {xaiInjectXSearchToggle}
+                    </SectionGrid>
                   </SectionStack>
                 </Collapsible>
               </SectionStack>

@@ -28,8 +28,10 @@ type Record struct {
 	APIKey       string
 	AuthID       string
 	AuthIndex    string
-	AuthType     string
-	Source       string
+	// AccessTokenSHA256 identifies the OAuth token version without exposing the token.
+	AccessTokenSHA256 string
+	AuthType          string
+	Source            string
 	// Generate marks image/video generation requests for usage event sinks.
 	Generate *bool
 	// ReasoningEffort stores the translated upstream thinking level for request event logs.

@@ -1172,7 +1172,7 @@ func applyXAICustomHeaders(r *http.Request, auth *cliproxyauth.Auth) {
 func applyXAIChatHeaders(cfg *config.Config, r *http.Request, auth *cliproxyauth.Auth, token string, stream bool, sessionID string) {
 	if xaiUsingAPI(auth) {
 		applyXAIHeaders(r, auth, token, stream, sessionID)
-		// 配置开启时，在标准 Header 之后再固定 Grok Build 拟真字段
+		// 配置开启时，在标准 Header 之后固定 Grok Build 拟真字段。
 		applyXAIGrokBuildHeaderDefaults(cfg, r)
 		return
 	}
@@ -1183,7 +1183,7 @@ func applyXAIChatHeaders(cfg *config.Config, r *http.Request, auth *cliproxyauth
 		r.Header.Set("User-Agent", "xai-grok-workspace/"+xaiClientVersionValue)
 	}
 	applyXAICustomHeaders(r, auth)
-	// 配置开启时覆盖为固定拟真 Header（含 User-Agent）
+	// 配置开启时覆盖为固定拟真 Header（含 User-Agent）。
 	applyXAIGrokBuildHeaderDefaults(cfg, r)
 }
 
@@ -2973,4 +2973,3 @@ func applyXAIPacketFilterToManager(ctx context.Context, auth *cliproxyauth.Auth,
 		log.Warnf("xai packet filter action not applied to manager yet: auth=%s action=%s model=%s rule=%s", authIDForLog(auth), action, model, ruleName)
 	}
 }
-

@@ -590,6 +590,10 @@ nonstream-keepalive-interval: 0
 # Enable fixed Grok Build header defaults for xAI auth-file requests (default false).
 # xai-grok-build-header-defaults: false
 
+# Native xAI behavior toggles (default false).
+# xai:
+#   inject-x-search: false
+
 
 # ---------------------------------------------------------------------------
 # 插件（可选）

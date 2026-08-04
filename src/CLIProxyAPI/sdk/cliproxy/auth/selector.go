@@ -273,6 +273,29 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 		limit = 4096
 	}
 
+	groups, parentOrder := groupByVirtualParent(available)
+	if len(parentOrder) > 1 {
+		groupKey := key + "::group"
+		s.ensureCursorKey(groupKey, limit)
+		groupIndex := s.cursors[groupKey]
+		if groupIndex >= 2_147_483_640 {
+			groupIndex = 0
+		}
+		s.cursors[groupKey] = groupIndex + 1
+
+		selectedParent := parentOrder[groupIndex%len(parentOrder)]
+		group := groups[selectedParent]
+		innerKey := key + "::cred:" + selectedParent
+		s.ensureCursorKey(innerKey, limit)
+		innerIndex := s.cursors[innerKey]
+		if innerIndex >= 2_147_483_640 {
+			innerIndex = 0
+		}
+		s.cursors[innerKey] = innerIndex + 1
+		s.mu.Unlock()
+		return group[innerIndex%len(group)], nil
+	}
+
 	s.ensureCursorKey(key, limit)
 	index := s.cursors[key]
 	if index >= 2_147_483_640 {
@@ -289,6 +312,29 @@ func (s *RoundRobinSelector) ensureCursorKey(key string, limit int) {
 	if _, ok := s.cursors[key]; !ok && len(s.cursors) >= limit {
 		s.cursors = make(map[string]int)
 	}
+}
+
+func groupByVirtualParent(auths []*Auth) (map[string][]*Auth, []string) {
+	if len(auths) == 0 {
+		return nil, nil
+	}
+	groups := make(map[string][]*Auth)
+	for _, auth := range auths {
+		parent := ""
+		if auth != nil && auth.Attributes != nil {
+			parent = strings.TrimSpace(auth.Attributes["gemini_virtual_parent"])
+		}
+		if parent == "" {
+			return nil, nil
+		}
+		groups[parent] = append(groups[parent], auth)
+	}
+	parentOrder := make([]string, 0, len(groups))
+	for parent := range groups {
+		parentOrder = append(parentOrder, parent)
+	}
+	sort.Strings(parentOrder)
+	return groups, parentOrder
 }
 
 // Pick selects the first available auth for the provider in a deterministic manner.
@@ -335,7 +381,7 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 						if next.Before(now) {
 							next = now
 						}
-						if state.Quota.Exceeded {
+						if state.Quota.Exceeded || state.Status == StatusError {
 							return true, blockReasonCooldown, next
 						}
 						return true, blockReasonOther, next
@@ -354,7 +400,7 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 		if next.Before(now) {
 			next = now
 		}
-		if auth.Quota.Exceeded {
+		if auth.Quota.Exceeded || auth.Status == StatusError {
 			return true, blockReasonCooldown, next
 		}
 		return true, blockReasonOther, next
@@ -518,96 +564,96 @@ func ExtractSessionID(headers http.Header, payload []byte, metadata map[string]a
 }
 
 // extractSessionIDs returns (primaryID, fallbackID) for session affinity.
-// primaryID: full hash including assistant response (stable after first turn)
-// fallbackID: short hash without assistant (used to inherit binding from first turn)
+// fallbackID preserves an earlier binding when a stronger body identifier appears
+// later, and lets callers bind both identifiers when both are present.
 func extractSessionIDs(headers http.Header, payload []byte, metadata map[string]any) (string, string) {
-	// 1. metadata.user_id with Claude Code session format (highest priority)
-	if len(payload) > 0 {
-		userID := gjson.GetBytes(payload, "metadata.user_id").String()
-		if userID != "" {
-			// Old format: user_{hash}_account__session_{uuid}
-			if matches := sessionPattern.FindStringSubmatch(userID); len(matches) >= 2 {
-				id := "claude:" + matches[1]
-				return id, ""
-			}
-			// New format: JSON object with session_id field
-			// e.g. {"device_id":"...","account_uuid":"...","session_id":"uuid"}
-			if len(userID) > 0 && userID[0] == '{' {
-				if sid := gjson.Get(userID, "session_id").String(); sid != "" {
-					return "claude:" + sid, ""
-				}
-			}
-		}
+	if sid := sessionHeaderValue(headers, "X-Claude-Code-Session-Id"); sid != "" {
+		return "claude:" + sid, ""
 	}
-
-	// 2. X-Session-ID header
-	if sessionID := sessionHeaderValue(headers, "X-Session-ID"); sessionID != "" {
-		return "header:" + sessionID, ""
+	if sid := cliproxysession.ClaudeMetadataSessionID(payload); sid != "" {
+		return "claude:" + sid, ""
 	}
-
-	// 3. Session_id header (Codex)
-	if sessionID := sessionHeaderValue(headers, "Session-Id"); sessionID != "" {
-		return "codex:" + sessionID, ""
+	if sid := sessionHeaderValue(headers, "Session-Id"); sid != "" {
+		return "codex:" + sid, ""
 	}
-	if sessionID := sessionHeaderValue(headers, "Session_id"); sessionID != "" {
-		return "codex:" + sessionID, ""
+	if sid := sessionHeaderValue(headers, "Session_id"); sid != "" {
+		return "codex:" + sid, ""
 	}
-
-	// 4. X-Client-Request-Id header (PI)
-	// Amp CLI thread ID (local enhancement)
+	if sid := sessionHeaderValue(headers, "X-Session-ID"); sid != "" {
+		return "header:" + sid, ""
+	}
+	if sid := sessionHeaderValue(headers, "X-Session-Affinity"); sid != "" {
+		return "affinity:" + sid, ""
+	}
 	if tid := sessionHeaderValue(headers, "X-Amp-Thread-Id"); tid != "" {
 		return "amp:" + tid, ""
 	}
-
-	if requestID := sessionHeaderValue(headers, "X-Client-Request-Id"); requestID != "" {
-		return "clientreq:" + requestID, ""
+	if sid := sessionHeaderValue(headers, "X-Client-Request-Id"); sid != "" {
+		return "clientreq:" + sid, ""
 	}
 
 	if len(payload) > 0 {
-		// 5. Explicit request-body session fields.
 		for _, path := range []string{"session_id", "sessionId"} {
-			if sessionID := strings.TrimSpace(gjson.GetBytes(payload, path).String()); sessionID != "" {
-				return "session:" + sessionID, ""
+			if sid := normalizedSessionCandidate(gjson.GetBytes(payload, path).String()); sid != "" {
+				return "session:" + sid, ""
 			}
 		}
-		if userID := strings.TrimSpace(gjson.GetBytes(payload, "metadata.user_id").String()); userID != "" {
+
+		conversationID := ""
+		conversation := gjson.GetBytes(payload, "conversation")
+		if sid := normalizedSessionCandidate(conversation.Get("id").String()); sid != "" {
+			conversationID = "conv:" + sid
+		} else if conversation.Type == gjson.String {
+			if sid := normalizedSessionCandidate(conversation.String()); sid != "" {
+				conversationID = "conv:" + sid
+			}
+		}
+		if sid := normalizedSessionCandidate(gjson.GetBytes(payload, "prompt_cache_key").String()); sid != "" {
+			return "pck:" + sid, conversationID
+		}
+		if conversationID != "" {
+			return conversationID, ""
+		}
+
+		if userID := normalizedSessionCandidate(gjson.GetBytes(payload, "metadata.user_id").String()); userID != "" {
 			return "user:" + userID, ""
 		}
-		if conversationID := strings.TrimSpace(gjson.GetBytes(payload, "conversation_id").String()); conversationID != "" {
+		if conversationID := normalizedSessionCandidate(gjson.GetBytes(payload, "conversation_id").String()); conversationID != "" {
 			return "conv:" + conversationID, ""
-		}
-		if promptCacheKey := strings.TrimSpace(gjson.GetBytes(payload, "prompt_cache_key").String()); promptCacheKey != "" {
-			return "prompt:" + promptCacheKey, ""
 		}
 	}
 
-	// 6. Explicit long-lived execution session.
 	if executionID, ok := metadata[cliproxyexecutor.ExecutionSessionMetadataKey].(string); ok {
-		if executionID = strings.TrimSpace(executionID); executionID != "" {
+		if executionID = normalizedSessionCandidate(executionID); executionID != "" {
 			return "execution:" + executionID, ""
 		}
 	}
-
-	// 7. Stable context-derived session identity.
-	if derivedID := cliproxysession.DerivedID(metadata); derivedID != "" {
+	if derivedID := normalizedSessionCandidate(cliproxysession.DerivedID(metadata)); derivedID != "" {
 		return "derived:" + derivedID, ""
 	}
-
 	if len(payload) == 0 {
 		return "", ""
 	}
-
-	// 8. Legacy hash-based fallback from message content.
 	return extractMessageHashIDs(payload)
 }
 
+func normalizedSessionCandidate(raw string) string {
+	return cliproxysession.NormalizeExplicitID(raw)
+}
+
 func sessionHeaderValue(headers http.Header, name string) string {
+	if headers == nil {
+		return ""
+	}
+	if value := normalizedSessionCandidate(headers.Get(name)); value != "" {
+		return value
+	}
 	for key, values := range headers {
 		if !strings.EqualFold(key, name) {
 			continue
 		}
-		for _, value := range values {
-			if value = strings.TrimSpace(value); value != "" {
+		for _, raw := range values {
+			if value := normalizedSessionCandidate(raw); value != "" {
 				return value
 			}
 		}

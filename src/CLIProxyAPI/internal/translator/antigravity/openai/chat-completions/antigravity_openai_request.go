@@ -81,6 +81,24 @@ func ConvertOpenAIRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 		}
 	}
 
+	responseFormat := gjson.GetBytes(rawJSON, "response_format")
+	if responseFormat.IsObject() {
+		switch strings.ToLower(strings.TrimSpace(responseFormat.Get("type").String())) {
+		case "json_object":
+			out, _ = sjson.SetBytes(out, "request.generationConfig.responseMimeType", "application/json")
+			out, _ = sjson.DeleteBytes(out, "request.generationConfig.responseSchema")
+		case "json_schema":
+			out, _ = sjson.SetBytes(out, "request.generationConfig.responseMimeType", "application/json")
+			schema := responseFormat.Get("json_schema.schema")
+			if !schema.Exists() {
+				schema = responseFormat.Get("schema")
+			}
+			if schema.IsObject() {
+				out, _ = sjson.SetRawBytes(out, "request.generationConfig.responseSchema", []byte(schema.Raw))
+			}
+		}
+	}
+
 	// Map OpenAI modalities -> Antigravity request.generationConfig.responseModalities
 	// e.g. "modalities": ["image", "text"] -> ["IMAGE", "TEXT"]
 	if mods := gjson.GetBytes(rawJSON, "modalities"); mods.Exists() && mods.IsArray() {

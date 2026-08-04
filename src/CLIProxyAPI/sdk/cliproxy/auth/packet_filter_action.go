@@ -82,3 +82,24 @@ func packetFilterActionStateFromContext(ctx context.Context) (action, target, au
 	}
 	return strings.TrimSpace(state.action), strings.TrimSpace(state.target), strings.TrimSpace(state.authID), state.seconds, strings.TrimSpace(state.rule)
 }
+
+func hasPacketFilterAction(ctx context.Context) bool {
+	action, target, _, _, _ := packetFilterActionStateFromContext(ctx)
+	if action != "" && target != "" {
+		return true
+	}
+	if ctx == nil {
+		return false
+	}
+	ginCtx, _ := ctx.Value("gin").(interface {
+		Get(string) (any, bool)
+	})
+	if ginCtx == nil {
+		return false
+	}
+	actionValue, hasAction := ginCtx.Get(packetFilterActionContextKey)
+	targetValue, hasTarget := ginCtx.Get(packetFilterTargetContextKey)
+	action, _ = actionValue.(string)
+	target, _ = targetValue.(string)
+	return hasAction && hasTarget && strings.TrimSpace(action) != "" && strings.TrimSpace(target) != ""
+}

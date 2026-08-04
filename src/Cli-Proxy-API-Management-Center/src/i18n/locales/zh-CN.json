@@ -1108,6 +1108,8 @@
           "xai_grok_build_defaults_desc": "使用 xAI 认证文件时固定 User-Agent 与必要拟真 Header（默认关闭）",
           "xai_openwebui_compat": "启用 xAI OpenWebUI 兼容转换",
           "xai_openwebui_compat_desc": "将 xAI Responses 输出转换为 OpenAI Chat Completions，便于 OpenWebUI 解析（默认关闭）",
+          "xai_inject_x_search": "注入 xAI x_search 工具",
+          "xai_inject_x_search_desc": "客户端未声明 x_search 时自动加入 xAI 原生搜索工具（默认关闭）",
           "codex_title": "Codex Header Defaults",
           "user_agent": "User-Agent",
           "package_version": "Package Version",

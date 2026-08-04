@@ -30,7 +30,7 @@ func (c *fakeHomeRefreshClient) HeartbeatOK() bool {
 	return true
 }
 
-func (c *fakeHomeRefreshClient) GetRefreshAuth(_ context.Context, authIndex string) ([]byte, error) {
+func (c *fakeHomeRefreshClient) GetRefreshAuth(_ context.Context, authIndex string, _ string) ([]byte, error) {
 	c.calls.Add(1)
 	c.authIndex = authIndex
 	return c.raw, nil

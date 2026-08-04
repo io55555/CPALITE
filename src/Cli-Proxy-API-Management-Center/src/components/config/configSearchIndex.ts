@@ -443,6 +443,15 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
     yamlKeys: ['xai-openwebui-compat'],
     keywords: ['xai', 'openwebui'],
   },
+  {
+    fieldId: 'xaiInjectXSearch',
+    sectionId: 'advanced',
+    labelKey: L('sections.headers.xai_inject_x_search'),
+    qualifierKey: L('sections.headers.xai_title'),
+    hintKey: L('sections.headers.xai_inject_x_search_desc'),
+    yamlKeys: ['xai', 'inject-x-search'],
+    keywords: ['xai', 'grok', 'search'],
+  },
   // ── payload (coarse: one entry per rule group) ──────────────────────────────
   {
     fieldId: 'payloadDefaultRules',

@@ -1433,6 +1433,24 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "field name is required"})
 			return
 		}
+		if rootAuthFileField(fieldPath) == "weight" {
+			weight, errWeight := parseCredentialWeightPatch(rawValue)
+			if errWeight != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": errWeight.Error()})
+				return
+			}
+			if targetAuth.Metadata == nil {
+				targetAuth.Metadata = make(map[string]any)
+			}
+			if weight == nil {
+				delete(targetAuth.Metadata, "weight")
+			} else {
+				targetAuth.Metadata["weight"] = *weight
+			}
+			touchedRoots["weight"] = struct{}{}
+			changed = true
+			continue
+		}
 		value, errDecode := decodeAuthFileFieldValue(rawValue)
 		if errDecode != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid field %s", fieldPath)})
@@ -1599,6 +1617,9 @@ func syncAuthFileMetadataFields(auth *coreauth.Auth, touchedRoots map[string]str
 	if _, ok := touchedRoots["priority"]; ok {
 		syncAuthFilePriorityAttribute(auth)
 	}
+	if _, ok := touchedRoots["weight"]; ok {
+		syncAuthFileWeightAttribute(auth)
+	}
 	if _, ok := touchedRoots["note"]; ok {
 		syncAuthFileNoteAttribute(auth)
 	}
@@ -1644,6 +1665,21 @@ func syncAuthFilePriorityAttribute(auth *coreauth.Auth) {
 		return
 	}
 	auth.Attributes["priority"] = strconv.Itoa(priority)
+}
+
+func syncAuthFileWeightAttribute(auth *coreauth.Auth) {
+	if auth == nil {
+		return
+	}
+	if auth.Attributes == nil {
+		auth.Attributes = make(map[string]string)
+	}
+	weight, ok := authFileIntValue(auth.Metadata["weight"])
+	if !ok {
+		delete(auth.Attributes, coreauth.AttributeWeight)
+		return
+	}
+	auth.Attributes[coreauth.AttributeWeight] = strconv.Itoa(weight)
 }
 
 func authFileIntValue(value any) (int, bool) {

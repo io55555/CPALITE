@@ -2,15 +2,15 @@
 
 ## CLIProxyAPI
 - branch: main
-- commit: c9417c8ae9b16fabc0386ca35d36f13bf8b1d678
-- tag: v7.2.104
-- note: selective merge from v7.2.102..v7.2.104: safe updates + pure new modules (request-lifecycle plugin, credential weight helpers/validation fields, home session alias, antigravity provenance/replay snapshot upgrade skipped to keep local antigravity executor chain, models/signature/translator fixes); kept local monoliths (conductor/selector/scheduler/auth_files/server/config/executors/handlers) to preserve packet/filter/cooldown/OpenWebUI/Grok Manager/quota chains; full weighted-RR scheduler path not force-ported into local selector/scheduler; management weight PATCH API partially not wired into local config_lists.
+- commit: a88197f845c979132c8978ea223c6af05cc81536
+- tag: v7.2.116
+- note: selective merge from v7.2.104..v7.2.116: adopted compatible Claude/Home auth recovery, fingerprint, request/translator/thinking/model metadata, xAI alpha-search/API-key capability, cache/httpwire/modelconfig helpers, and focused tests while keeping local conductor/selector/scheduler/auth-files/server/config/executor/packet-filter/Grok Manager surfaces where required to preserve cooldown, OpenWebUI, quota, monitoring, SSOcookie, and packet-capture chains.
 
 ## Cli-Proxy-API-Management-Center
 - branch: main
-- commit: 1708314bc7a27e0ad9ef86b083e28e4e00aceeb1
-- tag: v1.20.0
-- note: selective merge from v1.19.3..v1.20.0: adopted dashboard feature rewrite + Claude Fable weekly quota display; merged i18n/format/quota helpers; kept local AuthFiles/packet/visual-config surfaces; added local first/last pagination and enabled_ok status filter on auth-files pages.
+- commit: 30478c539c1f06649ac78deebeff6cfc227bbe22
+- tag: v1.21.4
+- note: selective merge from v1.20.0..v1.21.4: adopted compatible auth-files, quota, provider, excluded-model, LMU AI, visual-config, timing, and test updates while keeping local packet/filter/auth cooldown/Grok Manager/custom config surfaces; xAI Grok Build/OpenWebUI config controls remain local and are surfaced in both simple and full visual config modes.
 
 ## CLIProxyAPI-Pro
 - repository: https://github.com/ssfun/CLIProxyAPI-Pro

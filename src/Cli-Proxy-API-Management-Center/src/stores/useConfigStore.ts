@@ -43,14 +43,18 @@ const SECTION_KEYS: RawConfigSection[] = [
   'logs-max-total-size-mb',
   'ws-auth',
   'force-model-prefix',
+  'xai-grok-build-header-defaults',
+  'xai-openwebui-compat',
+  'xai',
   'routing/strategy',
   'api-keys',
   'gemini-api-key',
   'codex-api-key',
+  'xai-api-key',
   'claude-api-key',
   'vertex-api-key',
   'openai-compatibility',
-  'oauth-excluded-models'
+  'oauth-excluded-models',
 ];
 
 const extractSectionValue = (config: Config | null, section?: RawConfigSection) => {
@@ -74,6 +78,12 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
       return config.wsAuth;
     case 'force-model-prefix':
       return config.forceModelPrefix;
+    case 'xai-grok-build-header-defaults':
+      return config.xaiGrokBuildHeaderDefaults;
+    case 'xai-openwebui-compat':
+      return config.xaiOpenWebUICompat;
+    case 'xai':
+      return config.xai;
     case 'routing/strategy':
       return config.routingStrategy;
     case 'api-keys':
@@ -156,17 +166,21 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       set({
         config: data,
         cache: newCache,
-        loading: false
+        loading: false,
       });
 
       return section ? extractSectionValue(data, section) : data;
     } catch (error: unknown) {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Failed to fetch config';
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Failed to fetch config';
       if (requestId === configRequestToken) {
         set({
           error: message || 'Failed to fetch config',
-          loading: false
+          loading: false,
         });
       }
       throw error;
@@ -210,6 +224,15 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
           break;
         case 'force-model-prefix':
           nextConfig.forceModelPrefix = value as Config['forceModelPrefix'];
+          break;
+        case 'xai-grok-build-header-defaults':
+          nextConfig.xaiGrokBuildHeaderDefaults = value as Config['xaiGrokBuildHeaderDefaults'];
+          break;
+        case 'xai-openwebui-compat':
+          nextConfig.xaiOpenWebUICompat = value as Config['xaiOpenWebUICompat'];
+          break;
+        case 'xai':
+          nextConfig.xai = value as Config['xai'];
           break;
         case 'routing/strategy':
           nextConfig.routingStrategy = value as Config['routingStrategy'];
@@ -284,5 +307,5 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     if (!cached) return false;
 
     return Date.now() - cached.timestamp < CACHE_EXPIRY_MS;
-  }
+  },
 }));

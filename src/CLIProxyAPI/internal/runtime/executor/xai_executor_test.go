@@ -4731,6 +4731,27 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", xaiClientVersionHeader, got, xaiClientVersionValue)
 		}
 	})
+
+	t.Run("grok build header defaults apply when enabled", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "https://example.invalid/responses", nil)
+		auth := &cliproxyauth.Auth{
+			Attributes: map[string]string{"base_url": xaiauth.DefaultAPIBaseURL},
+		}
+		applyXAIChatHeaders(&config.Config{XAIGrokBuildHeaderDefaults: true}, req, auth, "xai-token", true, "conv-1")
+
+		if got := req.Header.Get("User-Agent"); !strings.Contains(got, "Chrome/131.0.0.0") {
+			t.Fatalf("User-Agent = %q, want Grok Build browser default", got)
+		}
+		if got := req.Header.Get(xaiClientVersionHeader); got != xaiClientVersionValue {
+			t.Fatalf("%s = %q, want %q", xaiClientVersionHeader, got, xaiClientVersionValue)
+		}
+		if got := req.Header.Get("x-grok-client-version"); got != xaiClientVersionValue {
+			t.Fatalf("x-grok-client-version = %q, want %q", got, xaiClientVersionValue)
+		}
+		if got := req.Header.Get("Origin"); got != "https://grok.com" {
+			t.Fatalf("Origin = %q, want https://grok.com", got)
+		}
+	})
 }
 
 func TestXAIExecutorExecuteChatUsesProxyHeadersOnlyForChatProxy(t *testing.T) {

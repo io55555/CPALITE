@@ -25,6 +25,10 @@ export interface AuthPoolCleanConfig {
   sampleSize?: number;
 }
 
+export interface XaiConfig {
+  injectXSearch?: boolean;
+}
+
 export interface Config {
   debug?: boolean;
   proxyUrl?: string;
@@ -42,9 +46,12 @@ export interface Config {
   logsMaxTotalSizeMb?: number;
   wsAuth?: boolean;
   forceModelPrefix?: boolean;
+  xaiGrokBuildHeaderDefaults?: boolean;
+  xaiOpenWebUICompat?: boolean;
   routingStrategy?: string;
   apiKeys?: string[];
   ampcode?: AmpcodeConfig;
+  xai?: XaiConfig;
   geminiApiKeys?: GeminiKeyConfig[];
   codexApiKeys?: ProviderKeyConfig[];
   xaiApiKeys?: ProviderKeyConfig[];
@@ -65,6 +72,9 @@ export type RawConfigSection =
   | 'logs-max-total-size-mb'
   | 'ws-auth'
   | 'force-model-prefix'
+  | 'xai-grok-build-header-defaults'
+  | 'xai-openwebui-compat'
+  | 'xai'
   | 'routing/strategy'
   | 'api-keys'
   | 'ampcode'

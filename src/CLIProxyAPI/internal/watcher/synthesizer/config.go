@@ -186,7 +186,24 @@ func (s *ConfigSynthesizer) synthesizeCodexKeys(ctx *SynthesisContext) []*coreau
 
 // synthesizeXAIKeys creates Auth entries for xAI API keys.
 func (s *ConfigSynthesizer) synthesizeXAIKeys(ctx *SynthesisContext) []*coreauth.Auth {
-	return s.synthesizeCodexStyleKeys(ctx, ctx.Config.XAIKey, "xai")
+	entries := make([]config.CodexKey, 0, len(ctx.Config.XAIKey))
+	for i := range ctx.Config.XAIKey {
+		entry := ctx.Config.XAIKey[i]
+		entries = append(entries, config.CodexKey{
+			APIKey:         entry.APIKey,
+			Priority:       entry.Priority,
+			Weight:         entry.Weight,
+			Prefix:         entry.Prefix,
+			BaseURL:        entry.BaseURL,
+			Websockets:     entry.Websockets,
+			ProxyURL:       entry.ProxyURL,
+			Models:         entry.Models,
+			Headers:        entry.Headers,
+			ExcludedModels: entry.ExcludedModels,
+			DisableCooling: entry.DisableCooling,
+		})
+	}
+	return s.synthesizeCodexStyleKeys(ctx, entries, "xai")
 }
 
 func (s *ConfigSynthesizer) synthesizeCodexStyleKeys(ctx *SynthesisContext, entries []config.CodexKey, provider string) []*coreauth.Auth {
@@ -205,8 +222,9 @@ func (s *ConfigSynthesizer) synthesizeCodexStyleKeys(ctx *SynthesisContext, entr
 		baseURL := strings.TrimSpace(entry.BaseURL)
 		id, token := idGen.Next(provider+":apikey", key, baseURL)
 		attrs := map[string]string{
-			"source":  fmt.Sprintf("config:%s[%s]", provider, token),
-			"api_key": key,
+			"source":       fmt.Sprintf("config:%s[%s]", provider, token),
+			"api_key":      key,
+			"config_index": strconv.Itoa(i),
 		}
 		metadata := map[string]any{}
 		if entry.DisableCooling {
@@ -221,6 +239,9 @@ func (s *ConfigSynthesizer) synthesizeCodexStyleKeys(ctx *SynthesisContext, entr
 		}
 		if entry.Websockets {
 			attrs["websockets"] = "true"
+		}
+		if provider == "codex" && entry.AlphaSearch {
+			attrs[coreauth.AttributeCodexAlphaSearch] = "true"
 		}
 		if hash := diff.ComputeCodexModelsHash(entry.Models); hash != "" {
 			attrs["models_hash"] = hash

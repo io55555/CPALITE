@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -8,6 +9,32 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
+
+func parseCredentialWeightPatch(raw json.RawMessage) (*int, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("weight is missing")
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	var weight int
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if errDecode := decoder.Decode(&weight); errDecode != nil {
+		return nil, fmt.Errorf("weight must be an integer")
+	}
+	if errValidate := config.ValidateCredentialWeight(&weight); errValidate != nil {
+		return nil, errValidate
+	}
+	return &weight, nil
+}
+
+func rejectInvalidCredentialWeight(c *gin.Context, field string, weight *int) bool {
+	if errValidate := config.ValidateCredentialWeight(weight); errValidate != nil {
+		c.JSON(400, gin.H{"error": fmt.Sprintf("%s: %v", field, errValidate)})
+		return true
+	}
+	return false
+}
 
 // Generic helpers for list[string]
 func (h *Handler) putStringList(c *gin.Context, set func([]string), after func()) {
@@ -139,6 +166,11 @@ func (h *Handler) PutGeminiKeys(c *gin.Context) {
 		}
 		arr = obj.Items
 	}
+	for index := range arr {
+		if rejectInvalidCredentialWeight(c, fmt.Sprintf("gemini-api-key[%d].weight", index), arr[index].Weight) {
+			return
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.cfg.GeminiKey = append([]config.GeminiKey(nil), arr...)
@@ -148,6 +180,7 @@ func (h *Handler) PutGeminiKeys(c *gin.Context) {
 func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	type geminiKeyPatch struct {
 		APIKey         *string            `json:"api-key"`
+		Weight         json.RawMessage    `json:"weight"`
 		Disabled       *bool              `json:"disabled"`
 		Prefix         *string            `json:"prefix"`
 		BaseURL        *string            `json:"base-url"`
@@ -198,6 +231,14 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 		}
 		entry.APIKey = trimmed
 	}
+	if len(body.Value.Weight) > 0 {
+		weight, errWeight := parseCredentialWeightPatch(body.Value.Weight)
+		if errWeight != nil {
+			c.JSON(400, gin.H{"error": errWeight.Error()})
+			return
+		}
+		entry.Weight = weight
+	}
 	if body.Value.Disabled != nil {
 		entry.Disabled = *body.Value.Disabled
 	}
@@ -219,6 +260,178 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	h.cfg.GeminiKey[targetIndex] = entry
 	h.cfg.SanitizeGeminiKeys()
 	h.persistLocked(c)
+}
+
+// interactions-api-key: []GeminiKey
+func (h *Handler) GetInteractionsKeys(c *gin.Context) {
+	c.JSON(200, gin.H{"interactions-api-key": h.interactionsKeysWithAuthIndex()})
+}
+func (h *Handler) PutInteractionsKeys(c *gin.Context) {
+	data, errRead := c.GetRawData()
+	if errRead != nil {
+		c.JSON(400, gin.H{"error": "failed to read body"})
+		return
+	}
+	var arr []config.GeminiKey
+	if errUnmarshal := json.Unmarshal(data, &arr); errUnmarshal != nil {
+		var obj struct {
+			Items []config.GeminiKey `json:"items"`
+		}
+		if errObject := json.Unmarshal(data, &obj); errObject != nil || len(obj.Items) == 0 {
+			c.JSON(400, gin.H{"error": "invalid body"})
+			return
+		}
+		arr = obj.Items
+	}
+	for index := range arr {
+		if rejectInvalidCredentialWeight(c, fmt.Sprintf("interactions-api-key[%d].weight", index), arr[index].Weight) {
+			return
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.cfg.InteractionsKey = append([]config.GeminiKey(nil), arr...)
+	h.cfg.SanitizeInteractionsKeys()
+	h.persistLocked(c)
+}
+func (h *Handler) PatchInteractionsKey(c *gin.Context) {
+	type geminiKeyPatch struct {
+		APIKey         *string            `json:"api-key"`
+		Weight         json.RawMessage    `json:"weight"`
+		Prefix         *string            `json:"prefix"`
+		BaseURL        *string            `json:"base-url"`
+		ProxyURL       *string            `json:"proxy-url"`
+		Headers        *map[string]string `json:"headers"`
+		ExcludedModels *[]string          `json:"excluded-models"`
+	}
+	var body struct {
+		Index *int            `json:"index"`
+		Match *string         `json:"match"`
+		Value *geminiKeyPatch `json:"value"`
+	}
+	if errBind := c.ShouldBindJSON(&body); errBind != nil || body.Value == nil {
+		c.JSON(400, gin.H{"error": "invalid body"})
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	targetIndex := -1
+	if body.Index != nil && *body.Index >= 0 && *body.Index < len(h.cfg.InteractionsKey) {
+		targetIndex = *body.Index
+	}
+	if targetIndex == -1 && body.Match != nil {
+		match := strings.TrimSpace(*body.Match)
+		if match != "" {
+			for i := range h.cfg.InteractionsKey {
+				if h.cfg.InteractionsKey[i].APIKey == match {
+					targetIndex = i
+					break
+				}
+			}
+		}
+	}
+	if targetIndex == -1 {
+		c.JSON(404, gin.H{"error": "item not found"})
+		return
+	}
+
+	entry := h.cfg.InteractionsKey[targetIndex]
+	if body.Value.APIKey != nil {
+		trimmed := strings.TrimSpace(*body.Value.APIKey)
+		if trimmed == "" {
+			h.cfg.InteractionsKey = append(h.cfg.InteractionsKey[:targetIndex], h.cfg.InteractionsKey[targetIndex+1:]...)
+			h.cfg.SanitizeInteractionsKeys()
+			h.persistLocked(c)
+			return
+		}
+		entry.APIKey = trimmed
+	}
+	if len(body.Value.Weight) > 0 {
+		weight, errWeight := parseCredentialWeightPatch(body.Value.Weight)
+		if errWeight != nil {
+			c.JSON(400, gin.H{"error": errWeight.Error()})
+			return
+		}
+		entry.Weight = weight
+	}
+	if body.Value.Prefix != nil {
+		entry.Prefix = strings.TrimSpace(*body.Value.Prefix)
+	}
+	if body.Value.BaseURL != nil {
+		entry.BaseURL = strings.TrimSpace(*body.Value.BaseURL)
+	}
+	if body.Value.ProxyURL != nil {
+		entry.ProxyURL = strings.TrimSpace(*body.Value.ProxyURL)
+	}
+	if body.Value.Headers != nil {
+		entry.Headers = config.NormalizeHeaders(*body.Value.Headers)
+	}
+	if body.Value.ExcludedModels != nil {
+		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
+	}
+	h.cfg.InteractionsKey[targetIndex] = entry
+	h.cfg.SanitizeInteractionsKeys()
+	h.persistLocked(c)
+}
+
+func (h *Handler) DeleteInteractionsKey(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if val := strings.TrimSpace(c.Query("api-key")); val != "" {
+		if baseRaw, okBase := c.GetQuery("base-url"); okBase {
+			base := strings.TrimSpace(baseRaw)
+			out := make([]config.GeminiKey, 0, len(h.cfg.InteractionsKey))
+			for _, v := range h.cfg.InteractionsKey {
+				if strings.TrimSpace(v.APIKey) == val && strings.TrimSpace(v.BaseURL) == base {
+					continue
+				}
+				out = append(out, v)
+			}
+			if len(out) != len(h.cfg.InteractionsKey) {
+				h.cfg.InteractionsKey = out
+				h.cfg.SanitizeInteractionsKeys()
+				h.persistLocked(c)
+			} else {
+				c.JSON(404, gin.H{"error": "item not found"})
+			}
+			return
+		}
+
+		matchIndex := -1
+		matchCount := 0
+		for i := range h.cfg.InteractionsKey {
+			if strings.TrimSpace(h.cfg.InteractionsKey[i].APIKey) == val {
+				matchCount++
+				if matchIndex == -1 {
+					matchIndex = i
+				}
+			}
+		}
+		if matchCount == 0 {
+			c.JSON(404, gin.H{"error": "item not found"})
+			return
+		}
+		if matchCount > 1 {
+			c.JSON(400, gin.H{"error": "multiple items match api-key; base-url is required"})
+			return
+		}
+		h.cfg.InteractionsKey = append(h.cfg.InteractionsKey[:matchIndex], h.cfg.InteractionsKey[matchIndex+1:]...)
+		h.cfg.SanitizeInteractionsKeys()
+		h.persistLocked(c)
+		return
+	}
+	if idxStr := c.Query("index"); idxStr != "" {
+		var idx int
+		_, errScan := fmt.Sscanf(idxStr, "%d", &idx)
+		if errScan == nil && idx >= 0 && idx < len(h.cfg.InteractionsKey) {
+			h.cfg.InteractionsKey = append(h.cfg.InteractionsKey[:idx], h.cfg.InteractionsKey[idx+1:]...)
+			h.cfg.SanitizeInteractionsKeys()
+			h.persistLocked(c)
+			return
+		}
+	}
+	c.JSON(400, gin.H{"error": "missing api-key or index"})
 }
 
 func (h *Handler) DeleteGeminiKey(c *gin.Context) {
@@ -312,6 +525,7 @@ func (h *Handler) PutClaudeKeys(c *gin.Context) {
 func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	type claudeKeyPatch struct {
 		APIKey                  *string               `json:"api-key"`
+		Weight                  json.RawMessage       `json:"weight"`
 		Prefix                  *string               `json:"prefix"`
 		BaseURL                 *string               `json:"base-url"`
 		ProxyURL                *string               `json:"proxy-url"`
@@ -353,6 +567,14 @@ func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	entry := h.cfg.ClaudeKey[targetIndex]
 	if body.Value.APIKey != nil {
 		entry.APIKey = strings.TrimSpace(*body.Value.APIKey)
+	}
+	if len(body.Value.Weight) > 0 {
+		weight, errWeight := parseCredentialWeightPatch(body.Value.Weight)
+		if errWeight != nil {
+			c.JSON(400, gin.H{"error": errWeight.Error()})
+			return
+		}
+		entry.Weight = weight
 	}
 	if body.Value.Prefix != nil {
 		entry.Prefix = strings.TrimSpace(*body.Value.Prefix)
@@ -470,14 +692,16 @@ func (h *Handler) PutOpenAICompat(c *gin.Context) {
 }
 func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	type openAICompatPatch struct {
-		Name          *string                                  `json:"name"`
-		Prefix        *string                                  `json:"prefix"`
-		Disabled      *bool                                    `json:"disabled"`
-		BaseURL       *string                                  `json:"base-url"`
-		APIKeyEntries *[]config.OpenAICompatibilityAPIKey      `json:"api-key-entries"`
-		Models        *[]config.OpenAICompatibilityModel       `json:"models"`
-		Headers       *map[string]string                       `json:"headers"`
-		StatusRulers  *[]config.OpenAICompatibilityStatusRuler `json:"status-rulers"`
+		Name                  *string                                  `json:"name"`
+		Prefix                *string                                  `json:"prefix"`
+		Disabled              *bool                                    `json:"disabled"`
+		DisableCooling        *bool                                    `json:"disable-cooling"`
+		BaseURL               *string                                  `json:"base-url"`
+		APIKeyEntries         *[]config.OpenAICompatibilityAPIKey      `json:"api-key-entries"`
+		Models                *[]config.OpenAICompatibilityModel       `json:"models"`
+		Headers               *map[string]string                       `json:"headers"`
+		StatusRulers          *[]config.OpenAICompatibilityStatusRuler `json:"status-rulers"`
+		SupportPromptCacheKey *bool                                    `json:"support-prompt-cache-key"`
 	}
 	var body struct {
 		Name  *string            `json:"name"`
@@ -519,6 +743,9 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	if body.Value.Disabled != nil {
 		entry.Disabled = *body.Value.Disabled
 	}
+	if body.Value.DisableCooling != nil {
+		entry.DisableCooling = *body.Value.DisableCooling
+	}
 	if body.Value.BaseURL != nil {
 		trimmed := strings.TrimSpace(*body.Value.BaseURL)
 		if trimmed == "" {
@@ -530,6 +757,12 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 		entry.BaseURL = trimmed
 	}
 	if body.Value.APIKeyEntries != nil {
+		for keyIndex := range *body.Value.APIKeyEntries {
+			weight := (*body.Value.APIKeyEntries)[keyIndex].Weight
+			if rejectInvalidCredentialWeight(c, fmt.Sprintf("api-key-entries[%d].weight", keyIndex), weight) {
+				return
+			}
+		}
 		entry.APIKeyEntries = append([]config.OpenAICompatibilityAPIKey(nil), (*body.Value.APIKeyEntries)...)
 	}
 	if body.Value.Models != nil {
@@ -540,6 +773,9 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	}
 	if body.Value.StatusRulers != nil {
 		entry.StatusRulers = append([]config.OpenAICompatibilityStatusRuler(nil), (*body.Value.StatusRulers)...)
+	}
+	if body.Value.SupportPromptCacheKey != nil {
+		entry.SupportPromptCacheKey = *body.Value.SupportPromptCacheKey
 	}
 	normalizeOpenAICompatibilityEntry(&entry)
 	h.cfg.OpenAICompatibility[targetIndex] = entry
@@ -612,6 +848,7 @@ func (h *Handler) PutVertexCompatKeys(c *gin.Context) {
 func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	type vertexCompatPatch struct {
 		APIKey         *string                     `json:"api-key"`
+		Weight         json.RawMessage             `json:"weight"`
 		Prefix         *string                     `json:"prefix"`
 		BaseURL        *string                     `json:"base-url"`
 		ProxyURL       *string                     `json:"proxy-url"`
@@ -661,6 +898,14 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 			return
 		}
 		entry.APIKey = trimmed
+	}
+	if len(body.Value.Weight) > 0 {
+		weight, errWeight := parseCredentialWeightPatch(body.Value.Weight)
+		if errWeight != nil {
+			c.JSON(400, gin.H{"error": errWeight.Error()})
+			return
+		}
+		entry.Weight = weight
 	}
 	if body.Value.Prefix != nil {
 		entry.Prefix = strings.TrimSpace(*body.Value.Prefix)
@@ -954,6 +1199,9 @@ func (h *Handler) PutCodexKeys(c *gin.Context) {
 	for i := range arr {
 		entry := arr[i]
 		normalizeCodexKey(&entry)
+		if rejectInvalidCredentialWeight(c, fmt.Sprintf("codex-api-key[%d].weight", i), entry.Weight) {
+			return
+		}
 		if entry.BaseURL == "" {
 			continue
 		}
@@ -968,9 +1216,11 @@ func (h *Handler) PutCodexKeys(c *gin.Context) {
 func (h *Handler) PatchCodexKey(c *gin.Context) {
 	type codexKeyPatch struct {
 		APIKey         *string              `json:"api-key"`
+		Weight         json.RawMessage      `json:"weight"`
 		Prefix         *string              `json:"prefix"`
 		BaseURL        *string              `json:"base-url"`
 		ProxyURL       *string              `json:"proxy-url"`
+		AlphaSearch    *bool                `json:"alpha-search"`
 		Models         *[]config.CodexModel `json:"models"`
 		Headers        *map[string]string   `json:"headers"`
 		ExcludedModels *[]string            `json:"excluded-models"`
@@ -1009,6 +1259,14 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 	if body.Value.APIKey != nil {
 		entry.APIKey = strings.TrimSpace(*body.Value.APIKey)
 	}
+	if len(body.Value.Weight) > 0 {
+		weight, errWeight := parseCredentialWeightPatch(body.Value.Weight)
+		if errWeight != nil {
+			c.JSON(400, gin.H{"error": errWeight.Error()})
+			return
+		}
+		entry.Weight = weight
+	}
 	if body.Value.Prefix != nil {
 		entry.Prefix = strings.TrimSpace(*body.Value.Prefix)
 	}
@@ -1024,6 +1282,9 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 	}
 	if body.Value.ProxyURL != nil {
 		entry.ProxyURL = strings.TrimSpace(*body.Value.ProxyURL)
+	}
+	if body.Value.AlphaSearch != nil {
+		entry.AlphaSearch = *body.Value.AlphaSearch
 	}
 	if body.Value.Models != nil {
 		entry.Models = append([]config.CodexModel(nil), (*body.Value.Models)...)
@@ -1118,7 +1379,10 @@ func (h *Handler) PutXAIKeys(c *gin.Context) {
 	filtered := make([]config.XAIKey, 0, len(arr))
 	for i := range arr {
 		entry := arr[i]
-		normalizeCodexKey(&entry)
+		normalizeXAIKey(&entry)
+		if rejectInvalidCredentialWeight(c, fmt.Sprintf("xai-api-key[%d].weight", i), entry.Weight) {
+			return
+		}
 		if entry.BaseURL == "" {
 			continue
 		}
@@ -1134,6 +1398,7 @@ func (h *Handler) PutXAIKeys(c *gin.Context) {
 func (h *Handler) PatchXAIKey(c *gin.Context) {
 	type xaiKeyPatch struct {
 		APIKey         *string            `json:"api-key"`
+		Weight         json.RawMessage    `json:"weight"`
 		Priority       *int               `json:"priority"`
 		Prefix         *string            `json:"prefix"`
 		BaseURL        *string            `json:"base-url"`
@@ -1181,6 +1446,14 @@ func (h *Handler) PatchXAIKey(c *gin.Context) {
 	if body.Value.Priority != nil {
 		entry.Priority = *body.Value.Priority
 	}
+	if len(body.Value.Weight) > 0 {
+		weight, errWeight := parseCredentialWeightPatch(body.Value.Weight)
+		if errWeight != nil {
+			c.JSON(400, gin.H{"error": errWeight.Error()})
+			return
+		}
+		entry.Weight = weight
+	}
 	if body.Value.Prefix != nil {
 		entry.Prefix = strings.TrimSpace(*body.Value.Prefix)
 	}
@@ -1212,7 +1485,7 @@ func (h *Handler) PatchXAIKey(c *gin.Context) {
 	if body.Value.DisableCooling != nil {
 		entry.DisableCooling = *body.Value.DisableCooling
 	}
-	normalizeCodexKey(&entry)
+	normalizeXAIKey(&entry)
 	h.cfg.XAIKey[targetIndex] = entry
 	h.cfg.SanitizeXAIKeys()
 	h.persistLocked(c)
@@ -1343,6 +1616,33 @@ func normalizeCodexKey(entry *config.CodexKey) {
 		return
 	}
 	normalized := make([]config.CodexModel, 0, len(entry.Models))
+	for i := range entry.Models {
+		model := entry.Models[i]
+		model.Name = strings.TrimSpace(model.Name)
+		model.Alias = strings.TrimSpace(model.Alias)
+		if model.Name == "" && model.Alias == "" {
+			continue
+		}
+		normalized = append(normalized, model)
+	}
+	entry.Models = normalized
+}
+
+func normalizeXAIKey(entry *config.XAIKey) {
+	if entry == nil {
+		return
+	}
+	entry.APIKey = strings.TrimSpace(entry.APIKey)
+	entry.Prefix = strings.TrimSpace(entry.Prefix)
+	entry.BaseURL = strings.TrimSpace(entry.BaseURL)
+	entry.ProxyURL = strings.TrimSpace(entry.ProxyURL)
+	entry.Headers = config.NormalizeHeaders(entry.Headers)
+	entry.ExcludedModels = config.NormalizeExcludedModels(entry.ExcludedModels)
+	entry.AlphaSearch = false
+	if len(entry.Models) == 0 {
+		return
+	}
+	normalized := make([]config.XAIModel, 0, len(entry.Models))
 	for i := range entry.Models {
 		model := entry.Models[i]
 		model.Name = strings.TrimSpace(model.Name)

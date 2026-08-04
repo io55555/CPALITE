@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	xxHash64 "github.com/pierrec/xxHash/xxHash64"
+	claudeauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/claude"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
@@ -30,6 +31,15 @@ import (
 
 func resetClaudeDeviceProfileCache() {
 	helps.ResetClaudeDeviceProfileCache()
+}
+
+func claudeOAuthTestMetadata() map[string]any {
+	return map[string]any{
+		"account_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		claudeauth.ClaudeDeviceIDsMetadataKey: []string{
+			"0000000000000000000000000000000000000000000000000000000000000000",
+		},
+	}
 }
 
 func malformedClaudeTreeSignatureForClaudeExecutorTest() string {
@@ -2701,7 +2711,7 @@ func TestPrepareClaudeOAuthToolNamesForUpstream_MixedCaseWithPrefix(t *testing.T
 		`{"type":"tool_use","id":"toolu_02","name":"glob","input":{}}` +
 		`]}]}`)
 
-	out, reverseMap := prepareClaudeOAuthToolNamesForUpstream(body, "proxy_", false)
+	out, reverseMap := prepareClaudeOAuthToolNamesForUpstream(body, claudeMCPAliasOptions{prefix: "proxy_"})
 
 	if got := gjson.GetBytes(out, "tools.0.name").String(); got != "proxy_Bash" {
 		t.Fatalf("tools.0.name = %q, want %q", got, "proxy_Bash")

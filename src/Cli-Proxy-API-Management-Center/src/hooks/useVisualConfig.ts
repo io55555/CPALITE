@@ -882,6 +882,7 @@ function getNextDirtyFields(
       'codexIdentityConfuse',
       'xaiGrokBuildHeaderDefaults',
       'xaiOpenWebUICompat',
+      'xaiInjectXSearch',
       'host',
       'port',
       'tlsEnable',
@@ -1064,6 +1065,7 @@ export function useVisualConfig() {
       const streaming = asRecord(parsed.streaming);
       const plugins = asRecord(parsed.plugins);
       const codex = asRecord(parsed.codex);
+      const xai = asRecord(parsed.xai);
       const claudeHeaderDefaults = asRecord(parsed['claude-header-defaults']);
       const codexHeaderDefaults = asRecord(parsed['codex-header-defaults']);
 
@@ -1110,6 +1112,7 @@ export function useVisualConfig() {
         passthroughHeaders: Boolean(parsed['passthrough-headers']),
         xaiGrokBuildHeaderDefaults: Boolean(parsed['xai-grok-build-header-defaults']),
         xaiOpenWebUICompat: Boolean(parsed['xai-openwebui-compat']),
+        xaiInjectXSearch: Boolean(xai?.['inject-x-search']),
         requestRetry: String(parsed['request-retry'] ?? ''),
         maxRetryCredentials: String(parsed['max-retry-credentials'] ?? ''),
         maxRetryInterval: String(parsed['max-retry-interval'] ?? ''),
@@ -1456,6 +1459,11 @@ export function useVisualConfig() {
         }
         if (dirtyFields.has('xaiOpenWebUICompat')) {
           setBooleanInDoc(doc, ['xai-openwebui-compat'], values.xaiOpenWebUICompat);
+        }
+        if (dirtyFields.has('xaiInjectXSearch')) {
+          ensureMapInDoc(doc, ['xai']);
+          setBooleanInDoc(doc, ['xai', 'inject-x-search'], values.xaiInjectXSearch);
+          deleteIfMapEmpty(doc, ['xai']);
         }
 
         const quotaDirty =

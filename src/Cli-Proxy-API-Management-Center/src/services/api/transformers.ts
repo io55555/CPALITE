@@ -390,6 +390,14 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
   }
   config.wsAuth = normalizeBoolean(raw['ws-auth']);
   config.forceModelPrefix = normalizeBoolean(raw['force-model-prefix']);
+  config.xaiGrokBuildHeaderDefaults = normalizeBoolean(raw['xai-grok-build-header-defaults']);
+  config.xaiOpenWebUICompat = normalizeBoolean(raw['xai-openwebui-compat']);
+  const xai = raw.xai;
+  if (isRecord(xai)) {
+    config.xai = {
+      injectXSearch: normalizeBoolean(xai['inject-x-search'])
+    };
+  }
   const routing = raw.routing;
   const strategyRaw = isRecord(routing) ? routing.strategy : undefined;
   if (strategyRaw !== undefined && strategyRaw !== null) {
