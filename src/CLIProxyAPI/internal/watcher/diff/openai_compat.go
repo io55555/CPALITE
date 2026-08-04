@@ -15,15 +15,17 @@ func DiffOpenAICompatibility(oldList, newList []config.OpenAICompatibility) []st
 	changes := make([]string, 0)
 	oldMap := make(map[string]config.OpenAICompatibility, len(oldList))
 	oldLabels := make(map[string]string, len(oldList))
+	oldSeen := make(map[string]int, len(oldList))
 	for idx, entry := range oldList {
-		key, label := openAICompatKey(entry, idx)
+		key, label := openAICompatKeyWithOccurrence(entry, idx, oldSeen)
 		oldMap[key] = entry
 		oldLabels[key] = label
 	}
 	newMap := make(map[string]config.OpenAICompatibility, len(newList))
 	newLabels := make(map[string]string, len(newList))
+	newSeen := make(map[string]int, len(newList))
 	for idx, entry := range newList {
-		key, label := openAICompatKey(entry, idx)
+		key, label := openAICompatKeyWithOccurrence(entry, idx, newSeen)
 		newMap[key] = entry
 		newLabels[key] = label
 	}
@@ -68,6 +70,9 @@ func describeOpenAICompatibilityUpdate(oldEntry, newEntry config.OpenAICompatibi
 	details := make([]string, 0, 3)
 	if oldEntry.Disabled != newEntry.Disabled {
 		details = append(details, fmt.Sprintf("disabled %t -> %t", oldEntry.Disabled, newEntry.Disabled))
+	}
+	if oldEntry.SupportPromptCacheKey != newEntry.SupportPromptCacheKey {
+		details = append(details, fmt.Sprintf("support-prompt-cache-key %t -> %t", oldEntry.SupportPromptCacheKey, newEntry.SupportPromptCacheKey))
 	}
 	if oldKeyCount != newKeyCount {
 		details = append(details, fmt.Sprintf("api-keys %d -> %d", oldKeyCount, newKeyCount))
@@ -134,6 +139,16 @@ func openAICompatKey(entry config.OpenAICompatibility, index int) (string, strin
 		short = short[:8]
 	}
 	return "sig:" + sig, "compat-" + short
+}
+
+func openAICompatKeyWithOccurrence(entry config.OpenAICompatibility, index int, seen map[string]int) (string, string) {
+	baseKey, label := openAICompatKey(entry, index)
+	occurrence := seen[baseKey]
+	seen[baseKey] = occurrence + 1
+	if occurrence == 0 {
+		return baseKey, label
+	}
+	return fmt.Sprintf("%s@dup:%d", baseKey, occurrence), label
 }
 
 func openAICompatSignature(entry config.OpenAICompatibility) string {

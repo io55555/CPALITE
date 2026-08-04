@@ -881,6 +881,7 @@ function getNextDirtyFields(
       'codexHeaderBetaFeatures',
       'codexIdentityConfuse',
       'xaiGrokBuildHeaderDefaults',
+      'xaiGrokBuildHeaderDefaultsUserAgent',
       'xaiOpenWebUICompat',
       'xaiInjectXSearch',
       'host',
@@ -1111,6 +1112,10 @@ export function useVisualConfig() {
         forceModelPrefix: Boolean(parsed['force-model-prefix']),
         passthroughHeaders: Boolean(parsed['passthrough-headers']),
         xaiGrokBuildHeaderDefaults: Boolean(parsed['xai-grok-build-header-defaults']),
+        xaiGrokBuildHeaderDefaultsUserAgent:
+          typeof parsed['xai-grok-build-header-defaults-user-agent'] === 'string'
+            ? parsed['xai-grok-build-header-defaults-user-agent']
+            : '',
         xaiOpenWebUICompat: Boolean(parsed['xai-openwebui-compat']),
         xaiInjectXSearch: Boolean(xai?.['inject-x-search']),
         requestRetry: String(parsed['request-retry'] ?? ''),
@@ -1456,6 +1461,13 @@ export function useVisualConfig() {
         }
         if (dirtyFields.has('xaiGrokBuildHeaderDefaults')) {
           setBooleanInDoc(doc, ['xai-grok-build-header-defaults'], values.xaiGrokBuildHeaderDefaults);
+        }
+        if (dirtyFields.has('xaiGrokBuildHeaderDefaultsUserAgent')) {
+          setStringInDoc(
+            doc,
+            ['xai-grok-build-header-defaults-user-agent'],
+            values.xaiGrokBuildHeaderDefaultsUserAgent
+          );
         }
         if (dirtyFields.has('xaiOpenWebUICompat')) {
           setBooleanInDoc(doc, ['xai-openwebui-compat'], values.xaiOpenWebUICompat);

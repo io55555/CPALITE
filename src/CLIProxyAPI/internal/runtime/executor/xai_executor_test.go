@@ -4837,6 +4837,22 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 			t.Fatalf("Origin = %q, want https://grok.com", got)
 		}
 	})
+
+	t.Run("grok build header defaults use configured user agent", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "https://example.invalid/responses", nil)
+		auth := &cliproxyauth.Auth{
+			Attributes: map[string]string{"base_url": xaiauth.DefaultAPIBaseURL},
+		}
+		cfg := &config.Config{
+			XAIGrokBuildHeaderDefaults:          true,
+			XAIGrokBuildHeaderDefaultsUserAgent: "custom-grok-build/1.0",
+		}
+		applyXAIChatHeaders(cfg, req, auth, "xai-token", true, "conv-1")
+
+		if got := req.Header.Get("User-Agent"); got != "custom-grok-build/1.0" {
+			t.Fatalf("User-Agent = %q, want configured value", got)
+		}
+	})
 }
 
 func TestXAIExecutorExecuteChatUsesProxyHeadersOnlyForChatProxy(t *testing.T) {

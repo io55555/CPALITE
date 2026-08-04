@@ -63,11 +63,12 @@ func performVideosRouteRequest(t *testing.T, method string, routePath string, re
 }
 
 type videoAuthCaptureExecutor struct {
-	mu         sync.Mutex
-	requestID  string
-	contentURL string
-	authIDs    []string
-	models     []string
+	mu            sync.Mutex
+	requestID     string
+	contentURL    string
+	authIDs       []string
+	models        []string
+	payloadModels []string
 }
 
 func (e *videoAuthCaptureExecutor) Identifier() string { return "xai" }
@@ -80,6 +81,7 @@ func (e *videoAuthCaptureExecutor) Execute(_ context.Context, auth *coreauth.Aut
 	e.mu.Lock()
 	e.authIDs = append(e.authIDs, authID)
 	e.models = append(e.models, req.Model)
+	e.payloadModels = append(e.payloadModels, strings.TrimSpace(gjson.GetBytes(req.Payload, "model").String()))
 	e.mu.Unlock()
 
 	requestID := strings.TrimSpace(gjson.GetBytes(req.Payload, "request_id").String())
@@ -123,6 +125,14 @@ func (e *videoAuthCaptureExecutor) Models() []string {
 	defer e.mu.Unlock()
 	out := make([]string, len(e.models))
 	copy(out, e.models)
+	return out
+}
+
+func (e *videoAuthCaptureExecutor) PayloadModels() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]string, len(e.payloadModels))
+	copy(out, e.payloadModels)
 	return out
 }
 
@@ -248,11 +258,14 @@ func TestBuildXAIVideosCreateRequestAllowsPreviewModel(t *testing.T) {
 		t.Fatalf("buildXAIVideosCreateRequest() error = %v", err)
 	}
 
-	if got := gjson.GetBytes(req, "model").String(); got != xaiVideos15PreviewModel {
-		t.Fatalf("model = %q, want %s", got, xaiVideos15PreviewModel)
+	if got := gjson.GetBytes(req, "model").String(); got != xaiVideos15Model {
+		t.Fatalf("model = %q, want %s", got, xaiVideos15Model)
 	}
-	if meta.Model != xaiVideos15PreviewModel {
-		t.Fatalf("meta model = %q, want %s", meta.Model, xaiVideos15PreviewModel)
+	if meta.Model != xaiVideos15Model {
+		t.Fatalf("meta model = %q, want %s", meta.Model, xaiVideos15Model)
+	}
+	if meta.RoutingModel != xaiVideos15PreviewAlias {
+		t.Fatalf("routing model = %q, want %s", meta.RoutingModel, xaiVideos15PreviewAlias)
 	}
 }
 
@@ -745,7 +758,7 @@ func TestXAIVideosNativeRetrieveUsesBoundModel(t *testing.T) {
 		model  string
 	}{
 		{authID: "video-xai-preview-default-auth", model: defaultXAIVideosModel},
-		{authID: "video-xai-preview-auth", model: xaiVideos15PreviewModel},
+		{authID: "video-xai-preview-auth", model: xaiVideos15PreviewAlias},
 	}
 	for _, entry := range authModels {
 		auth := &coreauth.Auth{
@@ -793,15 +806,19 @@ func TestXAIVideosNativeRetrieveUsesBoundModel(t *testing.T) {
 	if len(models) != 2 {
 		t.Fatalf("models = %v, want two calls", models)
 	}
-	if models[0] != xaiVideos15PreviewModel || models[1] != xaiVideos15PreviewModel {
-		t.Fatalf("models = %v, want both calls to use %s", models, xaiVideos15PreviewModel)
+	if models[0] != xaiVideos15PreviewAlias || models[1] != xaiVideos15PreviewAlias {
+		t.Fatalf("models = %v, want both calls to use %s", models, xaiVideos15PreviewAlias)
+	}
+	payloadModels := executor.PayloadModels()
+	if len(payloadModels) < 1 || payloadModels[0] != xaiVideos15Model {
+		t.Fatalf("payload models = %v, want create payload model %s", payloadModels, xaiVideos15Model)
 	}
 	binding, ok := videoAuthBindings.getBinding(videoID)
 	if !ok {
 		t.Fatal("video auth binding was not stored")
 	}
-	if binding.authID != "video-xai-preview-auth" || binding.model != xaiVideos15PreviewModel {
-		t.Fatalf("binding = {authID:%q model:%q}, want {authID:%q model:%q}", binding.authID, binding.model, "video-xai-preview-auth", xaiVideos15PreviewModel)
+	if binding.authID != "video-xai-preview-auth" || binding.model != xaiVideos15PreviewAlias {
+		t.Fatalf("binding = {authID:%q model:%q}, want {authID:%q model:%q}", binding.authID, binding.model, "video-xai-preview-auth", xaiVideos15PreviewAlias)
 	}
 }
 

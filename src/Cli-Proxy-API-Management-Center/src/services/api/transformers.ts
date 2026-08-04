@@ -391,6 +391,14 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
   config.wsAuth = normalizeBoolean(raw['ws-auth']);
   config.forceModelPrefix = normalizeBoolean(raw['force-model-prefix']);
   config.xaiGrokBuildHeaderDefaults = normalizeBoolean(raw['xai-grok-build-header-defaults']);
+  const xaiGrokBuildHeaderDefaultsUserAgent = raw['xai-grok-build-header-defaults-user-agent'];
+  config.xaiGrokBuildHeaderDefaultsUserAgent =
+    typeof xaiGrokBuildHeaderDefaultsUserAgent === 'string'
+      ? xaiGrokBuildHeaderDefaultsUserAgent
+      : xaiGrokBuildHeaderDefaultsUserAgent === undefined ||
+          xaiGrokBuildHeaderDefaultsUserAgent === null
+        ? undefined
+        : String(xaiGrokBuildHeaderDefaultsUserAgent);
   config.xaiOpenWebUICompat = normalizeBoolean(raw['xai-openwebui-compat']);
   const xai = raw.xai;
   if (isRecord(xai)) {

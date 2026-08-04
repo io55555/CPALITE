@@ -666,6 +666,18 @@ export function VisualConfigEditor({
     </FieldAnchor>
   );
 
+  const xaiGrokBuildHeaderDefaultsUserAgentField = (
+    <FieldAnchor fieldId="xaiGrokBuildHeaderDefaultsUserAgent">
+      <Input
+        label={t('config_management.visual.sections.headers.user_agent')}
+        placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        value={values.xaiGrokBuildHeaderDefaultsUserAgent}
+        onChange={(e) => onChange({ xaiGrokBuildHeaderDefaultsUserAgent: e.target.value })}
+        disabled={disabled}
+      />
+    </FieldAnchor>
+  );
+
   const xaiOpenWebUICompatToggle = (
     <FieldAnchor fieldId="xaiOpenWebUICompat">
       <ToggleRow
@@ -899,6 +911,7 @@ export function VisualConfigEditor({
             {quotaSwitchProjectToggle}
             {quotaSwitchPreviewModelToggle}
             {xaiGrokBuildHeaderDefaultsToggle}
+            {xaiGrokBuildHeaderDefaultsUserAgentField}
             {xaiOpenWebUICompatToggle}
             {xaiInjectXSearchToggle}
           </div>
@@ -1776,6 +1789,7 @@ export function VisualConfigEditor({
                     </div>
                     <SectionGrid>
                       {xaiGrokBuildHeaderDefaultsToggle}
+                      {xaiGrokBuildHeaderDefaultsUserAgentField}
                       {xaiOpenWebUICompatToggle}
                       {xaiInjectXSearchToggle}
                     </SectionGrid>

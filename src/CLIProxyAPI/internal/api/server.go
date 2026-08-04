@@ -31,6 +31,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api/modules"
 	ampmodule "github.com/router-for-me/CLIProxyAPI/v7/internal/api/modules/amp"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/cache"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/client/grokbuild"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
@@ -583,7 +584,6 @@ func (s *Server) homeHeartbeatMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
-
 
 func (s *Server) applyPacketCaptureCooldownLogConfig(cfg *config.Config, logDir string) {
 	if strings.TrimSpace(logDir) == "" {
@@ -1422,6 +1422,11 @@ func isAnthropicModelsRequest(c *gin.Context) bool {
 // that routes to different handlers based on the request.
 func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, claudeHandler *claude.ClaudeCodeAPIHandler) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if grokbuild.IsGrokShellUserAgent(c.GetHeader("User-Agent")) {
+			s.handleGrokModels(c)
+			return
+		}
+
 		if _, ok := c.Request.URL.Query()["client_version"]; ok {
 			if s != nil && s.cfg != nil && s.cfg.Home.Enabled {
 				s.handleHomeCodexClientModels(c)
@@ -1442,6 +1447,51 @@ func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, cl
 			openaiHandler.OpenAIModels(c)
 		}
 	}
+}
+
+func grokModelsFromHomeEntries(entries []homeModelEntry) []grokbuild.ModelInfo {
+	models := make([]grokbuild.ModelInfo, 0, len(entries))
+	for _, entry := range entries {
+		models = append(models, grokbuild.ModelInfo{
+			ID:            entry.id,
+			DisplayName:   entry.displayName,
+			ContextLength: entry.contextLength,
+		})
+	}
+	return models
+}
+
+func grokModelsFromRegistryInfos(infos []*registry.ModelInfo) []grokbuild.ModelInfo {
+	models := make([]grokbuild.ModelInfo, 0, len(infos))
+	for _, info := range infos {
+		if info == nil {
+			continue
+		}
+		model := grokbuild.ModelInfo{
+			ID:            info.ID,
+			DisplayName:   info.DisplayName,
+			ContextLength: info.ContextLength,
+		}
+		if info.Thinking != nil {
+			model.ReasoningLevels = append([]string(nil), info.Thinking.Levels...)
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
+func (s *Server) handleGrokModels(c *gin.Context) {
+	var models []grokbuild.ModelInfo
+	if s != nil && s.cfg != nil && s.cfg.Home.Enabled {
+		entries, ok := s.loadHomeModelEntries(c)
+		if !ok {
+			return
+		}
+		models = grokModelsFromHomeEntries(entries)
+	} else {
+		models = grokModelsFromRegistryInfos(registry.GetGlobalRegistry().GetAvailableModelInfos())
+	}
+	c.JSON(http.StatusOK, grokbuild.BuildResponse(models))
 }
 
 // handleHomeCodexClientModels builds the Codex client catalog from Home model IDs.

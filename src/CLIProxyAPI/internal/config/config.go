@@ -209,6 +209,8 @@ type Config struct {
 	XAIOpenWebUICompat bool `yaml:"xai-openwebui-compat" json:"xai-openwebui-compat"`
 	// XAIGrokBuildHeaderDefaults enables fixed Grok Build UA/headers for xAI auth files (default off).
 	XAIGrokBuildHeaderDefaults bool `yaml:"xai-grok-build-header-defaults" json:"xai-grok-build-header-defaults"`
+	// XAIGrokBuildHeaderDefaultsUserAgent overrides the fixed Grok Build User-Agent when non-empty.
+	XAIGrokBuildHeaderDefaultsUserAgent string `yaml:"xai-grok-build-header-defaults-user-agent" json:"xai-grok-build-header-defaults-user-agent"`
 
 	ConfigFilePath string `yaml:"-" json:"-"`
 
@@ -1156,6 +1158,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Sanitize Codex header defaults.
 	cfg.SanitizeCodexHeaderDefaults()
 
+	// Sanitize xAI Grok Build header defaults.
+	cfg.SanitizeXAIGrokBuildHeaderDefaults()
+
 	// Sanitize Claude header defaults.
 	cfg.SanitizeClaudeHeaderDefaults()
 
@@ -1318,6 +1323,14 @@ func (cfg *Config) SanitizeCodexHeaderDefaults() {
 	cfg.CodexHeaderDefaults.UserAgent = strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
 	cfg.CodexHeaderDefaults.BetaFeatures = strings.TrimSpace(cfg.CodexHeaderDefaults.BetaFeatures)
 	cfg.CodexOptimizeMultiAgentV2 = cfg.Codex.OptimizeMultiAgentV2
+}
+
+// SanitizeXAIGrokBuildHeaderDefaults trims configured xAI Grok Build header values.
+func (cfg *Config) SanitizeXAIGrokBuildHeaderDefaults() {
+	if cfg == nil {
+		return
+	}
+	cfg.XAIGrokBuildHeaderDefaultsUserAgent = strings.TrimSpace(cfg.XAIGrokBuildHeaderDefaultsUserAgent)
 }
 
 // SanitizeClaudeHeaderDefaults trims surrounding whitespace from the

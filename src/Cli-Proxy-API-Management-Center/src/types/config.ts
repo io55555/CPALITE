@@ -47,6 +47,7 @@ export interface Config {
   wsAuth?: boolean;
   forceModelPrefix?: boolean;
   xaiGrokBuildHeaderDefaults?: boolean;
+  xaiGrokBuildHeaderDefaultsUserAgent?: string;
   xaiOpenWebUICompat?: boolean;
   routingStrategy?: string;
   apiKeys?: string[];
@@ -73,6 +74,7 @@ export type RawConfigSection =
   | 'ws-auth'
   | 'force-model-prefix'
   | 'xai-grok-build-header-defaults'
+  | 'xai-grok-build-header-defaults-user-agent'
   | 'xai-openwebui-compat'
   | 'xai'
   | 'routing/strategy'

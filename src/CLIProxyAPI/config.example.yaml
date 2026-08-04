@@ -589,6 +589,9 @@ nonstream-keepalive-interval: 0
 
 # Enable fixed Grok Build header defaults for xAI auth-file requests (default false).
 # xai-grok-build-header-defaults: false
+# Optional User-Agent override used when xai-grok-build-header-defaults is enabled.
+# Leave empty to use the built-in Grok Build browser default.
+# xai-grok-build-header-defaults-user-agent: ""
 
 # Native xAI behavior toggles (default false).
 # xai:

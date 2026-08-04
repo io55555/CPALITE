@@ -436,6 +436,14 @@ export const CONFIG_FIELD_SEARCH_INDEX: ConfigFieldSearchEntry[] = [
     keywords: ['xai', 'header'],
   },
   {
+    fieldId: 'xaiGrokBuildHeaderDefaultsUserAgent',
+    sectionId: 'advanced',
+    labelKey: L('sections.headers.user_agent'),
+    qualifierKey: L('sections.headers.xai_title'),
+    yamlKeys: ['xai-grok-build-header-defaults-user-agent'],
+    keywords: ['xai', 'grok', 'build', 'user-agent', 'ua'],
+  },
+  {
     fieldId: 'xaiOpenWebUICompat',
     sectionId: 'advanced',
     labelKey: L('sections.headers.xai_openwebui_compat'),

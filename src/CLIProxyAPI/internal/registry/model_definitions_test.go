@@ -35,19 +35,25 @@ func TestGeminiVertexModelsUseFlashLiteReleaseID(t *testing.T) {
 	t.Fatalf("Vertex models do not contain %q", releaseID)
 }
 
-func TestWithXAIBuiltinsIncludesVideoPreviewModel(t *testing.T) {
+func TestWithXAIBuiltinsIncludesVideo15Models(t *testing.T) {
 	models := WithXAIBuiltins(nil)
 
+	found := map[string]bool{}
 	for _, model := range models {
 		if model == nil {
 			continue
 		}
-		if model.ID == xaiBuiltinVideo15PreviewModelID {
-			return
+		switch model.ID {
+		case xaiBuiltinVideo15ModelID, xaiBuiltinVideo15PreviewModelID:
+			found[model.ID] = true
 		}
 	}
 
-	t.Fatalf("expected xAI builtin model %s", xaiBuiltinVideo15PreviewModelID)
+	for _, id := range []string{xaiBuiltinVideo15ModelID, xaiBuiltinVideo15PreviewModelID} {
+		if !found[id] {
+			t.Fatalf("expected xAI builtin model %s", id)
+		}
+	}
 }
 
 func TestAntigravityWebSearchModelForRequiresRequestedModelCapability(t *testing.T) {

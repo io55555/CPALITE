@@ -44,6 +44,7 @@ const SECTION_KEYS: RawConfigSection[] = [
   'ws-auth',
   'force-model-prefix',
   'xai-grok-build-header-defaults',
+  'xai-grok-build-header-defaults-user-agent',
   'xai-openwebui-compat',
   'xai',
   'routing/strategy',
@@ -80,6 +81,8 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
       return config.forceModelPrefix;
     case 'xai-grok-build-header-defaults':
       return config.xaiGrokBuildHeaderDefaults;
+    case 'xai-grok-build-header-defaults-user-agent':
+      return config.xaiGrokBuildHeaderDefaultsUserAgent;
     case 'xai-openwebui-compat':
       return config.xaiOpenWebUICompat;
     case 'xai':
@@ -227,6 +230,10 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
           break;
         case 'xai-grok-build-header-defaults':
           nextConfig.xaiGrokBuildHeaderDefaults = value as Config['xaiGrokBuildHeaderDefaults'];
+          break;
+        case 'xai-grok-build-header-defaults-user-agent':
+          nextConfig.xaiGrokBuildHeaderDefaultsUserAgent =
+            value as Config['xaiGrokBuildHeaderDefaultsUserAgent'];
           break;
         case 'xai-openwebui-compat':
           nextConfig.xaiOpenWebUICompat = value as Config['xaiOpenWebUICompat'];

@@ -138,6 +138,7 @@ export type VisualConfigValues = {
   codexHeaderBetaFeatures: string;
   codexIdentityConfuse: boolean;
   xaiGrokBuildHeaderDefaults: boolean;
+  xaiGrokBuildHeaderDefaultsUserAgent: string;
   xaiOpenWebUICompat: boolean;
   xaiInjectXSearch: boolean;
   payloadDefaultRules: PayloadRule[];
@@ -206,6 +207,7 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
   codexHeaderBetaFeatures: '',
   codexIdentityConfuse: false,
   xaiGrokBuildHeaderDefaults: false,
+  xaiGrokBuildHeaderDefaultsUserAgent: '',
   xaiOpenWebUICompat: false,
   xaiInjectXSearch: false,
   payloadDefaultRules: [],

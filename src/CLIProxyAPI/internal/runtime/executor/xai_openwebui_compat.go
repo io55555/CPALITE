@@ -22,6 +22,8 @@ func xaiGrokBuildHeaderDefaultsEnabled(cfg *config.Config) bool {
 	return cfg != nil && cfg.XAIGrokBuildHeaderDefaults
 }
 
+const defaultXAIGrokBuildUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
 // xaiClientResponseFormat resolves the client-facing schema.
 // handlers often set ResponseFormat to the provider id ("xai") when no exit protocol
 // is specified; that is not a translator schema and must fall back to SourceFormat.
@@ -144,7 +146,11 @@ func applyXAIGrokBuildHeaderDefaults(cfg *config.Config, req *http.Request) {
 		return
 	}
 	// 强制固定拟真 UA / 版本，避免被默认 Header 覆盖
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	userAgent := strings.TrimSpace(cfg.XAIGrokBuildHeaderDefaultsUserAgent)
+	if userAgent == "" {
+		userAgent = defaultXAIGrokBuildUserAgent
+	}
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set(xaiClientVersionHeader, xaiClientVersionValue)
 	req.Header.Set("x-grok-client-version", xaiClientVersionValue)
 	if req.Header.Get("Accept") == "" {
