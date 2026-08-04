@@ -62,6 +62,51 @@ func TestCaptureFromUsageRecordWaitsForClientResponse(t *testing.T) {
 	}
 }
 
+func TestCaptureFromUsageRecordBackfillsUpstreamRequestFromAPIRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	if err := InitDefaultInLogDir(t.TempDir()); err != nil {
+		t.Fatalf("InitDefaultInLogDir: %v", err)
+	}
+	defer CloseDefault()
+	if err := DefaultStore().SetEnabled(context.Background(), true); err != nil {
+		t.Fatalf("SetEnabled: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Set("API_REQUEST", "=== API REQUEST 1 ===\nTimestamp: 2026-08-05T00:00:00Z\nUpstream URL: https://api.x.ai/v1/responses\nHTTP Method: POST\nAuth: provider=xai\n\nHeaders:\nAuthorization: Bearer xxx\nContent-Type: application/json\n\nBody:\n{\"model\":\"grok-4.5\"}\n")
+	ctx := context.WithValue(logging.WithRequestID(context.Background(), "req-upstream-backfill"), "gin", c)
+
+	CaptureFromUsageRecord(ctx, coreusage.Record{
+		Provider:    "xai",
+		Model:       "grok-4.5",
+		Source:      "xai",
+		RequestedAt: time.Now(),
+		RawRequest:  "POST /v1/messages HTTP/1.1\nContent-Type: application/json\n\n{\"model\":\"grok-4.5\"}",
+		RawResponse: "HTTP/1.1 400 Bad Request\nContent-Type: application/json\n\n{\"error\":\"bad request\"}",
+		Failed:      true,
+	})
+
+	got, err := DefaultStore().Query(context.Background(), QueryOptions{})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("records len = %d, want 1", len(got))
+	}
+	detail, ok, err := DefaultStore().Get(context.Background(), got[0].ID)
+	if err != nil || !ok {
+		t.Fatalf("Get ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(detail.Packets.UpstreamRequest, "POST /v1/responses HTTP/1.1") {
+		t.Fatalf("missing upstream request packet: %q", detail.Packets.UpstreamRequest)
+	}
+	if !strings.Contains(detail.Packets.UpstreamRequest, `{"model":"grok-4.5"}`) {
+		t.Fatalf("missing upstream request body: %q", detail.Packets.UpstreamRequest)
+	}
+}
+
 func TestCaptureFromUsageRecordStoresUnmarkedRawPackets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	if err := InitDefaultInLogDir(t.TempDir()); err != nil {

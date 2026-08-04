@@ -77,6 +77,10 @@ func openaiCompatClientResponseFormat(opts cliproxyexecutor.Options) sdktranslat
 	return cliproxyexecutor.ResponseFormatOrSource(opts)
 }
 
+func openAICompatRequestScopedStatus(code int) bool {
+	return code == http.StatusBadRequest || code == http.StatusRequestEntityTooLarge
+}
+
 func (e *OpenAICompatExecutor) Identifier() string { return e.provider }
 
 // PrepareRequest injects OpenAI-compatible credentials into the outgoing HTTP request.
@@ -261,7 +265,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
 		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
-		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched || clientFilterTerminal}
+		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched || clientFilterTerminal, requestScoped: openAICompatRequestScopedStatus(clientStatus)}
 		reporter.PublishFailure(ctx, err)
 		return resp, err
 	}
@@ -370,7 +374,7 @@ func (e *OpenAICompatExecutor) executeImages(ctx context.Context, auth *cliproxy
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		err = statusErr{code: httpResp.StatusCode, msg: string(body)}
+		err = statusErr{code: httpResp.StatusCode, msg: string(body), requestScoped: openAICompatRequestScopedStatus(httpResp.StatusCode)}
 		return resp, err
 	}
 
@@ -521,7 +525,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		helps.RecordUsageRawResponse(ctx, usageRawResponse)
 		reporter.SetRawResponse(usageRawResponse)
 		logOpenAICompatAttemptTrace(ctx, e.cfg, e.Identifier(), auth, apiKey, rawRequest, rawResponse, rulerDetail)
-		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched || clientFilterTerminal}
+		err = statusErr{code: clientStatus, msg: clientMessage, authFault: rulerMatched && !terminal.matched, stopRetry: terminal.matched || clientFilterTerminal, requestScoped: openAICompatRequestScopedStatus(clientStatus)}
 		reporter.PublishFailure(ctx, err)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
@@ -682,7 +686,7 @@ func (e *OpenAICompatExecutor) executeImagesStream(ctx context.Context, auth *cl
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, body)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		return nil, statusErr{code: httpResp.StatusCode, msg: string(body)}
+		return nil, statusErr{code: httpResp.StatusCode, msg: string(body), requestScoped: openAICompatRequestScopedStatus(httpResp.StatusCode)}
 	}
 
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -1419,11 +1423,12 @@ func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byt
 }
 
 type statusErr struct {
-	code       int
-	msg        string
-	retryAfter *time.Duration
-	authFault  bool
-	stopRetry  bool
+	code          int
+	msg           string
+	retryAfter    *time.Duration
+	authFault     bool
+	stopRetry     bool
+	requestScoped bool
 }
 
 func (e statusErr) Error() string {
@@ -1436,3 +1441,4 @@ func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
 func (e statusErr) AuthFault() bool            { return e.authFault }
 func (e statusErr) StopRetry() bool            { return e.stopRetry }
+func (e statusErr) IsRequestScoped() bool      { return e.requestScoped }

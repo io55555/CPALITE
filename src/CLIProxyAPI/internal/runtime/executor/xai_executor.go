@@ -205,6 +205,12 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 		switch gjson.GetBytes(eventData, "type").String() {
 		case "response.output_item.done":
 			xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
+		case "response.failed":
+			status, _ := xaiStreamEventFailureStatus(eventData)
+			if status <= 0 {
+				status = http.StatusBadGateway
+			}
+			return resp, e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, status, httpResp.Header.Clone(), eventData)
 		case "response.completed":
 			if detail, ok := helps.ParseCodexUsage(eventData); ok {
 				reporter.Publish(ctx, detail)
@@ -682,6 +688,8 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 		var outputItemsFallback [][]byte
 		responseFilter := newXAIInternalXSearchResponseFilter(prepared.filterInternalXSearch, prepared.clientDeclaredTools)
 		var pendingEventLine []byte
+		var sawTerminalEvent bool
+		var emittedTranslatedChunk bool
 		emitTranslatedLine := func(translatedLine []byte) bool {
 			var chunks [][]byte
 			if prepared.responseFormat == sdktranslator.FormatOpenAI {
@@ -694,6 +702,9 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 				chunks = helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, translatedLine, &param, claudeInputTokens)
 			}
 			for i := range chunks {
+				if len(chunks[i]) > 0 {
+					emittedTranslatedChunk = true
+				}
 				select {
 				case out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}:
 				case <-ctx.Done():
@@ -701,6 +712,14 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 				}
 			}
 			return true
+		}
+		emitSyntheticIncomplete := func() bool {
+			if sawTerminalEvent || !emittedTranslatedChunk {
+				return true
+			}
+			sawTerminalEvent = true
+			eventData := []byte(`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":0,"output_tokens":0}}}`)
+			return emitTranslatedLine(append([]byte("data: "), eventData...))
 		}
 		for scanner.Scan() {
 			line := scanner.Bytes()
@@ -730,6 +749,13 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 					if status, ok := xaiStreamEventFailureStatus(eventData); ok {
 						streamErr := e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, status, httpResp.Header.Clone(), eventData)
 						reporter.PublishFailure(ctx, streamErr)
+						sawTerminalEvent = true
+						if status != http.StatusTooManyRequests {
+							if !emitTranslatedLine(append([]byte("data: "), eventData...)) {
+								return
+							}
+							return
+						}
 						select {
 						case out <- cliproxyexecutor.StreamChunk{Err: streamErr}:
 						case <-ctx.Done():
@@ -739,13 +765,16 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 					switch normalizedEventName {
 					case "response.output_item.done":
 						xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
-					case "response.completed":
+					case "response.completed", "response.incomplete":
+						sawTerminalEvent = true
 						if detail, ok := helps.ParseCodexUsage(eventData); ok {
 							reporter.Publish(ctx, detail)
 						}
-						eventData = xaiPatchCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
-						eventData = xaiNormalizeReasoningSummaryData(eventData)
-						cacheXAIReasoningReplayFromCompleted(ctx, prepared.replayScope, eventData)
+						if normalizedEventName == "response.completed" {
+							eventData = xaiPatchCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
+							eventData = xaiNormalizeReasoningSummaryData(eventData)
+							cacheXAIReasoningReplayFromCompleted(ctx, prepared.replayScope, eventData)
+						}
 						normalizedEventName = gjson.GetBytes(eventData, "type").String()
 					}
 
@@ -782,10 +811,18 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 		if errScan := scanner.Err(); errScan != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
 			reporter.PublishFailure(ctx, errScan)
+			if emittedTranslatedChunk {
+				_ = emitSyntheticIncomplete()
+				return
+			}
 			select {
 			case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
 			case <-ctx.Done():
 			}
+			return
+		}
+		if !sawTerminalEvent {
+			_ = emitSyntheticIncomplete()
 		}
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
@@ -2902,6 +2939,9 @@ const xaiFreeUsageExhaustedCooldown = 24 * time.Hour
 // retry hint so conductor backoff still applies.
 func xaiStatusErr(code int, body []byte) statusErr {
 	err := statusErr{code: code, msg: string(body)}
+	if code == http.StatusBadRequest || code == http.StatusRequestEntityTooLarge || code == http.StatusNotFound {
+		err.requestScoped = true
+	}
 	if code != http.StatusTooManyRequests || len(body) == 0 {
 		return err
 	}
@@ -2934,7 +2974,7 @@ func xaiStreamEventFailureStatus(eventData []byte) (int, bool) {
 		"response.error.statusCode",
 	} {
 		if status := int(gjson.GetBytes(eventData, path).Int()); status > 0 {
-			return status, status == http.StatusTooManyRequests
+			return status, true
 		}
 	}
 	eventType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(eventData, "type").String()))
@@ -2951,7 +2991,22 @@ func xaiStreamEventFailureStatus(eventData []byte) (int, bool) {
 		strings.Contains(text, "included free usage") {
 		return http.StatusTooManyRequests, true
 	}
-	return 0, false
+	if strings.Contains(text, "context_length_exceeded") ||
+		strings.Contains(text, "context window") ||
+		strings.Contains(text, "invalid_request") ||
+		strings.Contains(text, "bad request") {
+		return http.StatusBadRequest, true
+	}
+	if strings.Contains(text, "unauthorized") || strings.Contains(text, "invalid_api_key") {
+		return http.StatusUnauthorized, true
+	}
+	if strings.Contains(text, "forbidden") || strings.Contains(text, "permission") {
+		return http.StatusForbidden, true
+	}
+	if strings.Contains(text, "not_found") || strings.Contains(text, "not found") {
+		return http.StatusNotFound, true
+	}
+	return http.StatusBadGateway, true
 }
 
 func applyXAIPacketFilterToManager(ctx context.Context, auth *cliproxyauth.Auth, model, action, target string, seconds int, ruleName string) {

@@ -19,6 +19,13 @@ import type { CredentialInfo } from '@/types/sourceInfo';
 import { buildSourceInfoMap, resolveSourceDisplay } from '@/utils/sourceResolver';
 import { parseTimestampMs } from '@/utils/timestamp';
 import { resolveUsageUserAgents } from '@/utils/packetUserAgent';
+import { copyToClipboard } from '@/utils/clipboard';
+import {
+  buildFourPacketFilename,
+  buildFourPacketText,
+  FOUR_PACKET_ITEMS,
+  type PacketKey,
+} from '@/utils/packetExport';
 import {
   collectUsageDetails,
   extractFirstByteLatencyMs,
@@ -1236,6 +1243,47 @@ export function RequestEventsDetailsCard({
     if (selectedFailureCapturedResponse) return selectedFailureCapturedResponse;
     return buildFallbackResponsePacket(selectedFailureRow, selectedFailureMessage);
   }, [selectedFailureCapturedResponse, selectedFailureMessage, selectedFailurePacketRecord, selectedFailureRow]);
+  const selectedFailurePackets = useMemo(() => {
+    if (!selectedFailureRow) return null;
+    return {
+      client_request: selectedFailureRequestPacket,
+      upstream_request: selectedFailureUpstreamRequestPacket,
+      upstream_response: selectedFailureUpstreamResponsePacket,
+      client_response: selectedFailureResponsePacket,
+    } as Record<PacketKey, string>;
+  }, [
+    selectedFailureRequestPacket,
+    selectedFailureResponsePacket,
+    selectedFailureRow,
+    selectedFailureUpstreamRequestPacket,
+    selectedFailureUpstreamResponsePacket,
+  ]);
+  const selectedFailureDownloadStatus = useMemo(() => {
+    if (!selectedFailureRow) return null;
+    return (
+      selectedFailureRow.failureStatusCode ||
+      parseHTTPStatusCode(selectedFailureUpstreamResponsePacket, null) ||
+      parseHTTPStatusCode(selectedFailureResponsePacket, null)
+    );
+  }, [selectedFailureResponsePacket, selectedFailureRow, selectedFailureUpstreamResponsePacket]);
+  const handleCopyFailurePacket = useCallback(
+    async (content: string) => {
+      const ok = await copyToClipboard(content || '');
+      showNotification(ok ? '已复制到剪贴板' : '复制失败', ok ? 'success' : 'error');
+    },
+    [showNotification]
+  );
+  const handleDownloadFailurePackets = useCallback(() => {
+    if (!selectedFailureRow || !selectedFailurePackets) return;
+    downloadBlob({
+      filename: buildFourPacketFilename({
+        statusCode: selectedFailureDownloadStatus,
+        timestamp: selectedFailureRow.timestampMs || selectedFailureRow.timestamp,
+        model: selectedFailureRow.model,
+      }),
+      blob: new Blob([buildFourPacketText(selectedFailurePackets)], { type: 'text/plain;charset=utf-8' }),
+    });
+  }, [selectedFailureDownloadStatus, selectedFailurePackets, selectedFailureRow]);
   const selectedFailureNote = useMemo(() => {
     if (
       selectedFailurePacketRecord ||
@@ -1648,28 +1696,35 @@ export function RequestEventsDetailsCard({
               <div className={styles.requestEventsFailureNote}>正在补充读取完整请求日志…</div>
             ) : null}
 
-            <div className={styles.requestEventsFailureMessageBlock}>
-              <div className={styles.requestEventsFailureMetaLabel}>客户端发给CPA的完整数据包</div>
-              <pre className={styles.requestEventsFailurePacket}>
-                {selectedFailureRequestPacket}
-              </pre>
-            </div>
-
-            {selectedFailureUpstreamRequestPacket && (
+            {selectedFailurePackets ? (
               <div className={styles.requestEventsFailureMessageBlock}>
-                <div className={styles.requestEventsFailureMetaLabel}>CPA发给供应商的完整数据包</div>
-                <pre className={styles.requestEventsFailurePacket}>
-                  {selectedFailureUpstreamRequestPacket}
-                </pre>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div className={styles.requestEventsFailureMetaLabel}>完整数据包导出</div>
+                  <Button size="sm" onClick={handleDownloadFailurePackets}>
+                    下载所有数据为txt
+                  </Button>
+                </div>
               </div>
-            )}
+            ) : null}
 
-            <div className={styles.requestEventsFailureMessageBlock}>
-              <div className={styles.requestEventsFailureMetaLabel}>供应商返回CPA的完整数据包</div>
-              <pre className={styles.requestEventsFailurePacket}>
-                {selectedFailureUpstreamResponsePacket || selectedFailureResponsePacket}
-              </pre>
-            </div>
+            {selectedFailurePackets &&
+              FOUR_PACKET_ITEMS.map(({ key, title }) => (
+                <div className={styles.requestEventsFailureMessageBlock} key={key}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div className={styles.requestEventsFailureMetaLabel}>{title}</div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void handleCopyFailurePacket(selectedFailurePackets[key] || '')}
+                    >
+                      一键复制
+                    </Button>
+                  </div>
+                  <pre className={styles.requestEventsFailurePacket}>
+                    {selectedFailurePackets[key] || '-'}
+                  </pre>
+                </div>
+              ))}
 
             {selectedFailureStatusRulers && (
               <div className={styles.requestEventsFailureMessageBlock}>
@@ -1679,13 +1734,6 @@ export function RequestEventsDetailsCard({
                 </pre>
               </div>
             )}
-
-            <div className={styles.requestEventsFailureMessageBlock}>
-              <div className={styles.requestEventsFailureMetaLabel}>CPA发送给客户端的完整数据包</div>
-              <pre className={styles.requestEventsFailurePacket}>
-                {selectedFailureResponsePacket}
-              </pre>
-            </div>
 
             <div className={styles.requestEventsFailureNote}>
               {selectedFailureNote}

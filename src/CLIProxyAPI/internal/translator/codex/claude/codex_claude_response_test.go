@@ -118,6 +118,27 @@ func TestConvertCodexResponseToClaude_StreamErrorTypeFallbackMessage(t *testing.
 	}
 }
 
+func TestConvertCodexResponseToClaude_StreamResponseFailedContextLength(t *testing.T) {
+	ctx := context.Background()
+	var param any
+
+	outputs := ConvertCodexResponseToClaude(ctx, "", []byte(`{"messages":[]}`), nil, []byte(`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}}`), &param)
+	if len(outputs) != 1 {
+		t.Fatalf("expected one error chunk, got %d: %q", len(outputs), outputs)
+	}
+
+	payload, ok := firstClaudeStreamPayloadForEvent(string(outputs[0]), "error")
+	if !ok {
+		t.Fatalf("missing error event payload: %q", outputs[0])
+	}
+	if got := payload.Get("error.type").String(); got != "invalid_request_error" {
+		t.Fatalf("error.type = %q, want invalid_request_error. Payload: %s", got, payload.Raw)
+	}
+	if got := payload.Get("error.message").String(); !strings.Contains(got, "context window") {
+		t.Fatalf("error.message = %q, want context window message. Payload: %s", got, payload.Raw)
+	}
+}
+
 func TestConvertCodexResponseToClaude_StreamThinkingWithoutReasoningItemStillIncludesSignatureField(t *testing.T) {
 	ctx := context.Background()
 	originalRequest := []byte(`{"messages":[]}`)

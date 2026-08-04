@@ -14,8 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
-	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 )
 
 type Service struct {
@@ -167,6 +167,12 @@ func captureFromUsageRecord(ctx context.Context, record coreusage.Record, allowQ
 		return
 	}
 	packets := PacketsFromUsageRaw(record.RawRequest, record.RawResponse)
+	if strings.TrimSpace(packets.UpstreamRequest) == "" {
+		packets.UpstreamRequest = packetFromAPIRequest(contextString(ctx, "API_REQUEST"))
+	}
+	if strings.TrimSpace(packets.UpstreamResponse) == "" {
+		packets.UpstreamResponse = packetFromAPIResponse(contextString(ctx, "API_RESPONSE"))
+	}
 	if packetBytes(packets) == 0 {
 		return
 	}
@@ -309,7 +315,6 @@ func packetFromAPIRequest(text string) string {
 	return strings.TrimSpace(method + " " + path + " HTTP/1.1\n" + headers + "\n\n" + body)
 }
 
-
 func packetFromAPIResponse(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" || strings.HasPrefix(text, "HTTP/") {
@@ -333,7 +338,6 @@ func packetFromAPIResponse(text string) string {
 	}
 	return strings.TrimSpace("HTTP/1.1 " + status + " " + http.StatusText(atoi(status)) + "\n" + headers + "\n\n" + body)
 }
-
 
 func latestAPIRequestSection(text string) string {
 	marker := "=== API REQUEST"

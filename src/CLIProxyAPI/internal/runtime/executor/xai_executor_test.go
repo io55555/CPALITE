@@ -477,6 +477,91 @@ func TestXAIManagerPacketFilter429CooldownFromStreamFailureEvent(t *testing.T) {
 	}
 }
 
+func TestXAIExecutorStreamResponseFailed400EmitsClaudeErrorWithoutStreamErr(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.failed\n"))
+		_, _ = w.Write([]byte(`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	exec := NewXAIExecutor(&config.Config{})
+	result, err := exec.ExecuteStream(context.Background(), &cliproxyauth.Auth{
+		Attributes: map[string]string{
+			"api_key":   "xai-key",
+			"base_url":  server.URL,
+			"using_api": "true",
+		},
+	}, cliproxyexecutor.Request{
+		Model:   "grok-4.5",
+		Payload: []byte(`{"model":"grok-4.5","input":"hello","stream":true}`),
+	}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, ResponseFormat: sdktranslator.FormatClaude})
+	if err != nil {
+		t.Fatalf("ExecuteStream: %v", err)
+	}
+
+	var streamErr error
+	var body bytes.Buffer
+	for chunk := range result.Chunks {
+		if chunk.Err != nil {
+			streamErr = chunk.Err
+		}
+		body.Write(chunk.Payload)
+	}
+	if streamErr != nil {
+		t.Fatalf("unexpected stream error: %v", streamErr)
+	}
+	out := body.String()
+	if !strings.Contains(out, "event: error\n") || !strings.Contains(out, "invalid_request_error") || !strings.Contains(out, "context window") {
+		t.Fatalf("expected Claude error SSE for context window, got: %q", out)
+	}
+}
+
+func TestXAIExecutorStreamMissingTerminalEmitsClaudeMessageStop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.created\n"))
+		_, _ = w.Write([]byte(`data: {"type":"response.created","response":{"id":"resp_1","model":"grok-4.5"}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: response.output_text.delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	exec := NewXAIExecutor(&config.Config{})
+	result, err := exec.ExecuteStream(context.Background(), &cliproxyauth.Auth{
+		Attributes: map[string]string{
+			"api_key":   "xai-key",
+			"base_url":  server.URL,
+			"using_api": "true",
+		},
+	}, cliproxyexecutor.Request{
+		Model:   "grok-4.5",
+		Payload: []byte(`{"model":"grok-4.5","input":"hello","stream":true}`),
+	}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, ResponseFormat: sdktranslator.FormatClaude})
+	if err != nil {
+		t.Fatalf("ExecuteStream: %v", err)
+	}
+
+	var streamErr error
+	var body bytes.Buffer
+	for chunk := range result.Chunks {
+		if chunk.Err != nil {
+			streamErr = chunk.Err
+		}
+		body.Write(chunk.Payload)
+	}
+	if streamErr != nil {
+		t.Fatalf("unexpected stream error: %v", streamErr)
+	}
+	out := body.String()
+	if !strings.Contains(out, "event: message_stop\n") {
+		t.Fatalf("expected synthetic Claude message_stop, got: %q", out)
+	}
+	if !strings.Contains(out, "partial") {
+		t.Fatalf("expected streamed text to be preserved, got: %q", out)
+	}
+}
+
 func TestXAIPacketCaptureSourceDistinguishesAccountKind(t *testing.T) {
 	tests := []struct {
 		name string

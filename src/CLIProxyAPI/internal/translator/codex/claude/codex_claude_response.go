@@ -91,6 +91,8 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
 	switch typeStr {
 	case "error":
 		output = append(output, codexStreamErrorToClaudeError(rootResult)...)
+	case "response.failed":
+		output = append(output, codexStreamErrorToClaudeError(rootResult)...)
 	case "response.created":
 		template = []byte(`{"type":"message_start","message":{"id":"","type":"message","role":"assistant","model":"claude-opus-4-1-20250805","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0},"content":[],"stop_reason":null}}`)
 		template, _ = sjson.SetBytes(template, "message.model", rootResult.Get("response.model").String())
@@ -307,15 +309,21 @@ func ConvertCodexResponseToClaude(_ context.Context, _ string, originalRequestRa
 
 func codexStreamErrorToClaudeError(rootResult gjson.Result) []byte {
 	errorResult := rootResult.Get("error")
+	if !errorResult.Exists() {
+		errorResult = rootResult.Get("response.error")
+	}
 	errType := strings.TrimSpace(errorResult.Get("type").String())
 	if errType == "" {
 		errType = strings.TrimSpace(rootResult.Get("error_type").String())
+	}
+	code := strings.TrimSpace(errorResult.Get("code").String())
+	if errType == "" && (strings.Contains(code, "context_length") || strings.Contains(code, "invalid_request")) {
+		errType = "invalid_request_error"
 	}
 	if errType == "" {
 		errType = "api_error"
 	}
 
-	code := strings.TrimSpace(errorResult.Get("code").String())
 	message := strings.TrimSpace(errorResult.Get("message").String())
 	if message == "" {
 		message = strings.TrimSpace(rootResult.Get("message").String())

@@ -17,6 +17,7 @@ import {
 } from '@/services/api/packetCapture';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { downloadBlob } from '@/utils/download';
+import { buildFourPacketFilename, buildFourPacketText } from '@/utils/packetExport';
 import { useNotificationStore } from '@/stores';
 import styles from './PacketCapturePage.module.scss';
 
@@ -611,6 +612,23 @@ export function PacketCapturePage() {
     const ok = await copyToClipboard(content || '');
     showNotification(ok ? '已复制到剪贴板' : '复制失败', ok ? 'success' : 'error');
   };
+  const handleDownloadRecordPackets = async (row: PacketRecordSummary) => {
+    try {
+      const record = await packetCaptureApi.getRecord(row.id);
+      downloadBlob({
+        filename: buildFourPacketFilename({
+          statusCode: record.upstream_status_code || row.upstream_status_code,
+          timestamp: record.timestamp || row.timestamp,
+          model: record.model || row.model,
+        }),
+        blob: new Blob([buildFourPacketText(record.packets)], { type: 'text/plain;charset=utf-8' }),
+      });
+      showNotification('已下载完整数据包', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      showNotification(message ? `下载失败: ${message}` : '下载失败', 'error');
+    }
+  };
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const config = useConfigStore((state) => state.config);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -994,6 +1012,7 @@ export function PacketCapturePage() {
                   <td>
                     <div className={styles.rowActions}>
                       <Button size="sm" variant="secondary" onClick={async () => setDetail(await packetCaptureApi.getRecord(row.id))}>查看数据包</Button>
+                      <Button size="sm" variant="secondary" onClick={() => void handleDownloadRecordPackets(row)}>下载所有数据为txt</Button>
                       <button
                         type="button"
                         className={styles.iconButton}
