@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/clienterror"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	internalusage "github.com/router-for-me/CLIProxyAPI/v7/internal/usage"
@@ -452,14 +452,10 @@ func failFromErrors(errs ...error) usage.Failure {
 		if err == nil {
 			continue
 		}
-		fail := usage.Failure{
-			Body: strings.TrimSpace(err.Error()),
+		return usage.Failure{
+			Body:       strings.TrimSpace(err.Error()),
+			StatusCode: clienterror.HTTPStatusFromError(err),
 		}
-		var se interface{ StatusCode() int }
-		if errors.As(err, &se) && se != nil {
-			fail.StatusCode = se.StatusCode()
-		}
-		return fail
 	}
 	return usage.Failure{}
 }

@@ -272,7 +272,8 @@
     "routing_title": "路由策略",
     "routing_strategy_label": "路由策略:",
     "routing_strategy_hint": "round-robin 為輪詢，fill-first 為優先填充。",
-    "routing_strategy_update": "更新"
+    "routing_strategy_update": "更新",
+    "routing_strategy_weighted_round_robin": "weighted-round-robin（加權輪詢）"
   },
   "auth_files": {
     "title": "驗證檔案管理",
@@ -324,12 +325,12 @@
     "pagination_next": "下一頁",
     "pagination_info": "第 {{current}} / {{total}} 頁 · 共 {{count}} 個檔案",
     "search_label": "搜尋設定檔",
-    "search_placeholder": "輸入名稱、類型或供應方關鍵字，支援 * 萬用字元",
+    "search_placeholder": "輸入名稱、帳號、類型或供應方關鍵字，支援 * 萬用字元",
     "problem_filter_label": "狀態篩選",
     "problem_filter_all": "全部",
-    "problem_filter_enabled": "已啟用",
-    "problem_filter_problem": "異常",
-    "problem_filter_disabled": "已停用",
+    "problem_filter_enabled": "啟用",
+    "problem_filter_problem": "問題",
+    "problem_filter_disabled": "停用",
     "display_options_label": "顯示選項",
     "compact_mode_label": "簡略模式",
     "sort_label": "排序",
@@ -416,8 +417,8 @@
     "quota_refresh_success": "已重新整理「{{name}}」的配額",
     "quota_refresh_failed": "重新整理「{{name}}」的配額失敗：{{message}}",
     "filter_oauth-excluded-models": "OAuth 排除模型",
-    "empty_title": "暫無驗證檔案",
-    "empty_desc": "點擊上方按鈕上傳第一個檔案",
+    "empty_title": "還沒有憑證",
+    "empty_desc": "上傳認證檔案，或透過 OAuth 連接一個提供商開始使用。",
     "health_status_unknown": "未知",
     "health_status_no_message": "暫無狀態說明",
     "last_refresh_label": "最近重新整理",
@@ -446,15 +447,26 @@
     "excluded_models_label": "排除模型（excluded_models）",
     "excluded_models_placeholder": "用逗號或換行分隔，例如: model-a, gpt-5-*, *-preview",
     "excluded_models_hint": "儲存為陣列；會自動 trim、小寫、去重並排序。",
-    "disable_cooling_label": "停用冷卻（disable_cooling）",
+    "disable_cooling_label": "停用指數冷卻（disable_cooling）",
     "disable_cooling_placeholder": "例如: true / false / 1 / 0",
-    "disable_cooling_hint": "支援布林值、0/非0 數字或字串 true/false/1/0；無法解析時忽略。",
+    "disable_cooling_hint": "開啟後，僅目前憑證會略過失敗後的冷卻與指數退避；其他憑證不受影響。",
     "filter_gemini-cli": "GeminiCLI",
     "type_gemini-cli": "GeminiCLI",
     "sort_name_asc": "名稱 A-Z",
     "sort_plan_desc": "方案高到低",
     "sort_plan_asc": "方案低到高",
-    "oauth-excluded-models": "OAuth 排除模型"
+    "oauth-excluded-models": "OAuth 排除模型",
+    "meta_total": "{{count}} 個憑證",
+    "meta_active": "{{count}} 個啟用",
+    "meta_problem": "{{count}} 個異常",
+    "empty_oauth_link": "前往 OAuth 登入",
+    "no_results_clear": "清除篩選",
+    "weight_display": "WRR 權重",
+    "batch_toolbar_label": "批次操作",
+    "weight_label": "調度權重（weight）",
+    "weight_hint": "預設值為 1；小於或等於 0 時不參與加權調度；最大值為 1,000,000。",
+    "weight_invalid_integer": "權重必須是整數。",
+    "weight_invalid_max": "權重不能超過 1,000,000。"
   },
   "antigravity_subscription": {
     "plan_unknown": "未知",
@@ -553,7 +565,7 @@
     "plan_label": "方案",
     "expires_label": "續期時間",
     "reset_credits_label": "主動重置次數",
-    "reset_credits_expiry_label": "主動重置過期時間（GMT+8）",
+    "reset_credits_expiry_label": "主動重置過期時間（{{timezone}}）",
     "reset_credit_number": "第 {{index}} 次",
     "reset_credits_expiry_failed": "主動重置過期時間取得失敗：{{message}}",
     "reset_credits_invalid_payload": "主動重置過期時間回應格式無效",
@@ -605,7 +617,7 @@
     "plan_supergrok": "SuperGrok",
     "plan_supergrok_heavy": "SuperGrok Heavy",
     "plan_paid": "付費",
-    "paid_health": "付費 xAI API 可存取。該介面不返回帳單額度明細。",
+    "paid_health": "付費 API 對話可用。xAI 暫不為此 OAuth 憑證提供配額總量資料。",
     "pay_as_you_go_label": "按量付費",
     "pay_as_you_go_enabled": "已啟用，封頂 {{cap}}",
     "pay_as_you_go_disabled": "未啟用"
@@ -776,9 +788,9 @@
     "antigravity_oauth_start_error": "啟動 Antigravity OAuth 失敗:",
     "antigravity_oauth_polling_error": "檢查驗證狀態失敗:",
     "kimi_oauth_title": "Kimi OAuth",
-    "kimi_oauth_button": "開始 Kimi 登入",
+    "kimi_oauth_button": "使用 Kimi 登入",
     "kimi_sign_up_button": "立即註冊",
-    "kimi_oauth_hint": "透過裝置授權流程登入 Kimi 服務，自動取得並儲存驗證檔案。",
+    "kimi_oauth_hint": "透過裝置授權快速登入 Kimi，完成後將自動取得並儲存驗證檔案。",
     "kimi_oauth_url_label": "授權連結:",
     "kimi_open_link": "開啟連結",
     "kimi_copy_link": "複製連結",
@@ -1139,7 +1151,9 @@
           "timeout": "Timeout",
           "stabilize_device": "穩定設備指紋",
           "stabilize_device_desc": "固定 OS/Arch，並按憑證/API Key 穩定軟體指紋",
-          "beta_features": "Beta Features"
+          "beta_features": "Beta Features",
+          "codex_identity_confuse": "混淆 Codex 身份請求頭",
+          "codex_identity_confuse_desc": "隨機化 Codex 客戶端身份請求頭，降低指紋識別。"
         },
         "network": {
           "title": "網路設定",
@@ -1174,7 +1188,8 @@
           "ws_auth": "WebSocket 驗證",
           "ws_auth_desc": "啟用 WebSocket 連線驗證（/v1/ws）",
           "enable_gemini_cli_endpoint": "啟用 Gemini CLI 內部端點",
-          "enable_gemini_cli_endpoint_desc": "啟用 /v1internal:* 相容端點"
+          "enable_gemini_cli_endpoint_desc": "啟用 /v1internal:* 相容端點",
+          "strategy_weighted_round_robin": "加權輪詢（Weighted Round Robin）"
         },
         "quota": {
           "title": "配額回退",
@@ -1210,6 +1225,10 @@
           "override_raw_rules_desc": "始終按原始 JSON 片段覆寫參數值，適合 response_format、schema 等複雜欄位",
           "filter_rules": "篩選規則",
           "filter_rules_desc": "透過 JSON Path 預篩選上游請求體，自動剔除不合規/冗餘參數（Request Sanitization）"
+        },
+        "common": {
+          "title": "常用",
+          "description": "最常調整的設定項，與完整分區共享同一份資料"
         }
       },
       "api_keys": {
@@ -1224,7 +1243,15 @@
         "input_placeholder": "貼上你的 API 金鑰",
         "input_hint": "此處僅修改本地設定檔內容，不會自動同步到 API 金鑰管理介面",
         "error_empty": "請輸入 API 金鑰",
-        "error_invalid": "API 金鑰包含無效字元"
+        "error_invalid": "API 金鑰包含無效字元",
+        "strength": {
+          "label": "API 金鑰強度",
+          "empty": "待輸入",
+          "weak": "弱",
+          "fair": "一般",
+          "good": "良好",
+          "strong": "很強"
+        }
       },
       "payload_rules": {
         "rule": "規則",
@@ -1299,7 +1326,22 @@
     "status_idle": "等待操作",
     "status_saved": "設定儲存完成",
     "status_save_failed": "儲存失敗",
-    "error_yaml_not_supported": "伺服器未回傳 YAML 格式，請確認 /config.yaml 介面可用"
+    "error_yaml_not_supported": "伺服器未回傳 YAML 格式，請確認 /config.yaml 介面可用",
+    "meta_fields": "{{count}} 項設定",
+    "meta_dirty": "{{count}} 項待儲存",
+    "meta_dirty_source": "原始碼有未儲存修改",
+    "meta_errors": "{{count}} 項驗證錯誤",
+    "meta_synced": "已同步",
+    "actions": {
+      "discard": "放棄變更",
+      "save": "儲存變更"
+    },
+    "discard_confirm_message": "確定放棄所有未儲存的變更並還原到最近的伺服器版本嗎？",
+    "mode": {
+      "label": "編輯模式",
+      "visual": "視覺化",
+      "source": "原始碼"
+    }
   },
   "quota_management": {
     "title": "配額管理",
@@ -1313,10 +1355,45 @@
     "search_empty_title": "沒有符合的憑證",
     "search_empty_desc": "請調整搜尋關鍵字或清空搜尋條件。",
     "sort_label": "排序",
-    "sort_default": "預設順序",
+    "sort_default": "預設",
     "sort_name_asc": "名稱 A-Z",
     "sort_plan_desc": "方案高到低",
-    "sort_plan_asc": "方案低到高"
+    "sort_plan_asc": "方案低到高",
+    "sort_soonest": "最快恢復優先",
+    "meta_credentials": "{{count}} 個憑證",
+    "meta_loaded": "{{count}} 個已載入",
+    "meta_attention": "{{count}} 個需關注",
+    "empty_title": "暫無可查配額的憑證",
+    "empty_desc": "接入 Antigravity、Claude、Codex、xAI 或 Kimi 憑證後即可在此查看配額。",
+    "windows_title": "配額視窗",
+    "windows_span_weekly": "兩週",
+    "windows_span_session": "三天",
+    "windows_current": "目前",
+    "windows_today": "今天",
+    "windows_prev": "上一頁",
+    "windows_next": "下一頁",
+    "windows_mode_weekly": "按週",
+    "windows_mode_session": "5 小時",
+    "windows_credential": "憑證",
+    "windows_idle": "沒有正在計時的視窗",
+    "windows_empty_session": "目前頁面沒有憑證提供 5 小時配額視窗。",
+    "windows_legend_current": "目前視窗",
+    "windows_legend_upcoming": "即將開始",
+    "windows_legend_elapsed": "已結束",
+    "windows_legend_reset_credit": "主動重設過期",
+    "soonest_row_hint": "該憑證中最先恢復",
+    "windows_reset_credit": "主動重設",
+    "windows_credit_granted": "取得時間",
+    "windows_credit_expires": "過期時間",
+    "windows_note_weekly": "每條表示一個完整的配額視窗，從開啟到重設。同時結束的視窗會競用相同的日期。",
+    "windows_note_session": "每條表示一個 5 小時視窗。僅顯示有正在計時視窗的憑證，其餘保持為空。",
+    "weekday_sun": "日",
+    "weekday_mon": "一",
+    "weekday_tue": "二",
+    "weekday_wed": "三",
+    "weekday_thu": "四",
+    "weekday_fri": "五",
+    "weekday_sat": "六"
   },
   "plugin_management": {
     "title": "插件管理",
@@ -1671,7 +1748,10 @@
       "code0": "Code0",
       "fennoAI": "FennoAI",
       "qiniuCloud": "七牛雲",
-      "kimi": "Kimi"
+      "kimi": "Kimi",
+      "interactions": "Interactions API",
+      "lmuAI": "LMU AI（靈眸AI）",
+      "infistar": "無限星河"
     },
     "table": {
       "key": "金鑰",
@@ -1725,11 +1805,15 @@
         "standard": "普通 URL",
         "direct": "專線直連 URL",
         "domestic": "中國大陸線路",
-        "overseas": "海外線路"
+        "overseas": "海外線路",
+        "mainlandChina": "中國大陸（推薦）",
+        "global": "全球"
       },
       "urlOptionDescriptions": {
         "domestic": "面向中國大陸使用者和部署在中國大陸網路環境中的業務，通常可獲得更低延遲。",
-        "overseas": "面向海外部署、跨境存取或需要存取境外模型的業務。"
+        "overseas": "面向海外部署、跨境存取或需要存取境外模型的業務。",
+        "mainlandChinaRecommended": "推薦中國大陸使用者和部署在中國大陸網路環境中的業務使用。",
+        "global": "適用於全球其他地區的使用者和部署環境。"
       },
       "modelsTitle": "協議模型設定",
       "modelsHint": "可分別限制或別名映射 Codex API、Anthropic、Gemini 與 OpenAI 相容入口的模型。",
@@ -1827,7 +1911,7 @@
       "proxyBadge": "代理",
       "modelBadgeImage": "圖片",
       "modelBadgeThinking": "Thinking",
-      "thinkingConfig": "Thinking 設定(JSON)",
+      "thinkingConfig": "允許的思考檔位",
       "thinkingConfigHint": "可設定 levels、min、max、zero_allowed、dynamic_allowed",
       "cloakCacheUserId": "快取 user_id",
       "cloakCacheUserIdHint": "按 API key 複用 Claude cloak 產生的 user_id",
@@ -1836,11 +1920,27 @@
       "validation": {
         "nameRequired": "名稱必填",
         "apiKeyRequired": "至少填寫一個 API 金鑰",
-        "baseUrlRequired": "服務位址必填"
+        "baseUrlRequired": "服務位址必填",
+        "weightInteger": "調度權重必須是整數",
+        "weightMax": "調度權重不能超過 {{max}}"
       },
       "headers": "請求標頭",
       "headersHint": "每行一條,格式 Key: Value",
-      "modelEntry": "模型 #{{index}}"
+      "modelEntry": "模型 #{{index}}",
+      "weight": "調度權重",
+      "weightHint": "預設 1 · ≤ 0 時不參與 · 最大 1,000,000",
+      "excludedDisabledNote": "「*」表示整個 provider 已停用，請改用上方的「已停用」開關。",
+      "thinkingExistingHint": "目前後端設定會保持不變；修改選項後將替換為所選標準檔位。",
+      "thinkingLevels": {
+        "none": "關閉思考",
+        "minimal": "最少",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "超高",
+        "max": "最大",
+        "auto": "自動"
+      }
     },
     "delete": {
       "title": "刪除資源",
@@ -2767,5 +2867,37 @@
     "events": "事件數",
     "last_consumed": "最後消費",
     "last_error": "最後錯誤"
+  },
+  "excluded_models": {
+    "trigger_summary": "已排除 {{excluded}} · {{available}} 可用",
+    "trigger_summary_rules": "{{n}} 條規則",
+    "trigger_empty": "未排除任何模型",
+    "meter_aria": "共 {{total}} 個模型，已排除 {{excluded}} 個",
+    "search_placeholder": "搜尋模型…",
+    "search_aria": "搜尋要排除的模型",
+    "list_aria": "模型",
+    "no_results": "沒有符合「{{query}}」的模型",
+    "catalog_loading": "正在載入模型…",
+    "catalog_unavailable": "無法取得模型清單，規則仍然生效。",
+    "catalog_error": "模型載入失敗。",
+    "catalog_retry": "重試",
+    "catalog_empty": "暫無可列出的模型。",
+    "footer_count": "{{excluded}} / {{total}} 已排除",
+    "select_all": "全部排除",
+    "clear": "清空",
+    "clear_aria": "清空已選模型（保留萬用字元規則）",
+    "badge_wildcard": "由規則",
+    "badge_unknown": "不在清單中",
+    "wildcard_reason": "由規則 {{rule}} 比對",
+    "wildcard_locked": "由規則 {{rule}} 排除，請在下方修改該規則",
+    "also_wildcard": "另由 {{rule}} 比對",
+    "chips_more": "還有 {{n}} 個",
+    "chip_remove": "取消排除 {{rule}}",
+    "rules_label": "萬用字元規則",
+    "rules_placeholder": "每行一個規則，例如 gpt-5-*",
+    "rules_hint": "* 比對任意字元，比對不區分大小寫。",
+    "rules_match_count": "比對 {{n}} 個模型",
+    "rules_match_none": "未比對到清單中的任何模型",
+    "rules_reserved": "「*」會停用整個 provider，請改用「已停用」開關"
   }
 }

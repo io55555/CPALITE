@@ -278,7 +278,8 @@
     "routing_title": "路由策略",
     "routing_strategy_label": "路由策略:",
     "routing_strategy_hint": "round-robin 为轮询，fill-first 为优先填充。",
-    "routing_strategy_update": "更新"
+    "routing_strategy_update": "更新",
+    "routing_strategy_weighted_round_robin": "weighted-round-robin (加权轮询)"
   },
   "auth_files": {
     "title": "认证文件管理",
@@ -330,12 +331,12 @@
     "pagination_next": "下一页",
     "pagination_info": "第 {{current}} / {{total}} 页 · 共 {{count}} 个文件",
     "search_label": "搜索配置文件",
-    "search_placeholder": "输入名称、类型或提供方关键字，支持 * 通配",
+    "search_placeholder": "输入名称、账号、类型或提供方关键字，支持 * 通配",
     "problem_filter_label": "状态筛选",
     "problem_filter_all": "全部",
-    "problem_filter_enabled": "已启用",
-    "problem_filter_problem": "异常",
-    "problem_filter_disabled": "已禁用",
+    "problem_filter_enabled": "启用",
+    "problem_filter_problem": "问题",
+    "problem_filter_disabled": "停用",
     "display_options_label": "显示选项",
     "compact_mode_label": "简略模式",
     "sort_label": "排序",
@@ -422,8 +423,8 @@
     "quota_refresh_success": "已刷新 \"{{name}}\" 的额度",
     "quota_refresh_failed": "刷新 \"{{name}}\" 的额度失败：{{message}}",
     "filter_oauth-excluded-models": "OAuth 排除模型",
-    "empty_title": "暂无认证文件",
-    "empty_desc": "点击上方按钮上传第一个文件",
+    "empty_title": "还没有凭证",
+    "empty_desc": "上传认证文件，或通过 OAuth 连接一个提供商开始使用。",
     "health_status_unknown": "未知",
     "health_status_no_message": "暂无状态说明",
     "last_refresh_label": "最近刷新",
@@ -452,15 +453,26 @@
     "excluded_models_label": "排除模型（excluded_models）",
     "excluded_models_placeholder": "用逗号或换行分隔，例如: model-a, gpt-5-*, *-preview",
     "excluded_models_hint": "保存为数组；会自动 trim、小写、去重并排序。",
-    "disable_cooling_label": "禁用冷却（disable_cooling）",
+    "disable_cooling_label": "禁用指数冷却（disable_cooling）",
     "disable_cooling_placeholder": "例如: true / false / 1 / 0",
-    "disable_cooling_hint": "支持布尔值、0/非0 数字或字符串 true/false/1/0；无法解析时忽略。",
+    "disable_cooling_hint": "开启后，仅当前凭证跳过失败后的冷却与指数退避；其他凭证不受影响。",
     "filter_gemini-cli": "GeminiCLI",
     "type_gemini-cli": "GeminiCLI",
     "sort_name_asc": "名称 A-Z",
     "sort_plan_desc": "套餐高到低",
     "sort_plan_asc": "套餐低到高",
-    "oauth-excluded-models": "OAuth 排除模型"
+    "oauth-excluded-models": "OAuth 排除模型",
+    "meta_total": "{{count}} 个凭证",
+    "meta_active": "{{count}} 个启用",
+    "meta_problem": "{{count}} 个异常",
+    "empty_oauth_link": "去 OAuth 登录",
+    "no_results_clear": "清除筛选",
+    "weight_display": "WRR 权重",
+    "batch_toolbar_label": "批量操作",
+    "weight_label": "调度权重（weight）",
+    "weight_hint": "默认值为 1；小于或等于 0 时不参与加权调度；最大值为 1,000,000。",
+    "weight_invalid_integer": "权重必须是整数。",
+    "weight_invalid_max": "权重不能超过 1,000,000。"
   },
   "antigravity_subscription": {
     "plan_unknown": "未知",
@@ -559,7 +571,7 @@
     "plan_label": "套餐",
     "expires_label": "续期时间",
     "reset_credits_label": "主动重置次数",
-    "reset_credits_expiry_label": "主动重置过期时间（GMT+8）",
+    "reset_credits_expiry_label": "主动重置过期时间（{{timezone}}）",
     "reset_credit_number": "第 {{index}} 次",
     "reset_credits_expiry_failed": "主动重置过期时间获取失败：{{message}}",
     "reset_credits_invalid_payload": "主动重置过期时间响应格式无效",
@@ -611,7 +623,7 @@
     "plan_supergrok": "SuperGrok",
     "plan_supergrok_heavy": "SuperGrok Heavy",
     "plan_paid": "付费",
-    "paid_health": "付费 xAI API 可访问。该接口不返回账单额度明细。",
+    "paid_health": "付费 API 对话可用。xAI 暂不为此 OAuth 凭证提供额度总量数据。",
     "pay_as_you_go_label": "按量付费",
     "pay_as_you_go_enabled": "已启用，封顶 {{cap}}",
     "pay_as_you_go_disabled": "未启用"
@@ -782,9 +794,9 @@
     "antigravity_oauth_start_error": "启动 Antigravity OAuth 失败:",
     "antigravity_oauth_polling_error": "检查认证状态失败:",
     "kimi_oauth_title": "Kimi OAuth",
-    "kimi_oauth_button": "开始 Kimi 登录",
+    "kimi_oauth_button": "使用 Kimi 登录",
     "kimi_sign_up_button": "立即注册",
-    "kimi_oauth_hint": "通过设备授权流程登录 Kimi 服务，自动获取并保存认证文件。",
+    "kimi_oauth_hint": "通过设备授权快速登录 Kimi，完成后将自动获取并保存认证文件。",
     "kimi_oauth_url_label": "授权链接:",
     "kimi_open_link": "打开链接",
     "kimi_copy_link": "复制链接",
@@ -1119,7 +1131,9 @@
           "timeout": "Timeout",
           "stabilize_device": "稳定设备指纹",
           "stabilize_device_desc": "固定 OS/Arch，并按凭据/API Key 稳定软件指纹",
-          "beta_features": "Beta Features"
+          "beta_features": "Beta Features",
+          "codex_identity_confuse": "混淆 Codex 身份请求头",
+          "codex_identity_confuse_desc": "随机化 Codex 客户端身份请求头，降低指纹识别。"
         },
         "network": {
           "title": "网络配置",
@@ -1154,7 +1168,8 @@
           "ws_auth": "WebSocket 认证",
           "ws_auth_desc": "启用 WebSocket 连接认证 (/v1/ws)",
           "enable_gemini_cli_endpoint": "启用 Gemini CLI 内部端点",
-          "enable_gemini_cli_endpoint_desc": "启用 /v1internal:* 兼容端点"
+          "enable_gemini_cli_endpoint_desc": "启用 /v1internal:* 兼容端点",
+          "strategy_weighted_round_robin": "加权轮询 (Weighted Round Robin)"
         },
         "quota": {
           "title": "配额回退",
@@ -1190,6 +1205,10 @@
           "override_raw_rules_desc": "始终按原始 JSON 片段覆盖参数值，适合 response_format、schema 等复杂字段",
           "filter_rules": "过滤规则",
           "filter_rules_desc": "通过 JSON Path 预过滤上游请求体，自动剔除不合规/冗余参数（Request Sanitization）"
+        },
+        "common": {
+          "title": "常用",
+          "description": "最常调整的配置项，与完整分区共享同一份数据"
         }
       },
       "api_keys": {
@@ -1204,7 +1223,15 @@
         "input_placeholder": "粘贴你的 API 密钥",
         "input_hint": "此处仅修改本地配置文件内容，不会自动同步到 API 密钥管理接口",
         "error_empty": "请输入 API 密钥",
-        "error_invalid": "API 密钥包含无效字符"
+        "error_invalid": "API 密钥包含无效字符",
+        "strength": {
+          "label": "API 密钥强度",
+          "empty": "待输入",
+          "weak": "弱",
+          "fair": "一般",
+          "good": "良好",
+          "strong": "很强"
+        }
       },
       "payload_rules": {
         "rule": "规则",
@@ -1279,7 +1306,22 @@
     "status_idle": "等待操作",
     "status_saved": "配置保存完成",
     "status_save_failed": "保存失败",
-    "error_yaml_not_supported": "服务器未返回 YAML 格式，请确认 /config.yaml 接口可用"
+    "error_yaml_not_supported": "服务器未返回 YAML 格式，请确认 /config.yaml 接口可用",
+    "meta_fields": "{{count}} 项配置",
+    "meta_dirty": "{{count}} 项待保存",
+    "meta_dirty_source": "源码有未保存修改",
+    "meta_errors": "{{count}} 项校验错误",
+    "meta_synced": "已同步",
+    "actions": {
+      "discard": "放弃更改",
+      "save": "保存更改"
+    },
+    "discard_confirm_message": "确定放弃所有未保存的更改并恢复到最近的服务器版本吗？",
+    "mode": {
+      "label": "编辑模式",
+      "visual": "可视化",
+      "source": "源码"
+    }
   },
   "quota_management": {
     "title": "配额管理",
@@ -1293,10 +1335,45 @@
     "search_empty_title": "没有匹配的凭证",
     "search_empty_desc": "请调整搜索关键词或清空搜索条件。",
     "sort_label": "排序",
-    "sort_default": "默认顺序",
+    "sort_default": "默认",
     "sort_name_asc": "名称 A-Z",
     "sort_plan_desc": "套餐高到低",
-    "sort_plan_asc": "套餐低到高"
+    "sort_plan_asc": "套餐低到高",
+    "sort_soonest": "最快恢复优先",
+    "meta_credentials": "{{count}} 个凭证",
+    "meta_loaded": "{{count}} 个已加载",
+    "meta_attention": "{{count}} 个需关注",
+    "empty_title": "暂无可查额度的凭证",
+    "empty_desc": "接入 Antigravity、Claude、Codex、xAI 或 Kimi 凭证后即可在此查看额度。",
+    "windows_title": "配额窗口",
+    "windows_span_weekly": "两周",
+    "windows_span_session": "三天",
+    "windows_current": "当前",
+    "windows_today": "今天",
+    "windows_prev": "上一页",
+    "windows_next": "下一页",
+    "windows_mode_weekly": "按周",
+    "windows_mode_session": "5 小时",
+    "windows_credential": "凭证",
+    "windows_idle": "没有正在计时的窗口",
+    "windows_empty_session": "当前页面没有凭证提供 5 小时配额窗口。",
+    "windows_legend_current": "当前窗口",
+    "windows_legend_upcoming": "即将开始",
+    "windows_legend_elapsed": "已结束",
+    "windows_legend_reset_credit": "主动重置过期",
+    "soonest_row_hint": "该凭证中最先恢复",
+    "windows_reset_credit": "主动重置",
+    "windows_credit_granted": "获得时间",
+    "windows_credit_expires": "过期时间",
+    "windows_note_weekly": "每条表示一个完整的配额窗口，从开启到重置。同时结束的窗口会争用相同的日期。",
+    "windows_note_session": "每条表示一个 5 小时窗口。仅显示有正在计时窗口的凭证，其余保持为空。",
+    "weekday_sun": "日",
+    "weekday_mon": "一",
+    "weekday_tue": "二",
+    "weekday_wed": "三",
+    "weekday_thu": "四",
+    "weekday_fri": "五",
+    "weekday_sat": "六"
   },
   "plugin_management": {
     "title": "插件管理",
@@ -1654,7 +1731,10 @@
       "fennoAI": "FennoAI",
       "qiniuCloud": "七牛云",
       "kimi": "Kimi",
-      "ampcode": "Ampcode"
+      "ampcode": "Ampcode",
+      "interactions": "Interactions API",
+      "lmuAI": "LMU AI（灵眸AI）",
+      "infistar": "无限星河"
     },
     "table": {
       "key": "密钥",
@@ -1714,11 +1794,15 @@
         "standard": "普通 URL",
         "direct": "专线直连 URL",
         "domestic": "国内线路",
-        "overseas": "海外线路"
+        "overseas": "海外线路",
+        "mainlandChina": "中国大陆（推荐）",
+        "global": "全球"
       },
       "urlOptionDescriptions": {
         "domestic": "面向中国大陆用户和部署在中国大陆网络环境中的业务，通常可获得更低延迟。",
-        "overseas": "面向海外部署、跨境访问或需要访问境外模型的业务。"
+        "overseas": "面向海外部署、跨境访问或需要访问境外模型的业务。",
+        "mainlandChinaRecommended": "推荐中国大陆用户和部署在中国大陆网络环境中的业务使用。",
+        "global": "适用于全球其他地区的用户和部署环境。"
       },
       "modelsTitle": "协议模型配置",
       "modelsHint": "可分别限制或别名映射 Codex API、Anthropic、Gemini 与 OpenAI 兼容入口的模型。",
@@ -1816,7 +1900,7 @@
       "proxyBadge": "代理",
       "modelBadgeImage": "图片",
       "modelBadgeThinking": "Thinking",
-      "thinkingConfig": "Thinking 配置(JSON)",
+      "thinkingConfig": "允许的思考档位",
       "thinkingConfigHint": "可配置 levels、min、max、zero_allowed、dynamic_allowed",
       "cloakCacheUserId": "缓存 user_id",
       "cloakCacheUserIdHint": "按 API key 复用 Claude cloak 生成的 user_id",
@@ -1825,11 +1909,27 @@
       "validation": {
         "nameRequired": "名称必填",
         "apiKeyRequired": "至少填写一个 API 密钥",
-        "baseUrlRequired": "服务地址必填"
+        "baseUrlRequired": "服务地址必填",
+        "weightInteger": "调度权重必须是整数",
+        "weightMax": "调度权重不能超过 {{max}}"
       },
       "headers": "请求头",
       "headersHint": "每行一个 Header: value",
-      "modelEntry": "模型 #{{index}}"
+      "modelEntry": "模型 #{{index}}",
+      "weight": "调度权重",
+      "weightHint": "默认 1 · ≤ 0 时不参与 · 最大 1,000,000",
+      "excludedDisabledNote": "“*” 表示整个 provider 已停用，请改用上方的「已停用」开关。",
+      "thinkingExistingHint": "当前后端配置会保持不变；修改选项后将替换为所选标准档位。",
+      "thinkingLevels": {
+        "none": "关闭思考",
+        "minimal": "最少",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "超高",
+        "max": "最大",
+        "auto": "自动"
+      }
     },
     "delete": {
       "title": "删除资源",
@@ -3094,5 +3194,37 @@
     "events": "事件数",
     "last_consumed": "最后消费",
     "last_error": "最后错误"
+  },
+  "excluded_models": {
+    "trigger_summary": "已排除 {{excluded}} · {{available}} 可用",
+    "trigger_summary_rules": "{{n}} 条规则",
+    "trigger_empty": "未排除任何模型",
+    "meter_aria": "共 {{total}} 个模型，已排除 {{excluded}} 个",
+    "search_placeholder": "搜索模型…",
+    "search_aria": "搜索要排除的模型",
+    "list_aria": "模型",
+    "no_results": "没有匹配“{{query}}”的模型",
+    "catalog_loading": "正在加载模型…",
+    "catalog_unavailable": "无法获取模型列表，规则仍然生效。",
+    "catalog_error": "模型加载失败。",
+    "catalog_retry": "重试",
+    "catalog_empty": "暂无可列出的模型。",
+    "footer_count": "{{excluded}} / {{total}} 已排除",
+    "select_all": "全部排除",
+    "clear": "清空",
+    "clear_aria": "清空已选模型（保留通配符规则）",
+    "badge_wildcard": "由规则",
+    "badge_unknown": "不在列表中",
+    "wildcard_reason": "由规则 {{rule}} 匹配",
+    "wildcard_locked": "由规则 {{rule}} 排除，请在下方修改该规则",
+    "also_wildcard": "另由 {{rule}} 匹配",
+    "chips_more": "还有 {{n}} 个",
+    "chip_remove": "取消排除 {{rule}}",
+    "rules_label": "通配符规则",
+    "rules_placeholder": "每行一个规则，例如 gpt-5-*",
+    "rules_hint": "* 匹配任意字符，匹配不区分大小写。",
+    "rules_match_count": "匹配 {{n}} 个模型",
+    "rules_match_none": "未匹配到列表中的任何模型",
+    "rules_reserved": "“*” 会停用整个 provider，请改用「已停用」开关"
   }
 }

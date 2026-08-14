@@ -1481,7 +1481,7 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 	for key, value := range headers {
 		if strings.Contains(value, "$TOKEN$") {
 			if !tokenResolved {
-				token, err = s.h.resolveTokenForAuth(reqCtx, auth)
+				token, err = s.h.resolveTokenForAuth(reqCtx, auth, "")
 				tokenResolved = true
 				if err != nil {
 					return accountInspectionHTTPResult{}, err
@@ -1494,7 +1494,7 @@ func (s *accountInspectionScheduler) apiCall(ctx context.Context, auth *coreauth
 	for key, value := range resolvedHeaders {
 		req.Header.Set(key, value)
 	}
-	client := &http.Client{Timeout: time.Duration(timeoutMS) * time.Millisecond, Transport: s.h.apiCallTransport(auth)}
+	client := &http.Client{Timeout: time.Duration(timeoutMS) * time.Millisecond, Transport: s.h.apiCallTransport(auth, "")}
 	resp, err := client.Do(req)
 	if err != nil {
 		return accountInspectionHTTPResult{}, err

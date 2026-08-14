@@ -22,7 +22,7 @@ import { PacketCapturePage } from '@/pages/PacketCapturePage';
 import { MonitoringCenterPage as MonitoringCenterSeakeePage } from '@/pages/MonitoringCenterSeakeePage';
 import { CodexInspectionPage as CodexInspectionSeakeePage } from '@/pages/CodexInspectionSeakeePage';
 import { MonitoringCenterSsfunPage } from '@/pages/MonitoringCenterSsfunPage';
-import { ConfigPage } from '@/pages/ConfigPage';
+import { ConfigPage } from '@/features/config/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SystemPage } from '@/pages/SystemPage';
 import { PluginsPage } from '@/features/plugins/PluginsPage';

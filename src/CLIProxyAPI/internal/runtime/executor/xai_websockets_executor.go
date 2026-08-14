@@ -839,6 +839,16 @@ func buildXAIWebsocketWarmupCompletedPayload(createdPayload []byte) []byte {
 
 func parseXAIWebsocketError(payload []byte) (error, bool) {
 	if wsErr, ok := parseCodexWebsocketError(payload); ok {
+		if statusError, okStatus := wsErr.(statusErrWithHeaders); okStatus {
+			xaiError := xaiStatusErr(statusError.code, payload)
+			// Apply normalized status (e.g. 403 bad-credentials -> 401) and any
+			// provider-specific retry hint while preserving websocket headers.
+			statusError.code = xaiError.code
+			if xaiError.retryAfter != nil {
+				statusError.retryAfter = xaiError.retryAfter
+			}
+			return statusError, true
+		}
 		return wsErr, true
 	}
 	if len(payload) == 0 || !gjson.GetBytes(payload, "error").Exists() {
@@ -857,7 +867,7 @@ func parseXAIWebsocketError(payload []byte) (error, bool) {
 	if errNode := gjson.GetBytes(payload, "error"); errNode.Exists() {
 		out, _ = sjson.SetRawBytes(out, "error", []byte(errNode.Raw))
 	}
-	return statusErr{code: status, msg: string(out)}, true
+	return xaiStatusErr(status, out), true
 }
 
 func xaiBareWebsocketErrorStatus(payload []byte) int {

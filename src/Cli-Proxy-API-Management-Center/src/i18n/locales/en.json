@@ -278,7 +278,8 @@
     "routing_title": "Routing Strategy",
     "routing_strategy_label": "Routing strategy:",
     "routing_strategy_hint": "round-robin cycles through keys; fill-first prioritizes the first available key.",
-    "routing_strategy_update": "Update"
+    "routing_strategy_update": "Update",
+    "routing_strategy_weighted_round_robin": "weighted-round-robin (weighted cycle)"
   },
   "auth_files": {
     "title": "Auth Files Management",
@@ -330,7 +331,7 @@
     "pagination_next": "Next",
     "pagination_info": "Page {{current}} / {{total}} · {{count}} files",
     "search_label": "Search configs",
-    "search_placeholder": "Filter by name, type, or provider. Use * as a wildcard",
+    "search_placeholder": "Filter by name, account, type, or provider. Use * as a wildcard",
     "problem_filter_label": "Status Filter",
     "problem_filter_all": "All",
     "problem_filter_enabled": "Enabled",
@@ -422,8 +423,8 @@
     "quota_refresh_success": "Quota refreshed for \"{{name}}\"",
     "quota_refresh_failed": "Failed to refresh quota for \"{{name}}\": {{message}}",
     "filter_oauth-excluded-models": "OAuth excluded models",
-    "empty_title": "No Auth Files",
-    "empty_desc": "Click the button above to upload the first file",
+    "empty_title": "No credentials yet",
+    "empty_desc": "Upload an auth file or connect a provider with OAuth to get started.",
     "health_status_unknown": "Unknown",
     "health_status_no_message": "No status message",
     "last_refresh_label": "Last Refresh",
@@ -452,15 +453,26 @@
     "excluded_models_label": "Excluded models (excluded_models)",
     "excluded_models_placeholder": "Comma or newline separated, e.g. model-a, gpt-5-*, *-preview",
     "excluded_models_hint": "Saved as an array and normalized by trim/lowercase/dedup/sort.",
-    "disable_cooling_label": "Disable cooling (disable_cooling)",
+    "disable_cooling_label": "Disable exponential cooldown (disable_cooling)",
     "disable_cooling_placeholder": "e.g. true / false / 1 / 0",
-    "disable_cooling_hint": "Supports booleans, numeric 0/non-0, and strings like true/false/1/0; unparseable values are ignored.",
+    "disable_cooling_hint": "Skip failure cooldown and exponential backoff only for this credential; other credentials are unaffected.",
     "filter_gemini-cli": "GeminiCLI",
     "type_gemini-cli": "GeminiCLI",
     "sort_name_asc": "Name A-Z",
     "sort_plan_desc": "Plan high to low",
     "sort_plan_asc": "Plan low to high",
-    "oauth-excluded-models": "OAuth excluded models"
+    "oauth-excluded-models": "OAuth excluded models",
+    "meta_total": "{{count}} credentials",
+    "meta_active": "{{count}} active",
+    "meta_problem": "{{count}} problem",
+    "empty_oauth_link": "Connect via OAuth",
+    "no_results_clear": "Clear filters",
+    "weight_display": "WRR weight",
+    "batch_toolbar_label": "Batch actions",
+    "weight_label": "Scheduling weight (weight)",
+    "weight_hint": "Defaults to 1. Values at or below 0 exclude this credential from weighted scheduling; maximum 1,000,000.",
+    "weight_invalid_integer": "Weight must be an integer.",
+    "weight_invalid_max": "Weight cannot exceed 1,000,000."
   },
   "antigravity_subscription": {
     "plan_unknown": "Unknown",
@@ -559,7 +571,7 @@
     "plan_label": "Plan",
     "expires_label": "Renewal time",
     "reset_credits_label": "Manual resets",
-    "reset_credits_expiry_label": "Manual reset expiry (GMT+8)",
+    "reset_credits_expiry_label": "Manual reset expiry ({{timezone}})",
     "reset_credit_number": "Reset {{index}}",
     "reset_credits_expiry_failed": "Failed to load manual reset expiry: {{message}}",
     "reset_credits_invalid_payload": "Invalid manual reset expiry response",
@@ -611,7 +623,7 @@
     "plan_supergrok": "SuperGrok",
     "plan_supergrok_heavy": "SuperGrok Heavy",
     "plan_paid": "Paid",
-    "paid_health": "Paid xAI API is reachable. Billing quota is not exposed by this endpoint.",
+    "paid_health": "Paid API chat is available. xAI does not expose quota totals for this OAuth credential.",
     "pay_as_you_go_label": "Pay as you go",
     "pay_as_you_go_enabled": "Enabled, cap {{cap}}",
     "pay_as_you_go_disabled": "Disabled"
@@ -782,9 +794,9 @@
     "antigravity_oauth_start_error": "Failed to start Antigravity OAuth:",
     "antigravity_oauth_polling_error": "Failed to check authentication status:",
     "kimi_oauth_title": "Kimi OAuth",
-    "kimi_oauth_button": "Start Kimi Login",
+    "kimi_oauth_button": "Log in with Kimi",
     "kimi_sign_up_button": "Sign Up Now",
-    "kimi_oauth_hint": "Login to Kimi service through OAuth device flow, automatically obtain and save authentication files.",
+    "kimi_oauth_hint": "Quickly log in to Kimi through device authorization. Authentication files are obtained and saved automatically.",
     "kimi_oauth_url_label": "Authorization URL:",
     "kimi_open_link": "Open Link",
     "kimi_copy_link": "Copy Link",
@@ -1119,7 +1131,9 @@
           "timeout": "Timeout",
           "stabilize_device": "Stabilize Device Profile",
           "stabilize_device_desc": "Pin OS/Arch and stabilize the software fingerprint per credential/API key",
-          "beta_features": "Beta Features"
+          "beta_features": "Beta Features",
+          "codex_identity_confuse": "Confuse Codex identity headers",
+          "codex_identity_confuse_desc": "Randomize Codex client identity headers to reduce fingerprinting."
         },
         "network": {
           "title": "Network Configuration",
@@ -1154,7 +1168,8 @@
           "ws_auth": "WebSocket Authentication",
           "ws_auth_desc": "Enable WebSocket authentication (/v1/ws)",
           "enable_gemini_cli_endpoint": "Enable Gemini CLI Internal Endpoint",
-          "enable_gemini_cli_endpoint_desc": "Enable /v1internal:* compatibility endpoints"
+          "enable_gemini_cli_endpoint_desc": "Enable /v1internal:* compatibility endpoints",
+          "strategy_weighted_round_robin": "Weighted Round Robin"
         },
         "quota": {
           "title": "Quota Fallback",
@@ -1190,6 +1205,10 @@
           "override_raw_rules_desc": "Always overwrite parameter values as raw JSON fragments, useful for response_format, schemas, and other complex fields",
           "filter_rules": "Filter Rules",
           "filter_rules_desc": "Pre-filter upstream request body via JSON Path, automatically remove non-compliant/redundant parameters (Request Sanitization)"
+        },
+        "common": {
+          "title": "Common",
+          "description": "The most-used settings, backed by the same data as the full sections"
         }
       },
       "api_keys": {
@@ -1204,7 +1223,15 @@
         "input_placeholder": "Paste your API key",
         "input_hint": "This only modifies the local config file content, it will not sync to the API Key Management interface",
         "error_empty": "Please enter an API key",
-        "error_invalid": "API key contains invalid characters"
+        "error_invalid": "API key contains invalid characters",
+        "strength": {
+          "label": "API key strength",
+          "empty": "Not entered",
+          "weak": "Weak",
+          "fair": "Fair",
+          "good": "Good",
+          "strong": "Strong"
+        }
       },
       "payload_rules": {
         "rule": "Rule",
@@ -1279,7 +1306,22 @@
     "status_idle": "Waiting for action",
     "status_saved": "Configuration saved",
     "status_save_failed": "Save failed",
-    "error_yaml_not_supported": "Server did not return YAML. Verify the /config.yaml endpoint is available."
+    "error_yaml_not_supported": "Server did not return YAML. Verify the /config.yaml endpoint is available.",
+    "meta_fields": "{{count}} settings",
+    "meta_dirty": "{{count}} unsaved",
+    "meta_dirty_source": "Unsaved source edits",
+    "meta_errors": "{{count}} validation errors",
+    "meta_synced": "In sync",
+    "actions": {
+      "discard": "Discard changes",
+      "save": "Save changes"
+    },
+    "discard_confirm_message": "Discard all unsaved changes and restore the last server version?",
+    "mode": {
+      "label": "Editor mode",
+      "visual": "Visual",
+      "source": "Source"
+    }
   },
   "quota_management": {
     "title": "Quota Management",
@@ -1293,10 +1335,45 @@
     "search_empty_title": "No matching credentials",
     "search_empty_desc": "Adjust the search keyword or clear the search filter.",
     "sort_label": "Sort",
-    "sort_default": "Default order",
+    "sort_default": "Default",
     "sort_name_asc": "Name A-Z",
     "sort_plan_desc": "Plan high to low",
-    "sort_plan_asc": "Plan low to high"
+    "sort_plan_asc": "Plan low to high",
+    "sort_soonest": "Soonest recovery",
+    "meta_credentials": "{{count}} credentials",
+    "meta_loaded": "{{count}} loaded",
+    "meta_attention": "{{count}} need attention",
+    "empty_title": "No quota-capable credentials",
+    "empty_desc": "Connect an Antigravity, Claude, Codex, xAI, or Kimi credential to track its quota here.",
+    "windows_title": "Quota windows",
+    "windows_span_weekly": "two weeks",
+    "windows_span_session": "three days",
+    "windows_current": "current",
+    "windows_today": "Today",
+    "windows_prev": "Previous",
+    "windows_next": "Next",
+    "windows_mode_weekly": "Weekly",
+    "windows_mode_session": "5-hour",
+    "windows_credential": "Credential",
+    "windows_idle": "no window counting down",
+    "windows_empty_session": "No credentials on this page report a 5-hour quota window.",
+    "windows_legend_current": "current window",
+    "windows_legend_upcoming": "upcoming",
+    "windows_legend_elapsed": "elapsed",
+    "windows_legend_reset_credit": "manual reset expiry",
+    "soonest_row_hint": "Recovers first on this credential",
+    "windows_reset_credit": "Manual reset",
+    "windows_credit_granted": "Granted",
+    "windows_credit_expires": "Expires",
+    "windows_note_weekly": "Each bar is one full quota window, drawn from when it opened to when it resets. Lanes ending together compete for the same days.",
+    "windows_note_session": "Each bar is one 5-hour window. Only credentials with a window counting down can be projected; the rest stay empty rather than invented.",
+    "weekday_sun": "Sun",
+    "weekday_mon": "Mon",
+    "weekday_tue": "Tue",
+    "weekday_wed": "Wed",
+    "weekday_thu": "Thu",
+    "weekday_fri": "Fri",
+    "weekday_sat": "Sat"
   },
   "plugin_management": {
     "title": "Plugin Management",
@@ -1654,7 +1731,10 @@
       "fennoAI": "FennoAI",
       "qiniuCloud": "Qiniu Cloud",
       "kimi": "Kimi",
-      "ampcode": "Ampcode"
+      "ampcode": "Ampcode",
+      "interactions": "Interactions API",
+      "lmuAI": "LMU AI (Lingmou AI)",
+      "infistar": "Infistar"
     },
     "table": {
       "key": "Key",
@@ -1713,11 +1793,15 @@
         "standard": "Standard URL",
         "direct": "Direct URL",
         "domestic": "China mainland route",
-        "overseas": "Overseas route"
+        "overseas": "Overseas route",
+        "mainlandChina": "Mainland China (recommended)",
+        "global": "Global"
       },
       "urlOptionDescriptions": {
         "domestic": "For users and workloads in mainland China; usually lower latency in mainland networks.",
-        "overseas": "For overseas deployments, cross-border access, or workloads that need overseas models."
+        "overseas": "For overseas deployments, cross-border access, or workloads that need overseas models.",
+        "mainlandChinaRecommended": "Recommended for users and workloads on mainland China networks.",
+        "global": "For users and workloads in all other regions."
       },
       "modelsTitle": "Protocol model settings",
       "modelsHint": "Configure model allowlists or aliases separately for Codex API, Anthropic, Gemini, and OpenAI-compatible routes.",
@@ -1815,7 +1899,7 @@
       "proxyBadge": "Proxy",
       "modelBadgeImage": "Image",
       "modelBadgeThinking": "Thinking",
-      "thinkingConfig": "Thinking config (JSON)",
+      "thinkingConfig": "Allowed thinking levels",
       "thinkingConfigHint": "Supports levels, min, max, zero_allowed, dynamic_allowed",
       "cloakCacheUserId": "Cache user_id",
       "cloakCacheUserIdHint": "Reuse the Claude cloak user_id per API key",
@@ -1824,11 +1908,27 @@
       "validation": {
         "nameRequired": "Name is required",
         "apiKeyRequired": "At least one API key is required",
-        "baseUrlRequired": "Base URL is required"
+        "baseUrlRequired": "Base URL is required",
+        "weightInteger": "Scheduling weight must be an integer",
+        "weightMax": "Scheduling weight cannot exceed {{max}}"
       },
       "headers": "Headers",
       "headersHint": "One Header: value per line",
-      "modelEntry": "Model #{{index}}"
+      "modelEntry": "Model #{{index}}",
+      "weight": "Scheduling weight",
+      "weightHint": "Default 1 · ≤ 0 is excluded · maximum 1,000,000",
+      "excludedDisabledNote": "“*” means the whole provider is disabled — use the Disabled switch above instead.",
+      "thinkingExistingHint": "The current backend config remains unchanged until you change a selection; then it will be replaced by the selected standard levels.",
+      "thinkingLevels": {
+        "none": "Disable thinking",
+        "minimal": "Minimal",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high",
+        "max": "Maximum",
+        "auto": "Automatic"
+      }
     },
     "delete": {
       "title": "Delete resource",
@@ -2799,5 +2899,37 @@
     "events": "Events",
     "last_consumed": "Last consumed",
     "last_error": "Last error"
+  },
+  "excluded_models": {
+    "trigger_summary": "{{excluded}} excluded · {{available}} available",
+    "trigger_summary_rules": "{{n}} rules",
+    "trigger_empty": "No models excluded",
+    "meter_aria": "{{excluded}} of {{total}} models excluded",
+    "search_placeholder": "Search models…",
+    "search_aria": "Search models to exclude",
+    "list_aria": "Models",
+    "no_results": "No model matches “{{query}}”",
+    "catalog_loading": "Loading models…",
+    "catalog_unavailable": "Model list unavailable — rules still apply.",
+    "catalog_error": "Could not load models.",
+    "catalog_retry": "Retry",
+    "catalog_empty": "No models to list.",
+    "footer_count": "{{excluded}} / {{total}} excluded",
+    "select_all": "Exclude all",
+    "clear": "Clear",
+    "clear_aria": "Clear selected models (wildcard rules are kept)",
+    "badge_wildcard": "By rule",
+    "badge_unknown": "Not in list",
+    "wildcard_reason": "Matched by rule {{rule}}",
+    "wildcard_locked": "Excluded by rule {{rule}} — edit the rule below",
+    "also_wildcard": "Also matched by {{rule}}",
+    "chips_more": "+{{n}} more",
+    "chip_remove": "Stop excluding {{rule}}",
+    "rules_label": "Wildcard rules",
+    "rules_placeholder": "One rule per line, e.g. gpt-5-*",
+    "rules_hint": "* matches any characters. Matching is case-insensitive.",
+    "rules_match_count": "matches {{n}} models",
+    "rules_match_none": "matches no model in the list",
+    "rules_reserved": "“*” disables the whole provider — use the Disabled switch instead"
   }
 }

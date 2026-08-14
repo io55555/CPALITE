@@ -673,6 +673,10 @@ type ClaudeKey struct {
 
 	// RebuildMidSystemMessage moves Claude messages with role "system" into the top-level system field.
 	RebuildMidSystemMessage bool `yaml:"rebuild-mid-system-message,omitempty" json:"rebuild-mid-system-message,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 }
 
 func (k ClaudeKey) GetAPIKey() string  { return k.APIKey }
@@ -697,6 +701,9 @@ type ClaudeModel struct {
 
 	// Thinking configures the thinking/reasoning capability for this model.
 	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
+
+	// IsCompat preserves thinking blocks with empty signatures for compatible upstreams.
+	IsCompat bool `yaml:"is-compat,omitempty" json:"is-compat,omitempty"`
 }
 
 func (m ClaudeModel) GetName() string                        { return m.Name }
@@ -704,6 +711,7 @@ func (m ClaudeModel) GetAlias() string                       { return m.Alias }
 func (m ClaudeModel) GetDisplayName() string                 { return m.DisplayName }
 func (m ClaudeModel) GetMaxContextLength() int               { return m.MaxContextLength }
 func (m ClaudeModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m ClaudeModel) GetIsCompat() bool                      { return m.IsCompat }
 func (m ClaudeModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // CodexKey represents the configuration for a Codex API key,
@@ -745,6 +753,10 @@ type CodexKey struct {
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
+
 	// AlphaSearch enables the Codex alpha search request path for this credential.
 	AlphaSearch bool `yaml:"alpha-search,omitempty" json:"alpha-search,omitempty"`
 }
@@ -771,6 +783,10 @@ type CodexModel struct {
 
 	// Thinking configures the thinking/reasoning capability for this model.
 	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
+
+	// IsCompat converts Codex MultiAgentV2 agent_message items into portable
+	// Responses-compatible content for non-native Codex upstreams.
+	IsCompat bool `yaml:"is-compat,omitempty" json:"is-compat,omitempty"`
 }
 
 func (m CodexModel) GetName() string                        { return m.Name }
@@ -778,6 +794,7 @@ func (m CodexModel) GetAlias() string                       { return m.Alias }
 func (m CodexModel) GetDisplayName() string                 { return m.DisplayName }
 func (m CodexModel) GetMaxContextLength() int               { return m.MaxContextLength }
 func (m CodexModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m CodexModel) GetIsCompat() bool                      { return m.IsCompat }
 func (m CodexModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // XAIConfig holds native xAI request behavior toggles.
@@ -800,6 +817,10 @@ type XAIKey struct {
 	ExcludedModels []string          `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
 	DisableCooling bool              `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 	AlphaSearch    bool              `yaml:"alpha-search,omitempty" json:"alpha-search,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 }
 
 func (k XAIKey) GetAPIKey() string  { return k.APIKey }
@@ -845,6 +866,10 @@ type GeminiKey struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 }
 
 func (k GeminiKey) GetAPIKey() string  { return k.APIKey }
@@ -869,6 +894,9 @@ type GeminiModel struct {
 
 	// Thinking configures the thinking/reasoning capability for this model.
 	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
+
+	// IsCompat preserves thinking blocks with empty signatures for compatible upstreams.
+	IsCompat bool `yaml:"is-compat,omitempty" json:"is-compat,omitempty"`
 }
 
 func (m GeminiModel) GetName() string                        { return m.Name }
@@ -876,6 +904,7 @@ func (m GeminiModel) GetAlias() string                       { return m.Alias }
 func (m GeminiModel) GetDisplayName() string                 { return m.DisplayName }
 func (m GeminiModel) GetMaxContextLength() int               { return m.MaxContextLength }
 func (m GeminiModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m GeminiModel) GetIsCompat() bool                      { return m.IsCompat }
 func (m GeminiModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // OpenAICompatibility represents the configuration for OpenAI API compatibility
@@ -914,6 +943,10 @@ type OpenAICompatibility struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this provider when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this provider.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 }
 
 // OpenAICompatibilityAPIKey represents an API key configuration with optional proxy setting.
@@ -979,6 +1012,9 @@ type OpenAICompatibilityModel struct {
 	// Thinking configures the thinking/reasoning capability for this model.
 	// If nil, the model defaults to level-based reasoning with levels ["low", "medium", "high"].
 	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
+
+	// IsCompat preserves Claude thinking blocks for compatible upstreams.
+	IsCompat bool `yaml:"is-compat,omitempty" json:"is-compat,omitempty"`
 }
 
 func (m OpenAICompatibilityModel) GetName() string                        { return m.Name }
@@ -986,6 +1022,7 @@ func (m OpenAICompatibilityModel) GetAlias() string                       { retu
 func (m OpenAICompatibilityModel) GetDisplayName() string                 { return m.DisplayName }
 func (m OpenAICompatibilityModel) GetMaxContextLength() int               { return m.MaxContextLength }
 func (m OpenAICompatibilityModel) GetForceMapping() bool                  { return m.ForceMapping }
+func (m OpenAICompatibilityModel) GetIsCompat() bool                      { return m.IsCompat }
 func (m OpenAICompatibilityModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // LoadConfig reads a YAML configuration file from the given path,

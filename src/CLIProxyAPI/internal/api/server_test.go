@@ -1267,3 +1267,92 @@ func TestDefaultRequestLoggerFactory_UsesResolvedLogDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexLiveRoutesRequireAuthAndAreRegistered(t *testing.T) {
+	server := newTestServer(t)
+
+	for _, path := range []string{"/v1/live", "/v1/realtime/calls"} {
+		unauthorized := httptest.NewRequest(http.MethodPost, path, nil)
+		unauthorizedRecorder := httptest.NewRecorder()
+		server.engine.ServeHTTP(unauthorizedRecorder, unauthorized)
+		if unauthorizedRecorder.Code != http.StatusUnauthorized {
+			t.Fatalf("%s unauthorized status = %d, want %d", path, unauthorizedRecorder.Code, http.StatusUnauthorized)
+		}
+
+		authorized := httptest.NewRequest(http.MethodPost, path, nil)
+		authorized.Header.Set("Authorization", "Bearer test-key")
+		authorizedRecorder := httptest.NewRecorder()
+		server.engine.ServeHTTP(authorizedRecorder, authorized)
+		if authorizedRecorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s authorized status = %d, want %d; body=%s", path, authorizedRecorder.Code, http.StatusServiceUnavailable, authorizedRecorder.Body.String())
+		}
+	}
+
+	for _, path := range []string{"/v1/live/call-123", "/v1/realtime/calls/call-123", "/v1/realtime?call_id=call-123"} {
+		unauthorized := httptest.NewRequest(http.MethodGet, path, nil)
+		unauthorized.Header.Set("Upgrade", "websocket")
+		unauthorized.Header.Set("Connection", "Upgrade")
+		unauthorizedRecorder := httptest.NewRecorder()
+		server.engine.ServeHTTP(unauthorizedRecorder, unauthorized)
+		if unauthorizedRecorder.Code != http.StatusUnauthorized {
+			t.Fatalf("%s unauthorized status = %d, want %d", path, unauthorizedRecorder.Code, http.StatusUnauthorized)
+		}
+
+		authorized := httptest.NewRequest(http.MethodGet, path, nil)
+		authorized.Header.Set("Authorization", "Bearer test-key")
+		authorizedRecorder := httptest.NewRecorder()
+		server.engine.ServeHTTP(authorizedRecorder, authorized)
+		if authorizedRecorder.Code != http.StatusUpgradeRequired {
+			t.Fatalf("%s authorized status = %d, want %d; body=%s", path, authorizedRecorder.Code, http.StatusUpgradeRequired, authorizedRecorder.Body.String())
+		}
+	}
+}
+
+
+func TestCodexAlphaSearchOptInAPIKeyUsesConfiguredEndpoint(t *testing.T) {
+	server := newTestServer(t)
+	executor := &codexSearchCaptureExecutor{}
+	server.handlers.AuthManager.RegisterExecutor(executor)
+	credential := &auth.Auth{
+		ID:       "codex-alpha-api-key",
+		Provider: "codex",
+		Status:   auth.StatusActive,
+		Attributes: map[string]string{
+			auth.AttributeAPIKey:           "codex-alpha-key",
+			auth.AttributeCodexAlphaSearch: "true",
+			"base_url":                     "https://codex.example.com/v1/",
+		},
+	}
+	if _, errRegister := server.handlers.AuthManager.Register(context.Background(), credential); errRegister != nil {
+		t.Fatalf("register Codex API key: %v", errRegister)
+	}
+
+	payload := `{"query":"golang","prompt_cache_key":"cache","prompt_cache_retention":"24h"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/alpha/search", strings.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer test-key")
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if executor.request == nil {
+		t.Fatal("Codex executor did not receive a request")
+	}
+	if got, want := executor.request.URL.String(), "https://codex.example.com/v1/alpha/search"; got != want {
+		t.Fatalf("upstream URL = %q, want %q", got, want)
+	}
+	if got := executor.request.Header.Get("Authorization"); got != "Bearer codex-alpha-key" {
+		t.Fatalf("Authorization = %q, want API key bearer", got)
+	}
+	var upstreamBody map[string]json.RawMessage
+	if errUnmarshal := json.Unmarshal(executor.body, &upstreamBody); errUnmarshal != nil {
+		t.Fatalf("unmarshal upstream body: %v", errUnmarshal)
+	}
+	for _, field := range []string{"prompt_cache_key", "prompt_cache_retention"} {
+		if _, exists := upstreamBody[field]; exists {
+			t.Fatalf("upstream body contains %s: %s", field, executor.body)
+		}
+	}
+}
+

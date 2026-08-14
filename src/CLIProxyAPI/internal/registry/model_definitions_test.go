@@ -35,24 +35,41 @@ func TestGeminiVertexModelsUseFlashLiteReleaseID(t *testing.T) {
 	t.Fatalf("Vertex models do not contain %q", releaseID)
 }
 
-func TestWithXAIBuiltinsIncludesVideo15Models(t *testing.T) {
+func TestWithXAIBuiltinsIncludesImage20(t *testing.T) {
 	models := WithXAIBuiltins(nil)
+	for _, model := range models {
+		if model != nil && model.ID == xaiBuiltinImage20ModelID {
+			if model.Created != 1786060800 {
+				t.Fatalf("created = %d, want 1786060800 (2026-08-07)", model.Created)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected xAI builtin model %s", xaiBuiltinImage20ModelID)
+}
 
-	found := map[string]bool{}
+func TestWithXAIBuiltinsIncludesVideo15GAAndPreviewAlias(t *testing.T) {
+	models := WithXAIBuiltins(nil)
+	foundGA := false
+	foundPreviewAlias := false
+
 	for _, model := range models {
 		if model == nil {
 			continue
 		}
-		switch model.ID {
-		case xaiBuiltinVideo15ModelID, xaiBuiltinVideo15PreviewModelID:
-			found[model.ID] = true
+		if model.ID == xaiBuiltinVideo15ModelID {
+			foundGA = true
+		}
+		if model.ID == xaiBuiltinVideo15PreviewID {
+			foundPreviewAlias = true
 		}
 	}
 
-	for _, id := range []string{xaiBuiltinVideo15ModelID, xaiBuiltinVideo15PreviewModelID} {
-		if !found[id] {
-			t.Fatalf("expected xAI builtin model %s", id)
-		}
+	if !foundGA {
+		t.Fatalf("expected xAI builtin model %s", xaiBuiltinVideo15ModelID)
+	}
+	if !foundPreviewAlias {
+		t.Fatalf("expected xAI builtin compatibility alias %s", xaiBuiltinVideo15PreviewID)
 	}
 }
 

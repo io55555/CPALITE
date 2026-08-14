@@ -5109,6 +5109,11 @@ func resultErrorFromError(err error) *Error {
 	if (isRequestScopedError(err) || isRequestInvalidError(err)) && resultErr.HTTPStatus != http.StatusTooManyRequests {
 		resultErr.Code = requestScopedErrorCode
 	}
+	if isConnectionLifecycleError(err) {
+		if resultErr.Code == "" || resultErr.Code == connectionLifecycleErrorCode {
+			resultErr.Code = connectionLifecycleErrorCode
+		}
+	}
 	return resultErr
 }
 
@@ -8768,6 +8773,9 @@ func shouldApplyCredentialFailureState(err *Error) bool {
 	if err == nil {
 		return true
 	}
+	if isConnectionLifecycleResultError(err) {
+		return false
+	}
 	if !isRequestScopedResultError(err) {
 		return true
 	}
@@ -8780,6 +8788,15 @@ func shouldApplyCredentialFailureState(err *Error) bool {
 }
 
 func shouldApplyCredentialFailureStateForResult(result Result) bool {
+	if result.Error != nil && result.RetryAfter == nil {
+		status := result.Error.HTTPStatus
+		if status == 0 {
+			status = inferHTTPStatusFromErrorMessage(result.Error.Message)
+		}
+		if status == 0 && (isConnectionLifecycleResultError(result.Error) || isConnectionLifecycleMessage(result.Error.Message)) {
+			return false
+		}
+	}
 	if result.RetryAfter != nil && *result.RetryAfter > 0 {
 		return true
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
 // ComputeOpenAICompatModelsHash returns a stable hash for OpenAI-compat models.
@@ -21,7 +22,7 @@ func ComputeOpenAICompatModelsHash(models []config.OpenAICompatibilityModel) str
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("image=%t", model.Image))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("image=%t", model.Image) + "|is-compat=" + fmt.Sprintf("%t", model.GetIsCompat()) + thinkingHashSuffix(model.GetThinking()))
 		}
 	})
 	return hashJoined(keys)
@@ -51,7 +52,7 @@ func ComputeClaudeModelsHash(models []config.ClaudeModel) string {
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|is-compat=" + fmt.Sprintf("%t", model.GetIsCompat()) + thinkingHashSuffix(model.GetThinking()))
 		}
 	})
 	return hashJoined(keys)
@@ -66,7 +67,7 @@ func ComputeCodexModelsHash(models []config.CodexModel) string {
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|is-compat=" + fmt.Sprintf("%t", model.GetIsCompat()) + thinkingHashSuffix(model.GetThinking()))
 		}
 	})
 	return hashJoined(keys)
@@ -81,7 +82,7 @@ func ComputeGeminiModelsHash(models []config.GeminiModel) string {
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|is-compat=" + fmt.Sprintf("%t", model.GetIsCompat()) + thinkingHashSuffix(model.GetThinking()))
 		}
 	})
 	return hashJoined(keys)
@@ -107,6 +108,11 @@ func ComputeExcludedModelsHash(excluded []string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+
+func thinkingHashSuffix(support *registry.ThinkingSupport) string {
+	data, _ := json.Marshal(support)
+	return "|thinking=" + string(data)
+}
 func normalizeModelPairs(collect func(out func(key string))) []string {
 	seen := make(map[string]struct{})
 	keys := make([]string, 0)

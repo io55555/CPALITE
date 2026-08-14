@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/translator"
@@ -287,6 +288,56 @@ func TestCodexExecutorExecuteStreamExplicitTerminalFailureIsNotSuccessful(t *tes
 	assertNotRequestScopedTestError(t, streamErr)
 }
 
+func TestCodexAutoExecutorHTTPFallbackForwardsSequentialCutoffReasoningSummaryDelivery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, errRead := io.ReadAll(r.Body)
+		if errRead != nil {
+			t.Errorf("read request body: %v", errRead)
+			return
+		}
+		if gjson.GetBytes(body, "stream_options.include_usage").Exists() {
+			t.Errorf("unsupported stream option was forwarded: %s", body)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		if delivery := gjson.GetBytes(body, "stream_options.reasoning_summary_delivery").String(); delivery == "sequential_cutoff" {
+			_, _ = w.Write([]byte(`data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","summary_index":0,"text":"Checking"}` + "\n\n"))
+		} else {
+			_, _ = w.Write([]byte(`data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":"Checking"}` + "\n\n"))
+		}
+		_, _ = w.Write([]byte(`data: {"type":"response.completed","response":{"id":"resp_1","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	executor := NewCodexAutoExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL,
+		"api_key":  "test",
+	}}
+	result, err := executor.ExecuteStream(cliproxyexecutor.WithDownstreamWebsocket(context.Background()), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.6-sol",
+		Payload: []byte(`{"model":"gpt-5.6-sol","input":"hello","reasoning":{"summary":"detailed"},"stream_options":{"reasoning_summary_delivery":"sequential_cutoff","include_usage":true}}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat:   sdktranslator.FromString("openai-response"),
+		ResponseFormat: sdktranslator.FromString("openai-response"),
+		Stream:         true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteStream error: %v", err)
+	}
+
+	var output bytes.Buffer
+	for chunk := range result.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+		output.Write(chunk.Payload)
+	}
+	if !strings.Contains(output.String(), `"type":"response.reasoning_summary_text.done"`) {
+		t.Fatalf("missing sequential-cutoff summary event; output=%s", output.String())
+	}
+}
+
 func TestCodexExecutorTransportFailureBeforeTerminalIsRequestScoped(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -491,6 +542,82 @@ func TestCodexTerminalStreamErrIgnoresRateLimitTerminalErrors(t *testing.T) {
 	_, _, ok := codexTerminalStreamErr([]byte(`{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"Rate limit reached."}}`))
 	if ok {
 		t.Fatal("rate limit terminal error should not be handled by replay terminal error path")
+	}
+}
+
+func TestCodexTerminalFailureErrClassifiesStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		event      string
+		wantStatus int
+	}{
+		{
+			name:       "invalid request",
+			event:      `{"type":"error","error":{"type":"invalid_request_error","code":"invalid_value","message":"Invalid input."}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "cyber policy",
+			event:      `{"type":"error","error":{"type":"invalid_request","code":"cyber_policy","message":"This content was flagged for possible cybersecurity risk."}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "authentication",
+			event:      `{"type":"response.failed","response":{"error":{"type":"authentication_error","code":"invalid_api_key","message":"Invalid token."}}}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "rate limit",
+			event:      `{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"Rate limit reached."}}`,
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			name:       "unknown upstream failure",
+			event:      `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"unknown","message":"Upstream failed."}}}`,
+			wantStatus: http.StatusBadGateway,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			streamErr, _, ok := codexTerminalFailureErr([]byte(tc.event))
+			if !ok {
+				t.Fatal("expected terminal failure to be handled")
+			}
+			if got := streamErr.StatusCode(); got != tc.wantStatus {
+				t.Fatalf("status code = %d, want %d; err=%v", got, tc.wantStatus, streamErr)
+			}
+		})
+	}
+}
+
+func TestCodexTerminalStreamErrHandlesUsageLimitErrorEvent(t *testing.T) {
+	streamErr, _, ok := codexTerminalStreamErr([]byte(`{"type":"error","error":{"type":"usage_limit_reached","message":"You've hit your usage limit.","resets_in_seconds":300}}`))
+	if !ok {
+		t.Fatal("expected usage_limit_reached terminal error to be handled")
+	}
+	if got := statusCodeFromTestError(t, streamErr); got != http.StatusTooManyRequests {
+		t.Fatalf("status code = %d, want %d", got, http.StatusTooManyRequests)
+	}
+	retryAfter := streamErr.RetryAfter()
+	if retryAfter == nil {
+		t.Fatal("expected retryAfter from usage_limit_reached terminal error")
+	}
+	if *retryAfter != 300*time.Second {
+		t.Fatalf("retryAfter = %v, want %v", *retryAfter, 300*time.Second)
+	}
+}
+
+func TestCodexTerminalStreamErrHandlesUsageLimitResponseFailed(t *testing.T) {
+	streamErr, _, ok := codexTerminalStreamErr([]byte(`{"type":"response.failed","response":{"error":{"type":"usage_limit_reached","message":"usage limit reached","resets_in_seconds":60}}}`))
+	if !ok {
+		t.Fatal("expected usage_limit_reached response.failed terminal error to be handled")
+	}
+	if got := statusCodeFromTestError(t, streamErr); got != http.StatusTooManyRequests {
+		t.Fatalf("status code = %d, want %d", got, http.StatusTooManyRequests)
+	}
+	if streamErr.RetryAfter() == nil {
+		t.Fatal("expected retryAfter from usage_limit_reached response.failed terminal error")
 	}
 }
 
