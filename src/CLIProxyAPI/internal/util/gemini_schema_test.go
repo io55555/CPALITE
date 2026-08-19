@@ -1532,4 +1532,3 @@ func TestSortByDepthUsesSegmentsAndIsStable(t *testing.T) {
 		t.Fatalf("sortByDepth() = %v, want %v", paths, want)
 	}
 }
-
