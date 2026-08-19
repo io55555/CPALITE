@@ -42,6 +42,35 @@ func (s *requestPrepareStore) lastAuth() *Auth {
 	return s.last.Clone()
 }
 
+type lightweightHydrateStore struct {
+	listCalls        atomic.Int32
+	lightweightCalls atomic.Int32
+	hydrateCalls     atomic.Int32
+	stub             *Auth
+	full             *Auth
+}
+
+func (s *lightweightHydrateStore) List(context.Context) ([]*Auth, error) {
+	s.listCalls.Add(1)
+	return []*Auth{s.full.Clone()}, nil
+}
+
+func (s *lightweightHydrateStore) ListLightweight(context.Context) ([]*Auth, error) {
+	s.lightweightCalls.Add(1)
+	return []*Auth{s.stub.Clone()}, nil
+}
+
+func (s *lightweightHydrateStore) HydrateAuth(_ context.Context, id string) (*Auth, error) {
+	s.hydrateCalls.Add(1)
+	if id != s.stub.ID {
+		return nil, errors.New("unexpected hydrate id")
+	}
+	return s.full.Clone(), nil
+}
+
+func (s *lightweightHydrateStore) Save(context.Context, *Auth) (string, error) { return "", nil }
+func (s *lightweightHydrateStore) Delete(context.Context, string) error        { return nil }
+
 type requestPrepareExecutor struct {
 	prepareCalls atomic.Int32
 	executeCalls atomic.Int32
@@ -398,6 +427,66 @@ func TestManagerExecute_PreparesAndPersistsMissingRequestAuthMetadata(t *testing
 	}
 	if got := executor.prepareCalls.Load(); got != 1 {
 		t.Fatalf("prepare calls after second execute = %d, want 1", got)
+	}
+}
+
+func TestManagerLoadUsesLightweightStoreAndHydratesBeforeRequest(t *testing.T) {
+	const model = "gemini-3.1-pro"
+	stub := &Auth{
+		ID:       "sqlite-auth",
+		Provider: "antigravity",
+		Status:   StatusActive,
+		Attributes: map[string]string{
+			AttributeSQLiteStub: "true",
+			AttributePath:       "sqlite-auth.json",
+		},
+	}
+	full := &Auth{
+		ID:       "sqlite-auth",
+		Provider: "antigravity",
+		Status:   StatusActive,
+		Metadata: map[string]any{"access_token": "secret"},
+	}
+	store := &lightweightHydrateStore{stub: stub, full: full}
+	executor := &requestPrepareExecutor{}
+	manager := NewManager(store, nil, nil)
+	manager.RegisterExecutor(executor)
+
+	if err := manager.Load(context.Background()); err != nil {
+		t.Fatalf("load manager: %v", err)
+	}
+	if got := store.lightweightCalls.Load(); got != 1 {
+		t.Fatalf("lightweight list calls = %d, want 1", got)
+	}
+	if got := store.listCalls.Load(); got != 0 {
+		t.Fatalf("full list calls = %d, want 0", got)
+	}
+	current, ok := manager.GetByID(stub.ID)
+	if !ok {
+		t.Fatal("expected lightweight auth in manager")
+	}
+	if !IsSQLiteAuthStub(current) || current.Metadata != nil {
+		t.Fatalf("manager auth = %#v, want lightweight stub without metadata", current)
+	}
+	registry.GetGlobalRegistry().RegisterClient(stub.ID, "antigravity", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(stub.ID) })
+
+	resp, errExecute := manager.Execute(context.Background(), []string{"antigravity"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute != nil {
+		t.Fatalf("Execute error: %v", errExecute)
+	}
+	if string(resp.Payload) != "ok" {
+		t.Fatalf("payload = %q, want ok", string(resp.Payload))
+	}
+	if got := store.hydrateCalls.Load(); got != 1 {
+		t.Fatalf("hydrate calls = %d, want 1", got)
+	}
+	if got := executor.prepareCalls.Load(); got != 1 {
+		t.Fatalf("prepare calls = %d, want 1", got)
+	}
+	observed := executor.lastObservedAuth()
+	if observed == nil || testStringValue(observed.Metadata["access_token"]) != "secret" {
+		t.Fatalf("executor observed auth = %#v, want hydrated metadata", observed)
 	}
 }
 

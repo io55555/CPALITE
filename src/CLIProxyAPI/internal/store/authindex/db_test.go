@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 func TestStoreUpsertQueryAndDelete(t *testing.T) {
@@ -71,6 +72,66 @@ func TestStoreSyncDirRemovesStaleRows(t *testing.T) {
 	}
 	if result.Total != 0 {
 		t.Fatalf("expected stale row removed, total=%d", result.Total)
+	}
+}
+
+func TestStoreListLightweightReturnsSQLiteStubsWithoutPayload(t *testing.T) {
+	authDir := t.TempDir()
+	path := filepath.Join(authDir, "codex-user.json")
+	if err := os.WriteFile(path, []byte(`{"type":"codex","email":"user@example.com","access_token":"secret","priority":3}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	store := openTestStore(t, authDir)
+	defer func() { _ = store.Close() }()
+
+	if err := store.SyncDir(context.Background()); err != nil {
+		t.Fatalf("sync dir: %v", err)
+	}
+	auths, err := store.ListLightweight(context.Background())
+	if err != nil {
+		t.Fatalf("list lightweight: %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("lightweight len = %d, want 1", len(auths))
+	}
+	got := auths[0]
+	if !coreauth.IsSQLiteAuthStub(got) {
+		t.Fatalf("auth is not sqlite stub: %#v", got.Attributes)
+	}
+	if got.Metadata != nil {
+		t.Fatalf("lightweight metadata = %#v, want nil", got.Metadata)
+	}
+	if got.Provider != "codex" || got.FileName != "codex-user.json" || got.Label != "user@example.com" {
+		t.Fatalf("unexpected lightweight auth: %#v", got)
+	}
+}
+
+func TestStoreHydrateAuthRestoresFullPayload(t *testing.T) {
+	authDir := t.TempDir()
+	path := filepath.Join(authDir, "xai-user.json")
+	if err := os.WriteFile(path, []byte(`{"type":"xai","email":"xai@example.com","access_token":"secret-token"}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	store := openTestStore(t, authDir)
+	defer func() { _ = store.Close() }()
+
+	if err := store.SyncDir(context.Background()); err != nil {
+		t.Fatalf("sync dir: %v", err)
+	}
+	auth, err := store.HydrateAuth(context.Background(), "xai-user.json")
+	if err != nil {
+		t.Fatalf("hydrate auth: %v", err)
+	}
+	if coreauth.IsSQLiteAuthStub(auth) {
+		t.Fatalf("hydrated auth still marked as sqlite stub")
+	}
+	if got, _ := auth.Metadata["access_token"].(string); got != "secret-token" {
+		t.Fatalf("hydrated access_token = %q, want secret-token", got)
+	}
+	if auth.Provider != "xai" || auth.FileName != "xai-user.json" {
+		t.Fatalf("unexpected hydrated auth: %#v", auth)
 	}
 }
 

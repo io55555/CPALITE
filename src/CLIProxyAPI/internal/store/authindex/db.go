@@ -14,14 +14,19 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/synthesizer"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/tidwall/gjson"
 	_ "modernc.org/sqlite"
 )
 
-// Store 维护认证文件目录的 SQLite 轻量索引，文件目录仍是唯一事实来源。
+// Store 维护认证文件目录的 SQLite 轻量索引；文件目录仍是唯一事实来源。
 type Store struct {
 	db      *sql.DB
 	authDir string
+	base    coreauth.Store
+	cfg     *config.Config
+	parser  synthesizer.PluginAuthParser
 }
 
 // Entry 是管理列表可直接返回的轻量认证文件条目。
@@ -91,12 +96,60 @@ func Open(ctx context.Context, authDir string, cfg config.AuthIndexCacheConfig) 
 	return store, nil
 }
 
+// WrapFileStore 在文件 store 外包裹 SQLite 索引层；文件写入仍由 base 负责。
+func WrapFileStore(ctx context.Context, base coreauth.Store, authDir string, cfg *config.Config, parser synthesizer.PluginAuthParser) (coreauth.Store, error) {
+	if cfg == nil || !cfg.AuthIndexCache.Enabled {
+		return base, nil
+	}
+	store, err := Open(ctx, authDir, cfg.AuthIndexCache)
+	if err != nil {
+		return base, err
+	}
+	store.base = base
+	store.SetSynthesisContext(cfg, parser)
+	if err = store.SyncDir(ctx); err != nil {
+		_ = store.Close()
+		return base, err
+	}
+	return store, nil
+}
+
+// SetSynthesisContext 设置按需 hydrate 时需要的运行时配置和插件解析器。
+func (s *Store) SetSynthesisContext(cfg *config.Config, parser synthesizer.PluginAuthParser) {
+	if s == nil {
+		return
+	}
+	s.cfg = cfg
+	s.parser = parser
+}
+
 // Close 关闭索引库。
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// SetBaseDir 同步文件 store 的认证目录，并更新索引目录。
+func (s *Store) SetBaseDir(dir string) {
+	if s == nil {
+		return
+	}
+	if setter, ok := s.base.(interface{ SetBaseDir(string) }); ok {
+		setter.SetBaseDir(dir)
+	}
+	if strings.TrimSpace(dir) != "" {
+		s.authDir = strings.TrimSpace(dir)
+	}
+}
+
+// AuthDir 返回当前索引绑定的认证目录。
+func (s *Store) AuthDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.authDir
 }
 
 func (s *Store) configure(ctx context.Context, cfg config.AuthIndexCacheConfig) error {
@@ -207,13 +260,47 @@ func (s *Store) SyncDir(ctx context.Context) error {
 			stale = append(stale, id)
 		}
 	}
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("auth index: iterate indexed ids: %w", err)
+	}
 	for _, id := range stale {
-		if err = s.Delete(ctx, id); err != nil {
+		if err = s.deleteIndexOnly(ctx, id); err != nil {
 			return err
 		}
 	}
 	_, _ = s.db.ExecContext(ctx, `INSERT INTO auth_meta(k, v) VALUES('last_full_scan_unix', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, strconv.FormatInt(time.Now().Unix(), 10))
 	return nil
+}
+
+// List 返回轻量认证对象，避免启动时常驻完整 JSON payload。
+func (s *Store) List(ctx context.Context) ([]*coreauth.Auth, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth index: store is nil")
+	}
+	if err := s.SyncDir(ctx); err != nil {
+		if s.base != nil {
+			return s.base.List(ctx)
+		}
+		return nil, err
+	}
+	return s.ListLightweight(ctx)
+}
+
+// Save 先写入文件事实来源，再同步 SQLite 索引。
+func (s *Store) Save(ctx context.Context, auth *coreauth.Auth) (string, error) {
+	if s == nil || s.base == nil {
+		return "", fmt.Errorf("auth index: base store is nil")
+	}
+	path, err := s.base.Save(ctx, auth)
+	if err != nil {
+		return path, err
+	}
+	if strings.TrimSpace(path) != "" {
+		if errIndex := s.UpsertFile(ctx, path); errIndex != nil {
+			return path, errIndex
+		}
+	}
+	return path, nil
 }
 
 // UpsertFile 重读单个认证文件并写入索引。
@@ -264,7 +351,7 @@ func (s *Store) UpsertFile(ctx context.Context, path string) error {
 		cooldown_until=excluded.cooldown_until,
 		updated_unix=excluded.updated_unix`,
 		entry.ID, entry.FileName, entry.FilePath, entry.Provider, boolInt(entry.Disabled), boolInt(entry.Unavailable), entry.Status,
-		entry.Email, entry.ProjectID, entry.Account, entry.AccountType, entry.Priority, entry.ModTimeUnix, entry.Size, strings.TrimSpace(hash),
+		entry.Email, entry.ProjectID, entry.Account, entry.AccountType, entry.Priority, entry.ModTimeUnix, entry.Size, hex.EncodeToString(sum[:]),
 		entry.CooldownUntil, entry.UpdatedUnix)
 	if err != nil {
 		return fmt.Errorf("auth index: upsert index: %w", err)
@@ -279,11 +366,39 @@ func (s *Store) UpsertFile(ctx context.Context, path string) error {
 	return nil
 }
 
-// Delete 从索引中删除认证文件记录。
+// Delete 先删除文件事实来源，再删除索引记录。
 func (s *Store) Delete(ctx context.Context, id string) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	if s.base != nil {
+		deleteID := id
+		if filepath.IsAbs(id) {
+			if rel, errRel := filepath.Rel(s.authDir, id); errRel == nil && rel != "" {
+				deleteID = rel
+			}
+		}
+		if err := s.base.Delete(ctx, deleteID); err != nil {
+			return err
+		}
+		id = authIDForPath(filepath.Join(s.authDir, deleteID), s.authDir)
+	}
+	return s.deleteIndexOnly(ctx, id)
+}
+
+// DeleteIndexOnly 仅清理 SQLite 索引，供 watcher 删除事件使用。
+func (s *Store) DeleteIndexOnly(ctx context.Context, id string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.deleteIndexOnly(ctx, id)
+}
+
+func (s *Store) deleteIndexOnly(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil
@@ -342,6 +457,66 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) (QueryResult, erro
 	return result, nil
 }
 
+// ListLightweight 返回不含完整 Metadata 的轻量认证对象，用于降低常驻内存。
+func (s *Store) ListLightweight(ctx context.Context) ([]*coreauth.Auth, error) {
+	result, err := s.Query(ctx, QueryOptions{Page: 1, PageSize: 1_000_000})
+	if err != nil {
+		return nil, err
+	}
+	auths := make([]*coreauth.Auth, 0, len(result.Entries))
+	for _, entry := range result.Entries {
+		auth := authFromEntry(entry)
+		if auth != nil {
+			auths = append(auths, auth)
+		}
+	}
+	return auths, nil
+}
+
+// HydrateAuth 按 ID 从 SQLite payload 或文件目录恢复完整认证对象。
+func (s *Store) HydrateAuth(ctx context.Context, id string) (*coreauth.Auth, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("auth index: store is nil")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("auth index: auth id is empty")
+	}
+	var (
+		payload  string
+		filePath string
+	)
+	err := s.db.QueryRowContext(ctx, `SELECT p.json, i.file_path FROM auth_payload p JOIN auth_index i ON i.id=p.id WHERE p.id=?`, id).Scan(&payload, &filePath)
+	if err != nil {
+		filePath = filepath.Join(s.authDir, id)
+		data, errRead := os.ReadFile(filePath)
+		if errRead != nil {
+			return nil, fmt.Errorf("auth index: hydrate %s: query payload: %v; read file: %w", id, err, errRead)
+		}
+		payload = string(data)
+	}
+	sctx := &synthesizer.SynthesisContext{
+		Config:           s.cfg,
+		AuthDir:          s.authDir,
+		Now:              time.Now(),
+		IDGenerator:      synthesizer.NewStableIDGenerator(),
+		PluginAuthParser: s.parser,
+	}
+	auths, err := synthesizer.SynthesizeAuthFile(sctx, filePath, []byte(payload))
+	if err != nil {
+		return nil, err
+	}
+	for _, auth := range auths {
+		if auth != nil && strings.EqualFold(strings.TrimSpace(auth.ID), id) {
+			return auth, nil
+		}
+	}
+	if len(auths) > 0 && auths[0] != nil {
+		return auths[0], nil
+	}
+	return nil, fmt.Errorf("auth index: hydrate %s produced no auth", id)
+}
+
 func buildWhere(opts QueryOptions) (string, []any) {
 	clauses := make([]string, 0, 4)
 	args := make([]any, 0, 4)
@@ -366,6 +541,57 @@ func buildWhere(opts QueryOptions) (string, []any) {
 		return "", nil
 	}
 	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func authFromEntry(entry Entry) *coreauth.Auth {
+	id := strings.TrimSpace(entry.ID)
+	provider := strings.ToLower(strings.TrimSpace(entry.Provider))
+	if id == "" || provider == "" {
+		return nil
+	}
+	status := coreauth.Status(strings.TrimSpace(entry.Status))
+	if status == "" {
+		status = coreauth.StatusActive
+	}
+	auth := &coreauth.Auth{
+		ID:          id,
+		Provider:    provider,
+		FileName:    entry.FileName,
+		Label:       firstNonEmpty(entry.Email, entry.Account, entry.ProjectID, entry.FileName),
+		Status:      status,
+		Disabled:    entry.Disabled,
+		Unavailable: entry.Unavailable,
+		Attributes: map[string]string{
+			coreauth.AttributePath:          entry.FilePath,
+			coreauth.AttributeSource:        entry.FilePath,
+			coreauth.AttributeSourceBackend: coreauth.AuthSourceFile,
+			coreauth.AttributeSQLiteStub:    "true",
+		},
+		CreatedAt: time.Unix(entry.ModTimeUnix, 0).UTC(),
+		UpdatedAt: time.Unix(entry.ModTimeUnix, 0).UTC(),
+	}
+	if entry.Email != "" {
+		auth.Attributes["email"] = entry.Email
+	}
+	if entry.ProjectID != "" {
+		auth.Attributes["project_id"] = entry.ProjectID
+	}
+	if entry.AccountType != "" {
+		auth.Attributes[coreauth.AttributeAuthKind] = entry.AccountType
+	}
+	if entry.Account != "" {
+		auth.Attributes["account"] = entry.Account
+	}
+	if entry.Priority != 0 {
+		auth.Attributes[coreauth.AttributeWeight] = strconv.Itoa(entry.Priority)
+		auth.Attributes["priority"] = strconv.Itoa(entry.Priority)
+	}
+	if entry.CooldownUntil > 0 {
+		auth.NextRetryAfter = time.Unix(entry.CooldownUntil, 0).UTC()
+		auth.Unavailable = true
+	}
+	auth.EnsureIndex()
+	return auth
 }
 
 func entryFromJSON(path, authDir string, data []byte, info os.FileInfo, hash string) Entry {

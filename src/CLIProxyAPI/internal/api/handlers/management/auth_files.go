@@ -324,7 +324,14 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 	for _, indexed := range result.Entries {
 		if h.authManager != nil {
 			if auth, ok := h.authManager.GetByID(indexed.ID); ok && auth != nil {
-				if entry := h.buildAuthFileEntry(auth); entry != nil {
+				if !coreauth.IsSQLiteAuthStub(auth) {
+					entry := h.buildAuthFileEntry(auth)
+					if entry != nil {
+						files = append(files, entry)
+						continue
+					}
+				}
+				if entry := mergeAuthIndexRuntimeState(authIndexEntryToGinH(indexed), auth); entry != nil {
 					files = append(files, entry)
 					continue
 				}
@@ -334,6 +341,29 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 	}
 	h.respondAuthFileList(c, files, opts, result.Total, true)
 	return true
+}
+
+func mergeAuthIndexRuntimeState(entry gin.H, auth *coreauth.Auth) gin.H {
+	if entry == nil || auth == nil {
+		return entry
+	}
+	entry["success"] = auth.Success
+	entry["failed"] = auth.Failed
+	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
+	if auth.NextRetryAfter.After(time.Now()) {
+		entry["cooldown_until"] = auth.NextRetryAfter
+		entry["next_retry_after"] = auth.NextRetryAfter
+		entry["unavailable"] = true
+	}
+	if cooldownUntil, cooldownModel, modelStates := authFileCooldownSummary(auth); !cooldownUntil.IsZero() {
+		entry["cooldown_until"] = cooldownUntil
+		entry["cooldown_model"] = cooldownModel
+		entry["next_retry_after"] = cooldownUntil
+		if len(modelStates) > 0 {
+			entry["model_states"] = modelStates
+		}
+	}
+	return entry
 }
 
 // GetAuthFileModels returns the models supported by a specific auth file

@@ -103,9 +103,18 @@ type Auth struct {
 const (
 	AttributeAuthIndexSeed   = "auth_index_seed"
 	AttributePluginVirtual   = "plugin_virtual"
+	AttributeSQLiteStub      = "sqlite_auth_stub"
 	AttributeVirtualSource   = "virtual_source"
 	pluginVirtualAttrEnabled = "true"
 )
+
+// IsSQLiteAuthStub 判断认证对象是否为 SQLite 轻量缓存占位对象。
+func IsSQLiteAuthStub(auth *Auth) bool {
+	if auth == nil || auth.Attributes == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(auth.Attributes[AttributeSQLiteStub]), "true")
+}
 
 // MarkPluginVirtualAuth marks an auth that was expanded from a plugin-owned source file.
 func MarkPluginVirtualAuth(auth *Auth, sourcePath string, ordinal int) {

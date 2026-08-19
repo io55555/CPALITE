@@ -681,6 +681,9 @@ func (m *scheduledAuthMeta) supportsModel(modelKey string) bool {
 	if modelKey == "" {
 		return true
 	}
+	if IsSQLiteAuthStub(m.auth) {
+		return true
+	}
 	if len(m.supportedModelSet) == 0 {
 		return m.openAICompatWithoutModelSnapshot()
 	}

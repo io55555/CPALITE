@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
@@ -291,6 +292,16 @@ type Manager struct {
 	persistMu      sync.Mutex
 	persistDirty   map[string]*Auth
 	persistStarted sync.Once
+
+	hydrateMu    sync.Mutex
+	hydrateLRU   *list.List
+	hydrateCache map[string]*list.Element
+	hydrateLimit int
+}
+
+type hydratedAuthCacheEntry struct {
+	id   string
+	auth *Auth
 }
 
 // NewManager constructs a manager with optional custom selector and hook.
@@ -314,6 +325,9 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		modelPoolOffsets:      make(map[string]int),
 		removedAuthIDs:        make(map[string]struct{}),
 		persistDirty:          make(map[string]*Auth),
+		hydrateLRU:            list.New(),
+		hydrateCache:          make(map[string]*list.Element),
+		hydrateLimit:          128,
 	}
 	// atomic.Value requires non-nil initial value.
 	manager.runtimeConfig.Store(&internalconfig.Config{})
@@ -602,6 +616,7 @@ func (m *Manager) SetStore(store Store) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.store = store
+	m.clearHydrateCacheLocked()
 }
 
 // SetCooldownStateStore swaps the independent runtime cooldown state store.
@@ -660,6 +675,7 @@ func (m *Manager) setConfigSnapshotLocked(cfg *internalconfig.Config) bool {
 	oldCooldownStore := m.cooldownStore
 	m.mu.RUnlock()
 	m.runtimeConfig.Store(cfg)
+	m.setHydrateCacheLimit(cfg.AuthIndexCache.LRUSize)
 	clearedCooldowns := m.clearDisabledCooldownStates(cfg)
 	if clearedCooldowns && oldCooldownStore != nil {
 		m.mu.Lock()
@@ -2503,6 +2519,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	if m.scheduler != nil {
 		m.scheduler.upsertAuth(authClone)
 	}
+	m.invalidateHydrateCache(auth.ID)
 	m.queueRefreshReschedule(auth.ID)
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthRegistered(ctx, auth.Clone())
@@ -2597,6 +2614,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	if m.scheduler != nil {
 		m.scheduler.upsertAuth(authClone)
 	}
+	m.invalidateHydrateCache(auth.ID)
 	m.queueRefreshReschedule(auth.ID)
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
@@ -2647,6 +2665,7 @@ func (m *Manager) Remove(ctx context.Context, id string) {
 	if m.scheduler != nil {
 		m.scheduler.removeAuth(id)
 	}
+	m.invalidateHydrateCache(id)
 	m.queueRefreshUnschedule(id)
 	m.invalidateSessionAffinity(id)
 
@@ -2669,6 +2688,160 @@ func (m *Manager) invalidateSessionAffinity(authID string) {
 	}
 }
 
+func (m *Manager) hydrateRequestAuth(ctx context.Context, auth *Auth) (*Auth, error) {
+	if m == nil || auth == nil || !IsSQLiteAuthStub(auth) {
+		return auth, nil
+	}
+	id := strings.TrimSpace(auth.ID)
+	if id == "" {
+		return auth, nil
+	}
+	if cached := m.getHydratedAuth(id); cached != nil {
+		mergeStubRuntimeState(cached, auth)
+		return cached, nil
+	}
+	m.mu.RLock()
+	hydrator, _ := m.store.(AuthHydrator)
+	m.mu.RUnlock()
+	if hydrator == nil {
+		return auth, nil
+	}
+	full, err := hydrator.HydrateAuth(ctx, id)
+	if err != nil {
+		return auth, err
+	}
+	if full == nil {
+		return auth, nil
+	}
+	full.EnsureIndex()
+	mergeStubRuntimeState(full, auth)
+	m.putHydratedAuth(full)
+	return full.Clone(), nil
+}
+
+func mergeStubRuntimeState(full *Auth, stub *Auth) {
+	if full == nil || stub == nil {
+		return
+	}
+	full.Success = stub.Success
+	full.Failed = stub.Failed
+	full.recentRequests = stub.recentRequests
+	if stub.NextRetryAfter.After(time.Now()) && (full.NextRetryAfter.IsZero() || stub.NextRetryAfter.After(full.NextRetryAfter)) {
+		full.NextRetryAfter = stub.NextRetryAfter
+		full.Unavailable = true
+		if full.Status == "" || full.Status == StatusActive {
+			full.Status = stub.Status
+		}
+		if strings.TrimSpace(full.StatusMessage) == "" {
+			full.StatusMessage = stub.StatusMessage
+		}
+	}
+	if len(stub.ModelStates) > 0 && len(full.ModelStates) == 0 {
+		full.ModelStates = make(map[string]*ModelState, len(stub.ModelStates))
+		for model, state := range stub.ModelStates {
+			full.ModelStates[model] = state.Clone()
+		}
+	}
+}
+
+func (m *Manager) getHydratedAuth(id string) *Auth {
+	if m == nil || id == "" {
+		return nil
+	}
+	m.hydrateMu.Lock()
+	defer m.hydrateMu.Unlock()
+	element := m.hydrateCache[id]
+	if element == nil {
+		return nil
+	}
+	m.hydrateLRU.MoveToFront(element)
+	entry, _ := element.Value.(*hydratedAuthCacheEntry)
+	if entry == nil || entry.auth == nil {
+		return nil
+	}
+	return entry.auth.Clone()
+}
+
+func (m *Manager) putHydratedAuth(auth *Auth) {
+	if m == nil || auth == nil || strings.TrimSpace(auth.ID) == "" {
+		return
+	}
+	m.hydrateMu.Lock()
+	defer m.hydrateMu.Unlock()
+	if m.hydrateLRU == nil {
+		m.hydrateLRU = list.New()
+	}
+	if m.hydrateCache == nil {
+		m.hydrateCache = make(map[string]*list.Element)
+	}
+	id := strings.TrimSpace(auth.ID)
+	if element := m.hydrateCache[id]; element != nil {
+		if entry, _ := element.Value.(*hydratedAuthCacheEntry); entry != nil {
+			entry.auth = auth.Clone()
+		}
+		m.hydrateLRU.MoveToFront(element)
+		return
+	}
+	element := m.hydrateLRU.PushFront(&hydratedAuthCacheEntry{id: id, auth: auth.Clone()})
+	m.hydrateCache[id] = element
+	m.trimHydrateCacheLocked()
+}
+
+func (m *Manager) trimHydrateCacheLocked() {
+	if m == nil || m.hydrateLRU == nil {
+		return
+	}
+	limit := m.hydrateLimit
+	if limit <= 0 {
+		limit = 128
+	}
+	for m.hydrateLRU.Len() > limit {
+		back := m.hydrateLRU.Back()
+		if back == nil {
+			return
+		}
+		if entry, _ := back.Value.(*hydratedAuthCacheEntry); entry != nil {
+			delete(m.hydrateCache, entry.id)
+		}
+		m.hydrateLRU.Remove(back)
+	}
+}
+
+func (m *Manager) invalidateHydrateCache(id string) {
+	if m == nil || id == "" {
+		return
+	}
+	m.hydrateMu.Lock()
+	defer m.hydrateMu.Unlock()
+	if element := m.hydrateCache[id]; element != nil {
+		delete(m.hydrateCache, id)
+		m.hydrateLRU.Remove(element)
+	}
+}
+
+func (m *Manager) clearHydrateCacheLocked() {
+	if m == nil {
+		return
+	}
+	m.hydrateMu.Lock()
+	defer m.hydrateMu.Unlock()
+	m.hydrateLRU = list.New()
+	m.hydrateCache = make(map[string]*list.Element)
+}
+
+func (m *Manager) setHydrateCacheLimit(limit int) {
+	if m == nil {
+		return
+	}
+	if limit <= 0 {
+		limit = 128
+	}
+	m.hydrateMu.Lock()
+	m.hydrateLimit = limit
+	m.trimHydrateCacheLocked()
+	m.hydrateMu.Unlock()
+}
+
 // Load resets manager state from the backing store.
 func (m *Manager) Load(ctx context.Context) error {
 	m.mu.Lock()
@@ -2676,11 +2849,20 @@ func (m *Manager) Load(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
-	items, err := m.store.List(ctx)
+	var (
+		items []*Auth
+		err   error
+	)
+	if lightweight, ok := m.store.(LightweightAuthProvider); ok && lightweight != nil {
+		items, err = lightweight.ListLightweight(ctx)
+	} else {
+		items, err = m.store.List(ctx)
+	}
 	if err != nil {
 		m.mu.Unlock()
 		return err
 	}
+	m.clearHydrateCacheLocked()
 	m.auths = make(map[string]*Auth, len(items))
 	for _, auth := range items {
 		if auth == nil || auth.ID == "" {
@@ -3113,10 +3295,6 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 		}
 		execCtx = contextWithRequestedModelAlias(execCtx, opts, routeModel)
 
-		models, pooled, aliasResult := m.preparedExecutionModelsWithAlias(auth, routeModel)
-		if len(models) == 0 {
-			continue
-		}
 		attempted[auth.ID] = struct{}{}
 		var errPrepare error
 		auth, errPrepare = m.prepareRequestAuth(execCtx, executor, auth)
@@ -3127,6 +3305,10 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			result := Result{AuthID: auth.ID, Provider: provider, Model: routeModel, Success: false, Error: resultErrorFromError(errPrepare)}
 			m.MarkResult(execCtx, result)
 			lastErr = errPrepare
+			continue
+		}
+		models, pooled, aliasResult := m.preparedExecutionModelsWithAlias(auth, routeModel)
+		if len(models) == 0 {
 			continue
 		}
 		var authErr error
@@ -3257,10 +3439,6 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 		}
 		execCtx = contextWithRequestedModelAlias(execCtx, opts, routeModel)
 
-		models, pooled, aliasResult := m.preparedExecutionModelsWithAlias(auth, routeModel)
-		if len(models) == 0 {
-			continue
-		}
 		attempted[auth.ID] = struct{}{}
 		var errPrepare error
 		auth, errPrepare = m.prepareRequestAuth(execCtx, executor, auth)
@@ -3271,6 +3449,10 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			result := Result{AuthID: auth.ID, Provider: provider, Model: routeModel, Success: false, Error: resultErrorFromError(errPrepare)}
 			m.MarkResult(execCtx, result)
 			lastErr = errPrepare
+			continue
+		}
+		models, pooled, aliasResult := m.preparedExecutionModelsWithAlias(auth, routeModel)
+		if len(models) == 0 {
 			continue
 		}
 		var authErr error
@@ -3445,19 +3627,6 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
-		models, pooled, aliasResult := m.preparedExecutionModelsWithAlias(auth, routeModel)
-		if selection != nil && aliasResult.ForceMapping && responseAlias != "" {
-			aliasResult.OriginalAlias = responseAlias
-		}
-		if len(models) == 0 {
-			if selection != nil {
-				releaseAttempt()
-				if errEnd := m.endHomeSelectionBeforeRedispatch(ctx, selection, "no_execution_models"); errEnd != nil {
-					return nil, errEnd
-				}
-			}
-			continue
-		}
 		attempted[auth.ID] = struct{}{}
 		var errPrepare error
 		if selection != nil {
@@ -3483,6 +3652,19 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			lastErr = errPrepare
 			if selection != nil {
 				if errEnd := m.endHomeSelectionBeforeRedispatch(ctx, selection, "prepare_failed"); errEnd != nil {
+					return nil, errEnd
+				}
+			}
+			continue
+		}
+		models, pooled, aliasResult := m.preparedExecutionModelsWithAlias(auth, routeModel)
+		if selection != nil && aliasResult.ForceMapping && responseAlias != "" {
+			aliasResult.OriginalAlias = responseAlias
+		}
+		if len(models) == 0 {
+			if selection != nil {
+				releaseAttempt()
+				if errEnd := m.endHomeSelectionBeforeRedispatch(ctx, selection, "no_execution_models"); errEnd != nil {
 					return nil, errEnd
 				}
 			}
@@ -3775,6 +3957,11 @@ func (m *Manager) prepareRequestAuth(ctx context.Context, executor ProviderExecu
 	if m == nil || executor == nil || auth == nil {
 		return auth, nil
 	}
+	hydrated, errHydrate := m.hydrateRequestAuth(ctx, auth)
+	if errHydrate != nil {
+		return auth, errHydrate
+	}
+	auth = hydrated
 	preparer, ok := executor.(RequestAuthPreparer)
 	if !ok || preparer == nil || !preparer.ShouldPrepareRequestAuth(auth) {
 		return auth, nil
@@ -3797,7 +3984,9 @@ func (m *Manager) prepareRequestAuth(ctx context.Context, executor ProviderExecu
 	target := auth.Clone()
 	m.mu.RLock()
 	if current := m.auths[id]; current != nil {
-		target = current.Clone()
+		if !IsSQLiteAuthStub(current) {
+			target = current.Clone()
+		}
 	}
 	m.mu.RUnlock()
 

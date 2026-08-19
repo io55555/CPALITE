@@ -4,8 +4,9 @@
 package cliproxy
 
 import (
-	"path/filepath"
+	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,10 +14,12 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/openai_compat_state"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/store/authindex"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	log "github.com/sirupsen/logrus"
 )
 
 // Builder constructs a Service instance with customizable providers.
@@ -223,6 +226,16 @@ func (b *Builder) Build() (*Service, error) {
 		tokenStore := sdkAuth.GetTokenStore()
 		if dirSetter, ok := tokenStore.(interface{ SetBaseDir(string) }); ok && b.cfg != nil {
 			dirSetter.SetBaseDir(b.cfg.AuthDir)
+		}
+		if b.cfg != nil && b.cfg.AuthIndexCache.Enabled {
+			if _, ok := tokenStore.(*sdkAuth.FileTokenStore); ok {
+				wrapped, errWrap := authindex.WrapFileStore(context.Background(), tokenStore, b.cfg.AuthDir, b.cfg, b.pluginHost)
+				if errWrap != nil {
+					log.WithError(errWrap).Warn("auth index cache disabled for core auth store")
+				} else {
+					tokenStore = wrapped
+				}
+			}
 		}
 
 		strategy := ""

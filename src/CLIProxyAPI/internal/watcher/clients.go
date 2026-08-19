@@ -75,71 +75,11 @@ func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string
 	}
 
 	if rescanAuth {
-		w.authRescanMu.Lock()
-		cacheAuthContents := log.IsLevelEnabled(log.DebugLevel)
-		newAuthHashes := make(map[string]string)
-		var newAuthContents map[string]*coreauth.Auth
-		if cacheAuthContents {
-			newAuthContents = make(map[string]*coreauth.Auth)
+		if cfg.AuthIndexCache.Enabled {
+			w.loadAuthIndexSnapshot(cfg)
+		} else {
+			w.loadFileAuthSnapshot(cfg)
 		}
-		newFileAuthsByPath := make(map[string]map[string]*coreauth.Auth)
-
-		w.clientsMutex.RLock()
-		parser := w.pluginAuthParser
-		w.clientsMutex.RUnlock()
-
-		if resolvedAuthDir, errResolveAuthDir := util.ResolveAuthDir(cfg.AuthDir); errResolveAuthDir != nil {
-			log.Errorf("failed to resolve auth directory for hash cache: %v", errResolveAuthDir)
-		} else if resolvedAuthDir != "" {
-			entries, errReadDir := os.ReadDir(resolvedAuthDir)
-			if errReadDir != nil {
-				log.Errorf("failed to read auth directory for hash cache: %v", errReadDir)
-			} else {
-				for _, entry := range entries {
-					if entry == nil || entry.IsDir() {
-						continue
-					}
-					name := entry.Name()
-					if !strings.HasSuffix(strings.ToLower(name), ".json") {
-						continue
-					}
-					fullPath := filepath.Join(resolvedAuthDir, name)
-					if data, errReadFile := os.ReadFile(fullPath); errReadFile == nil && len(data) > 0 {
-						sum := sha256.Sum256(data)
-						normalizedPath := w.normalizeAuthPath(fullPath)
-						newAuthHashes[normalizedPath] = hex.EncodeToString(sum[:])
-						// Parse and cache auth content for future diff comparisons (debug only).
-						if cacheAuthContents {
-							var auth coreauth.Auth
-							if errParse := json.Unmarshal(data, &auth); errParse == nil {
-								newAuthContents[normalizedPath] = &auth
-							}
-						}
-						ctx := &synthesizer.SynthesisContext{
-							Config:           cfg,
-							AuthDir:          resolvedAuthDir,
-							Now:              time.Now(),
-							IDGenerator:      synthesizer.NewStableIDGenerator(),
-							PluginAuthParser: parser,
-						}
-						generated, errSynthesize := synthesizer.SynthesizeAuthFile(ctx, fullPath, data)
-						if errSynthesize != nil {
-							log.WithError(errSynthesize).Warnf("skipping auth file %s", name)
-						} else if len(generated) > 0 {
-							if pathAuths := authSliceToMap(generated); len(pathAuths) > 0 {
-								newFileAuthsByPath[normalizedPath] = authIDSet(pathAuths)
-							}
-						}
-					}
-				}
-			}
-		}
-		w.clientsMutex.Lock()
-		w.lastAuthHashes = newAuthHashes
-		w.lastAuthContents = newAuthContents
-		w.fileAuthsByPath = newFileAuthsByPath
-		w.clientsMutex.Unlock()
-		w.authRescanMu.Unlock()
 	}
 
 	totalNewClients := authFileCount + geminiAPIKeyCount + vertexCompatAPIKeyCount + claudeAPIKeyCount + codexAPIKeyCount + xaiAPIKeyCount + openAICompatCount
@@ -326,6 +266,130 @@ func (w *Watcher) syncAuthIndexDir(cfg *config.Config) {
 	}
 }
 
+func (w *Watcher) loadAuthIndexSnapshot(cfg *config.Config) {
+	if w == nil || cfg == nil || !cfg.AuthIndexCache.Enabled {
+		return
+	}
+	w.authRescanMu.Lock()
+	defer w.authRescanMu.Unlock()
+
+	authDir, err := util.ResolveAuthDir(cfg.AuthDir)
+	if err != nil || strings.TrimSpace(authDir) == "" {
+		log.WithError(err).Warn("auth index snapshot skipped: resolve auth dir failed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	store, err := authindex.Open(ctx, authDir, cfg.AuthIndexCache)
+	if err != nil {
+		log.WithError(err).Warn("auth index snapshot skipped")
+		return
+	}
+	defer func() { _ = store.Close() }()
+	if err = store.SyncDir(ctx); err != nil {
+		log.WithError(err).Warn("auth index snapshot sync failed")
+		return
+	}
+	auths, err := store.ListLightweight(ctx)
+	if err != nil {
+		log.WithError(err).Warn("auth index snapshot load failed")
+		return
+	}
+	newFileAuthsByPath := make(map[string]map[string]*coreauth.Auth, len(auths))
+	for _, auth := range auths {
+		if auth == nil || strings.TrimSpace(auth.ID) == "" {
+			continue
+		}
+		path := strings.TrimSpace(auth.Attributes[coreauth.AttributePath])
+		if path == "" {
+			path = filepath.Join(authDir, auth.ID)
+		}
+		normalizedPath := w.normalizeAuthPath(path)
+		if newFileAuthsByPath[normalizedPath] == nil {
+			newFileAuthsByPath[normalizedPath] = make(map[string]*coreauth.Auth)
+		}
+		newFileAuthsByPath[normalizedPath][auth.ID] = nil
+	}
+	w.clientsMutex.Lock()
+	w.lastAuthHashes = make(map[string]string)
+	w.lastAuthContents = nil
+	w.fileAuthsByPath = newFileAuthsByPath
+	w.clientsMutex.Unlock()
+	log.Debugf("auth index snapshot loaded %d lightweight auth entries", len(auths))
+}
+
+func (w *Watcher) loadFileAuthSnapshot(cfg *config.Config) {
+	if w == nil || cfg == nil {
+		return
+	}
+	w.authRescanMu.Lock()
+	defer w.authRescanMu.Unlock()
+
+	cacheAuthContents := log.IsLevelEnabled(log.DebugLevel)
+	newAuthHashes := make(map[string]string)
+	var newAuthContents map[string]*coreauth.Auth
+	if cacheAuthContents {
+		newAuthContents = make(map[string]*coreauth.Auth)
+	}
+	newFileAuthsByPath := make(map[string]map[string]*coreauth.Auth)
+
+	w.clientsMutex.RLock()
+	parser := w.pluginAuthParser
+	w.clientsMutex.RUnlock()
+
+	if resolvedAuthDir, errResolveAuthDir := util.ResolveAuthDir(cfg.AuthDir); errResolveAuthDir != nil {
+		log.Errorf("failed to resolve auth directory for hash cache: %v", errResolveAuthDir)
+	} else if resolvedAuthDir != "" {
+		entries, errReadDir := os.ReadDir(resolvedAuthDir)
+		if errReadDir != nil {
+			log.Errorf("failed to read auth directory for hash cache: %v", errReadDir)
+		} else {
+			for _, entry := range entries {
+				if entry == nil || entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				if !strings.HasSuffix(strings.ToLower(name), ".json") {
+					continue
+				}
+				fullPath := filepath.Join(resolvedAuthDir, name)
+				if data, errReadFile := os.ReadFile(fullPath); errReadFile == nil && len(data) > 0 {
+					sum := sha256.Sum256(data)
+					normalizedPath := w.normalizeAuthPath(fullPath)
+					newAuthHashes[normalizedPath] = hex.EncodeToString(sum[:])
+					// 仅在 debug 日志下缓存原始 auth，避免正常运行常驻完整对象。
+					if cacheAuthContents {
+						var auth coreauth.Auth
+						if errParse := json.Unmarshal(data, &auth); errParse == nil {
+							newAuthContents[normalizedPath] = &auth
+						}
+					}
+					ctx := &synthesizer.SynthesisContext{
+						Config:           cfg,
+						AuthDir:          resolvedAuthDir,
+						Now:              time.Now(),
+						IDGenerator:      synthesizer.NewStableIDGenerator(),
+						PluginAuthParser: parser,
+					}
+					generated, errSynthesize := synthesizer.SynthesizeAuthFile(ctx, fullPath, data)
+					if errSynthesize != nil {
+						log.WithError(errSynthesize).Warnf("skipping auth file %s", name)
+					} else if len(generated) > 0 {
+						if pathAuths := authSliceToMap(generated); len(pathAuths) > 0 {
+							newFileAuthsByPath[normalizedPath] = authIDSet(pathAuths)
+						}
+					}
+				}
+			}
+		}
+	}
+	w.clientsMutex.Lock()
+	w.lastAuthHashes = newAuthHashes
+	w.lastAuthContents = newAuthContents
+	w.fileAuthsByPath = newFileAuthsByPath
+	w.clientsMutex.Unlock()
+}
+
 func (w *Watcher) syncAuthIndexFile(cfg *config.Config, path string) {
 	if w == nil || cfg == nil || !cfg.AuthIndexCache.Enabled || strings.TrimSpace(path) == "" {
 		return
@@ -376,7 +440,7 @@ func (w *Watcher) syncAuthIndexDelete(path string) {
 		return
 	}
 	defer func() { _ = store.Close() }()
-	if err = store.Delete(ctx, id); err != nil {
+	if err = store.DeleteIndexOnly(ctx, id); err != nil {
 		log.WithError(err).Warnf("auth index delete sync failed for %s", filepath.Base(path))
 	}
 }
@@ -455,8 +519,7 @@ func (w *Watcher) loadFileClients(cfg *config.Config) int {
 		}
 		authFileCount++
 		log.Debugf("processing auth file %d: %s", authFileCount, name)
-		fullPath := filepath.Join(authDir, name)
-		if data, errReadFile := os.ReadFile(fullPath); errReadFile == nil && len(data) > 0 {
+		if _, errInfo := entry.Info(); errInfo == nil {
 			successfulAuthCount++
 		}
 	}
