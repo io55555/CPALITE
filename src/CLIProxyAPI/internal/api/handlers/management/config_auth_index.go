@@ -49,7 +49,7 @@ type openAICompatibilityWithAuthIndex struct {
 	Headers               map[string]string                        `json:"headers,omitempty"`
 	SupportPromptCacheKey bool                                     `json:"support-prompt-cache-key,omitempty"`
 	StatusRulers          []config.OpenAICompatibilityStatusRuler  `json:"status-rulers,omitempty"`
-	DisableCooling        bool                                     `json:"disable-cooling,omitempty"`
+	DisableCooling        *bool                                    `json:"disable-cooling,omitempty"`
 	RequestRetry          *int                                     `json:"request-retry,omitempty"`
 	AuthIndex             string                                   `json:"auth-index,omitempty"`
 }

@@ -150,7 +150,7 @@ func providerCoolingDisabledForAuth(auth *Auth, cfg *internalconfig.Config) bool
 		providerKey = provider
 	}
 	entry := resolveOpenAICompatConfig(cfg, providerKey, compatName, provider)
-	return entry != nil && entry.DisableCooling
+	return entry != nil && entry.DisableCooling != nil && *entry.DisableCooling
 }
 
 func nextTransientErrorRetryAfter(now time.Time) time.Time {

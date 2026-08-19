@@ -265,7 +265,7 @@ func TestConfigSynthesizer_CodexKeys(t *testing.T) {
 					BaseURL:        "https://api.openai.com",
 					ProxyURL:       "http://proxy.local",
 					Websockets:     true,
-					DisableCooling: true,
+					DisableCooling: boolPointer(true),
 				},
 			},
 		},
@@ -308,7 +308,7 @@ func TestConfigSynthesizer_XAIKeys(t *testing.T) {
 				BaseURL:        "https://api.x.ai/v1",
 				ProxyURL:       "http://proxy.local",
 				Websockets:     true,
-				DisableCooling: true,
+				DisableCooling: boolPointer(true),
 				Headers:        map[string]string{"X-Custom": "value"},
 				Models:         []config.XAIModel{{Name: "grok-4.5", Alias: "grok-latest"}},
 			}},
@@ -1035,4 +1035,3 @@ func TestConfigSynthesizer_RequestScopedErrors(t *testing.T) {
 		}
 	}
 }
-

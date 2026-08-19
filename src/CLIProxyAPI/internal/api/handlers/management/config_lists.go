@@ -190,15 +190,17 @@ func (h *Handler) PutGeminiKeys(c *gin.Context) {
 }
 func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	type geminiKeyPatch struct {
-		APIKey         *string            `json:"api-key"`
-		Weight         json.RawMessage    `json:"weight"`
-		Disabled       *bool              `json:"disabled"`
-		Prefix         *string            `json:"prefix"`
-		BaseURL        *string            `json:"base-url"`
-		ProxyURL       *string            `json:"proxy-url"`
-		Headers        *map[string]string `json:"headers"`
-		ExcludedModels *[]string          `json:"excluded-models"`
-		RequestRetry   *int               `json:"request-retry"`
+		APIKey              *string                          `json:"api-key"`
+		Weight              json.RawMessage                  `json:"weight"`
+		Disabled            *bool                            `json:"disabled"`
+		Prefix              *string                          `json:"prefix"`
+		BaseURL             *string                          `json:"base-url"`
+		ProxyURL            *string                          `json:"proxy-url"`
+		Headers             *map[string]string               `json:"headers"`
+		ExcludedModels      *[]string                        `json:"excluded-models"`
+		DisableCooling      json.RawMessage                  `json:"disable-cooling"`
+		RequestRetry        *int                             `json:"request-retry"`
+		RequestScopedErrors *[]config.RequestScopedErrorRule `json:"request-scoped-errors"`
 	}
 	var body struct {
 		Index *int            `json:"index"`
@@ -747,7 +749,7 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 		Name                  *string                                  `json:"name"`
 		Prefix                *string                                  `json:"prefix"`
 		Disabled              *bool                                    `json:"disabled"`
-		DisableCooling        *bool                                    `json:"disable-cooling"`
+		DisableCooling        json.RawMessage                          `json:"disable-cooling"`
 		BaseURL               *string                                  `json:"base-url"`
 		APIKeyEntries         *[]config.OpenAICompatibilityAPIKey      `json:"api-key-entries"`
 		Models                *[]config.OpenAICompatibilityModel       `json:"models"`
@@ -796,14 +798,14 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	if body.Value.Disabled != nil {
 		entry.Disabled = *body.Value.Disabled
 	}
-	if body.Value.DisableCooling != nil {
-		entry.DisableCooling = *body.Value.DisableCooling
+	if !applyDisableCoolingPatch(c, body.Value.DisableCooling, &entry.DisableCooling) {
+		return
 	}
 	if body.Value.BaseURL != nil {
 		trimmed := strings.TrimSpace(*body.Value.BaseURL)
 		if trimmed == "" {
 			h.cfg.OpenAICompatibility = append(h.cfg.OpenAICompatibility[:targetIndex], h.cfg.OpenAICompatibility[targetIndex+1:]...)
-	h.cfg.SanitizeOpenAICompatibility()
+			h.cfg.SanitizeOpenAICompatibility()
 			h.persistLocked(c)
 			return
 		}
@@ -859,7 +861,7 @@ func (h *Handler) DeleteOpenAICompat(c *gin.Context) {
 		_, err := fmt.Sscanf(idxStr, "%d", &idx)
 		if err == nil && idx >= 0 && idx < len(h.cfg.OpenAICompatibility) {
 			h.cfg.OpenAICompatibility = append(h.cfg.OpenAICompatibility[:idx], h.cfg.OpenAICompatibility[idx+1:]...)
-	h.cfg.SanitizeOpenAICompatibility()
+			h.cfg.SanitizeOpenAICompatibility()
 			h.persistLocked(c)
 			return
 		}
@@ -1326,12 +1328,6 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 	if body.Value.APIKey != nil {
 		entry.APIKey = strings.TrimSpace(*body.Value.APIKey)
 	}
-	if body.Value.FingerprintProfile != nil {
-		if rejectInvalidFingerprintProfile(c, "fingerprint-profile", *body.Value.FingerprintProfile) {
-			return
-		}
-		entry.FingerprintProfile, _ = config.NormalizeClaudeFingerprintProfile(*body.Value.FingerprintProfile)
-	}
 	if len(body.Value.Weight) > 0 {
 		weight, errWeight := parseCredentialWeightPatch(body.Value.Weight)
 		if errWeight != nil {
@@ -1489,7 +1485,7 @@ func (h *Handler) PatchXAIKey(c *gin.Context) {
 		Models         *[]config.XAIModel `json:"models"`
 		Headers        *map[string]string `json:"headers"`
 		ExcludedModels *[]string          `json:"excluded-models"`
-		DisableCooling *bool              `json:"disable-cooling"`
+		DisableCooling json.RawMessage    `json:"disable-cooling"`
 		RequestRetry   *int               `json:"request-retry"`
 	}
 	var body struct {
@@ -1565,8 +1561,8 @@ func (h *Handler) PatchXAIKey(c *gin.Context) {
 	if body.Value.ExcludedModels != nil {
 		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
 	}
-	if body.Value.DisableCooling != nil {
-		entry.DisableCooling = *body.Value.DisableCooling
+	if !applyDisableCoolingPatch(c, body.Value.DisableCooling, &entry.DisableCooling) {
+		return
 	}
 	if body.Value.RequestRetry != nil {
 		entry.RequestRetry = body.Value.RequestRetry
