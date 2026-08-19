@@ -59,5 +59,8 @@ export interface AuthFilesSummary {
 export interface AuthFilesResponse {
   files: AuthFileItem[];
   total?: number;
+  page?: number;
+  page_size?: number;
+  has_more?: boolean;
   summary?: AuthFilesSummary;
 }

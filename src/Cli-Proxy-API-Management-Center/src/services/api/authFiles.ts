@@ -13,6 +13,14 @@ type AuthFileStatusResponse = { status: string; disabled: boolean };
 type AuthFilePatchPayload = { name: string; disabled?: boolean; [key: string]: unknown };
 type AuthFileCooldownResponse = { status: string; file?: AuthFileEntry };
 type AuthFileEntry = AuthFilesResponse['files'][number];
+type AuthFilesListOptions = {
+  page?: number;
+  pageSize?: number;
+  provider?: string;
+  cooldownOnly?: boolean;
+  disabled?: boolean;
+  keyword?: string;
+};
 export type AuthFileFieldsPatch = {
   prefix?: string;
   proxy_url?: string;
@@ -242,6 +250,17 @@ const dedupeAuthFilesResponse = (payload: AuthFilesResponse): AuthFilesResponse 
   };
 };
 
+const buildAuthFilesListParams = (options: AuthFilesListOptions = {}): Record<string, unknown> => {
+  const params: Record<string, unknown> = {};
+  if (options.page !== undefined) params.page = options.page;
+  if (options.pageSize !== undefined) params.page_size = options.pageSize;
+  if (options.provider) params.provider = options.provider;
+  if (options.cooldownOnly !== undefined) params.cooldown_only = options.cooldownOnly;
+  if (options.disabled !== undefined) params.disabled = options.disabled;
+  if (options.keyword) params.keyword = options.keyword;
+  return params;
+};
+
 const normalizeOauthExcludedModels = (payload: unknown): Record<string, string[]> => {
   if (!payload || typeof payload !== 'object') return {};
 
@@ -351,7 +370,39 @@ export const buildManualRefreshExpiredAt = (nowMs = Date.now()): string =>
   new Date(nowMs - MANUAL_REFRESH_EXPIRY_OFFSET_MS).toISOString();
 
 export const authFilesApi = {
-  list: async () => dedupeAuthFilesResponse(await apiClient.get<AuthFilesResponse>('/auth-files')),
+  list: async (options?: AuthFilesListOptions) =>
+    dedupeAuthFilesResponse(
+      await apiClient.get<AuthFilesResponse>('/auth-files', {
+        params: buildAuthFilesListParams(options),
+      })
+    ),
+
+  listAll: async (options?: Omit<AuthFilesListOptions, 'page'>) => {
+    const pageSize = options?.pageSize ?? 2000;
+    let page = 1;
+    let merged: AuthFilesResponse = { files: [] };
+
+    while (true) {
+      const payload = await authFilesApi.list({ ...options, page, pageSize });
+      merged = {
+        ...payload,
+        files: [...merged.files, ...payload.files],
+        total: payload.total ?? merged.total,
+        summary: payload.summary ?? merged.summary,
+      };
+      const total = payload.total ?? merged.files.length;
+      const actualPageSize =
+        typeof payload.page_size === 'number' && payload.page_size > 0
+          ? payload.page_size
+          : pageSize;
+      const received = page * actualPageSize;
+      if (!payload.has_more && received >= total) break;
+      if (payload.files.length === 0) break;
+      page += 1;
+    }
+
+    return dedupeAuthFilesResponse(merged);
+  },
 
   patchFile: (payload: AuthFilePatchPayload) =>
     apiClient.patch<AuthFileStatusResponse>('/auth-files', payload),
