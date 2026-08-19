@@ -312,6 +312,9 @@ func packetFromAPIRequest(text string) string {
 	if body == "<empty>" {
 		body = ""
 	}
+	if (rawURL == "" || rawURL == "<unknown>") && headers == "" && body == "" {
+		return ""
+	}
 	return strings.TrimSpace(method + " " + path + " HTTP/1.1\n" + headers + "\n\n" + body)
 }
 
@@ -557,10 +560,10 @@ func pendingRecordsFromGin(c *gin.Context) []*pendingCaptureRecord {
 
 func PacketsFromUsageRaw(rawRequest, rawResponse string) PacketSet {
 	packets := PacketSet{
-		ClientRequest:    extractNamedSection(rawRequest, "客户端发给CPA的完整数据包"),
-		UpstreamRequest:  extractNamedSection(rawRequest, "CPA发给供应商的完整数据包"),
-		UpstreamResponse: extractNamedSection(rawResponse, "供应商返回CPA的完整数据包"),
-		ClientResponse:   extractNamedSection(rawResponse, "CPA发送给客户端的完整数据包"),
+		ClientRequest:    extractNamedSection(rawRequest, packetTitleClientRequest),
+		UpstreamRequest:  extractNamedSection(rawRequest, packetTitleUpstreamRequest),
+		UpstreamResponse: extractNamedSection(rawResponse, packetTitleUpstreamResponse),
+		ClientResponse:   extractNamedSection(rawResponse, packetTitleClientResponse),
 	}
 	if packetBytes(packets) > 0 {
 		return packets

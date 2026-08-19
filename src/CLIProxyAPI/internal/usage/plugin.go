@@ -20,8 +20,16 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const insertTimeout = 5 * time.Second
-const usageRawPacketMaxBytes = 256 * 1024
+const (
+	insertTimeout          = 5 * time.Second
+	usageRawPacketMaxBytes = 256 * 1024
+
+	packetTitleClientRequest    = "客户端发给CPA的完整数据包"
+	packetTitleUpstreamRequest  = "CPA发给供应商的完整数据包"
+	packetTitleUpstreamResponse = "供应商返回CPA的完整数据包"
+	packetTitleClientResponse   = "CPA发送给客户端的完整数据包"
+	packetTitleStatusRulers     = "触发status-rulers"
+)
 
 var statisticsEnabled atomic.Bool
 
@@ -263,7 +271,7 @@ func clientUserAgent(ctx context.Context) string {
 }
 
 func recordUpstreamUserAgent(rawRequest string) string {
-	packet := extractNamedSection(rawRequest, "CPA发给供应商的完整数据包")
+	packet := extractNamedSection(rawRequest, packetTitleUpstreamRequest)
 	if strings.TrimSpace(packet) == "" {
 		packet = rawRequest
 	}
@@ -271,7 +279,7 @@ func recordUpstreamUserAgent(rawRequest string) string {
 }
 
 func clientUserAgentFromRawRequest(rawRequest string) string {
-	packet := extractNamedSection(rawRequest, "客户端发给CPA的完整数据包")
+	packet := extractNamedSection(rawRequest, packetTitleClientRequest)
 	if strings.TrimSpace(packet) == "" {
 		packet = rawRequest
 	}
@@ -292,7 +300,7 @@ func apiLogHeaderValue(raw, name string) string {
 }
 
 func thinkingEffortFromRawRequest(rawRequest string) string {
-	for _, title := range []string{"客户端发给CPA的完整数据包", "CPA发给供应商的完整数据包"} {
+	for _, title := range []string{packetTitleClientRequest, packetTitleUpstreamRequest} {
 		if effort := thinkingEffortFromPacket(extractNamedSection(rawRequest, title)); effort != "" {
 			return effort
 		}
@@ -386,17 +394,37 @@ func packetBody(packet string) string {
 }
 
 func extractNamedSection(content, title string) string {
-	marker := "=== " + title + " ==="
-	start := strings.Index(content, marker)
-	if start < 0 {
-		return ""
+	for _, candidate := range packetTitleAliases(title) {
+		marker := "=== " + candidate + " ==="
+		start := strings.Index(content, marker)
+		if start < 0 {
+			continue
+		}
+		from := start + len(marker)
+		next := strings.Index(content[from:], "=== ")
+		if next >= 0 {
+			return strings.TrimSpace(content[from : from+next])
+		}
+		return strings.TrimSpace(content[from:])
 	}
-	from := start + len(marker)
-	next := strings.Index(content[from:], "=== ")
-	if next >= 0 {
-		return strings.TrimSpace(content[from : from+next])
+	return ""
+}
+
+func packetTitleAliases(title string) []string {
+	switch strings.TrimSpace(title) {
+	case packetTitleClientRequest, "瀹㈡埛绔彂缁機PA鐨勫畬鏁存暟鎹寘":
+		return []string{packetTitleClientRequest, "瀹㈡埛绔彂缁機PA鐨勫畬鏁存暟鎹寘"}
+	case packetTitleUpstreamRequest, "CPA鍙戠粰渚涘簲鍟嗙殑瀹屾暣鏁版嵁鍖?":
+		return []string{packetTitleUpstreamRequest, "CPA鍙戠粰渚涘簲鍟嗙殑瀹屾暣鏁版嵁鍖?"}
+	case packetTitleUpstreamResponse, "渚涘簲鍟嗚繑鍥濩PA鐨勫畬鏁存暟鎹寘":
+		return []string{packetTitleUpstreamResponse, "渚涘簲鍟嗚繑鍥濩PA鐨勫畬鏁存暟鎹寘"}
+	case packetTitleClientResponse, "CPA鍙戦€佺粰瀹㈡埛绔殑瀹屾暣鏁版嵁鍖?":
+		return []string{packetTitleClientResponse, "CPA鍙戦€佺粰瀹㈡埛绔殑瀹屾暣鏁版嵁鍖?"}
+	case packetTitleStatusRulers, "瑙﹀彂status-rulers":
+		return []string{packetTitleStatusRulers, "瑙﹀彂status-rulers"}
+	default:
+		return []string{title}
 	}
-	return strings.TrimSpace(content[from:])
 }
 
 func headerValue(packet, name string) string {
@@ -419,36 +447,36 @@ func enrichUsageRawPackets(ctx context.Context, rawRequest, rawResponse string) 
 	apiResponse := contextString(ctx, "API_RESPONSE")
 	clientResponse := contextString(ctx, "USAGE_CLIENT_RESPONSE")
 
-	if strings.TrimSpace(rawRequest) != "" && extractNamedSection(rawRequest, "CPA发给供应商的完整数据包") == "" {
+	if strings.TrimSpace(rawRequest) != "" && extractNamedSection(rawRequest, packetTitleUpstreamRequest) == "" {
 		if upstream := packetFromAPIRequestLog(apiRequest); upstream != "" {
-			client := extractNamedSection(rawRequest, "客户端发给CPA的完整数据包")
+			client := extractNamedSection(rawRequest, packetTitleClientRequest)
 			if client == "" && !looksLikeAPIRequestLog(rawRequest) {
 				client = rawRequest
 			}
 			rawRequest = joinNamedUsageSections([]namedUsageSection{
-				{title: "客户端发给CPA的完整数据包", body: client},
-				{title: "CPA发给供应商的完整数据包", body: upstream},
+				{title: packetTitleClientRequest, body: client},
+				{title: packetTitleUpstreamRequest, body: upstream},
 			})
 		}
 	}
 
-	upstreamResponse := extractNamedSection(rawResponse, "供应商返回CPA的完整数据包")
+	upstreamResponse := extractNamedSection(rawResponse, packetTitleUpstreamResponse)
 	if upstreamResponse == "" {
 		upstreamResponse = packetFromAPIResponseLog(apiResponse)
 		if upstreamResponse == "" && strings.TrimSpace(rawResponse) != "" && !strings.Contains(rawResponse, "=== ") {
 			upstreamResponse = rawResponse
 		}
 	}
-	statusRulers := extractNamedSection(rawResponse, "触发status-rulers")
-	client := extractNamedSection(rawResponse, "CPA发送给客户端的完整数据包")
+	statusRulers := extractNamedSection(rawResponse, packetTitleStatusRulers)
+	client := extractNamedSection(rawResponse, packetTitleClientResponse)
 	if client == "" {
 		client = strings.TrimSpace(clientResponse)
 	}
 	if upstreamResponse != "" || statusRulers != "" || client != "" {
 		rawResponse = joinNamedUsageSections([]namedUsageSection{
-			{title: "供应商返回CPA的完整数据包", body: upstreamResponse},
-			{title: "触发status-rulers", body: statusRulers},
-			{title: "CPA发送给客户端的完整数据包", body: client},
+			{title: packetTitleUpstreamResponse, body: upstreamResponse},
+			{title: packetTitleStatusRulers, body: statusRulers},
+			{title: packetTitleClientResponse, body: client},
 		})
 	}
 
@@ -495,6 +523,9 @@ func packetFromAPIRequestLog(text string) string {
 	body := strings.TrimSpace(afterMarker(text, "Body:"))
 	if body == "<empty>" {
 		body = ""
+	}
+	if (rawURL == "" || rawURL == "<unknown>") && headers == "" && body == "" {
+		return ""
 	}
 	return strings.TrimSpace(method + " " + path + " HTTP/1.1\n" + headers + "\n\n" + body)
 }

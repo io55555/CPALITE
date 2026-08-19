@@ -113,12 +113,26 @@ const extractPacketBody = (packet: string): string => {
 };
 
 const extractNamedSection = (content: string, title: string): string => {
-  const marker = `=== ${title} ===`;
-  const start = content.indexOf(marker);
-  if (start < 0) return '';
-  const from = start + marker.length;
-  const next = content.indexOf('=== ', from);
-  return content.slice(from, next >= 0 ? next : undefined).trim();
+  for (const candidate of packetTitleAliases(title)) {
+    const marker = `=== ${candidate} ===`;
+    const start = content.indexOf(marker);
+    if (start < 0) continue;
+    const from = start + marker.length;
+    const next = content.indexOf('=== ', from);
+    return content.slice(from, next >= 0 ? next : undefined).trim();
+  }
+  return '';
+};
+
+const packetTitleAliases = (title: string): string[] => {
+  const aliases: Record<string, string[]> = {
+    客户端发给CPA的完整数据包: ['客户端发给CPA的完整数据包', '瀹㈡埛绔彂缁機PA鐨勫畬鏁存暟鎹寘'],
+    CPA发给供应商的完整数据包: ['CPA发给供应商的完整数据包', 'CPA鍙戠粰渚涘簲鍟嗙殑瀹屾暣鏁版嵁鍖?'],
+    供应商返回CPA的完整数据包: ['供应商返回CPA的完整数据包', '渚涘簲鍟嗚繑鍥濩PA鐨勫畬鏁存暟鎹寘'],
+    CPA发送给客户端的完整数据包: ['CPA发送给客户端的完整数据包', 'CPA鍙戦€佺粰瀹㈡埛绔殑瀹屾暣鏁版嵁鍖?'],
+    '触发status-rulers': ['触发status-rulers', '瑙﹀彂status-rulers'],
+  };
+  return aliases[title] ?? [title];
 };
 
 const firstNonEmpty = (...values: string[]): string => {

@@ -259,6 +259,71 @@ func TestLoggerPluginBackfillsFailurePacketsFromGinContext(t *testing.T) {
 	}
 }
 
+func TestLoggerPluginBackfillsFailurePacketsWithReadableSectionTitles(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newPluginTestSQLiteStore(t)
+	recorder := NewRecorder(store)
+	plugin := &LoggerPlugin{recorder: recorder}
+
+	ginCtx := &gin.Context{}
+	ginCtx.Set("USAGE_RAW_REQUEST", "POST /v1/chat/completions HTTP/2\nHost: cpa.local\n\n{\"model\":\"llama\"}")
+	ginCtx.Set("API_REQUEST", strings.Join([]string{
+		"=== API REQUEST 1 ===",
+		"Timestamp: 2026-08-19T00:00:00Z",
+		"Upstream URL: https://provider.example.com/v1/chat/completions",
+		"HTTP Method: POST",
+		"",
+		"Headers:",
+		"Content-Type: application/json",
+		"",
+		"Body:",
+		`{"model":"llama","messages":[{"role":"user","content":"hi"}]}`,
+	}, "\n"))
+	ginCtx.Set("API_RESPONSE", "=== API RESPONSE 1 ===\nStatus: 502\nHeaders:\nContent-Type: application/json\n\nBody:\n{\"error\":\"bad gateway\"}")
+	ginCtx.Set("USAGE_CLIENT_RESPONSE", "HTTP/1.1 502 Bad Gateway\nContent-Type: application/json\n\n{\"error\":\"bad gateway\"}")
+
+	ctx := context.WithValue(context.Background(), "gin", ginCtx)
+	ctx = internallogging.WithEndpoint(ctx, "POST /v1/chat/completions")
+	ctx = internallogging.WithResponseStatusHolder(ctx)
+	internallogging.SetResponseStatus(ctx, 502)
+
+	plugin.HandleUsage(ctx, coreusage.Record{
+		Provider:    "compat",
+		Model:       "llama",
+		RequestedAt: time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC),
+		Failed:      true,
+		Fail:        coreusage.Failure{StatusCode: 502},
+	})
+
+	usage, err := store.Query(context.Background(), QueryRange{IncludeRaw: true})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	details := usage["POST /v1/chat/completions"]["llama"]
+	if len(details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(details))
+	}
+	got := details[0]
+	for _, want := range []string{
+		"=== 客户端发给CPA的完整数据包 ===",
+		"=== CPA发给供应商的完整数据包 ===",
+		"POST /v1/chat/completions HTTP/1.1",
+	} {
+		if !strings.Contains(got.RawRequest, want) {
+			t.Fatalf("RawRequest missing %q: %q", want, got.RawRequest)
+		}
+	}
+	for _, want := range []string{
+		"=== 供应商返回CPA的完整数据包 ===",
+		"=== CPA发送给客户端的完整数据包 ===",
+		"HTTP/1.1 502 Bad Gateway",
+	} {
+		if !strings.Contains(got.RawResponse, want) {
+			t.Fatalf("RawResponse missing %q: %q", want, got.RawResponse)
+		}
+	}
+}
+
 func TestLoggerPluginBuildsFallbackRawRequestFromGinRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := newPluginTestSQLiteStore(t)

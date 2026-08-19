@@ -16,15 +16,23 @@ import (
 
 func nowUTC() time.Time { return time.Now().UTC() }
 
+const (
+	packetTitleClientRequest    = "客户端发给CPA的完整数据包"
+	packetTitleUpstreamRequest  = "CPA发给供应商的完整数据包"
+	packetTitleUpstreamResponse = "供应商返回CPA的完整数据包"
+	packetTitleClientResponse   = "CPA发送给客户端的完整数据包"
+	packetTitleStatusRulers     = "触发status-rulers"
+)
+
 func normalizePacketName(value string) string {
 	switch strings.TrimSpace(value) {
-	case "client_request", "客户端发给CPA的完整数据包":
+	case "client_request", packetTitleClientRequest, "瀹㈡埛绔彂缁機PA鐨勫畬鏁存暟鎹寘":
 		return "client_request"
-	case "upstream_request", "CPA发给供应商的完整数据包":
+	case "upstream_request", packetTitleUpstreamRequest, "CPA鍙戠粰渚涘簲鍟嗙殑瀹屾暣鏁版嵁鍖?":
 		return "upstream_request"
-	case "upstream_response", "供应商返回CPA的完整数据包":
+	case "upstream_response", packetTitleUpstreamResponse, "渚涘簲鍟嗚繑鍥濩PA鐨勫畬鏁存暟鎹寘":
 		return "upstream_response"
-	case "client_response", "CPA发送给客户端的完整数据包":
+	case "client_response", packetTitleClientResponse, "CPA鍙戦€佺粰瀹㈡埛绔殑瀹屾暣鏁版嵁鍖?":
 		return "client_response"
 	default:
 		return strings.TrimSpace(value)
@@ -576,17 +584,37 @@ func replaceHeader(packet, name, value string) string {
 }
 
 func extractNamedSection(content, title string) string {
-	marker := "=== " + title + " ==="
-	start := strings.Index(content, marker)
-	if start < 0 {
-		return ""
+	for _, candidate := range packetTitleAliases(title) {
+		marker := "=== " + candidate + " ==="
+		start := strings.Index(content, marker)
+		if start < 0 {
+			continue
+		}
+		from := start + len(marker)
+		next := strings.Index(content[from:], "=== ")
+		if next >= 0 {
+			return strings.TrimSpace(content[from : from+next])
+		}
+		return strings.TrimSpace(content[from:])
 	}
-	from := start + len(marker)
-	next := strings.Index(content[from:], "=== ")
-	if next >= 0 {
-		return strings.TrimSpace(content[from : from+next])
+	return ""
+}
+
+func packetTitleAliases(title string) []string {
+	switch strings.TrimSpace(title) {
+	case packetTitleClientRequest, "瀹㈡埛绔彂缁機PA鐨勫畬鏁存暟鎹寘":
+		return []string{packetTitleClientRequest, "瀹㈡埛绔彂缁機PA鐨勫畬鏁存暟鎹寘"}
+	case packetTitleUpstreamRequest, "CPA鍙戠粰渚涘簲鍟嗙殑瀹屾暣鏁版嵁鍖?":
+		return []string{packetTitleUpstreamRequest, "CPA鍙戠粰渚涘簲鍟嗙殑瀹屾暣鏁版嵁鍖?"}
+	case packetTitleUpstreamResponse, "渚涘簲鍟嗚繑鍥濩PA鐨勫畬鏁存暟鎹寘":
+		return []string{packetTitleUpstreamResponse, "渚涘簲鍟嗚繑鍥濩PA鐨勫畬鏁存暟鎹寘"}
+	case packetTitleClientResponse, "CPA鍙戦€佺粰瀹㈡埛绔殑瀹屾暣鏁版嵁鍖?":
+		return []string{packetTitleClientResponse, "CPA鍙戦€佺粰瀹㈡埛绔殑瀹屾暣鏁版嵁鍖?"}
+	case packetTitleStatusRulers, "瑙﹀彂status-rulers":
+		return []string{packetTitleStatusRulers, "瑙﹀彂status-rulers"}
+	default:
+		return []string{title}
 	}
-	return strings.TrimSpace(content[from:])
 }
 
 func statusFromPacket(packet string, fallback int) int {

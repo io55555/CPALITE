@@ -107,6 +107,46 @@ func TestCaptureFromUsageRecordBackfillsUpstreamRequestFromAPIRequest(t *testing
 	}
 }
 
+func TestPacketsFromUsageRawParsesReadableAndLegacySectionTitles(t *testing.T) {
+	rawRequest := strings.Join([]string{
+		"=== 客户端发给CPA的完整数据包 ===",
+		"POST /v1/chat/completions HTTP/2",
+		"",
+		`{"model":"client-model"}`,
+		"",
+		"=== CPA发给供应商的完整数据包 ===",
+		"POST /v1beta/models/gemini:generateContent HTTP/1.1",
+		"Content-Type: application/json",
+		"",
+		`{"model":"upstream-model"}`,
+	}, "\n")
+	rawResponse := strings.Join([]string{
+		"=== 渚涘簲鍟嗚繑鍥濩PA鐨勫畬鏁存暟鎹寘 ===",
+		"HTTP/1.1 429 Too Many Requests",
+		"",
+		`{"error":"quota"}`,
+		"",
+		"=== CPA鍙戦€佺粰瀹㈡埛绔殑瀹屾暣鏁版嵁鍖? ===",
+		"HTTP/1.1 429 Too Many Requests",
+		"",
+		`{"error":"quota"}`,
+	}, "\n")
+
+	packets := PacketsFromUsageRaw(rawRequest, rawResponse)
+	if !strings.Contains(packets.ClientRequest, "client-model") {
+		t.Fatalf("client request missing: %#v", packets)
+	}
+	if !strings.Contains(packets.UpstreamRequest, "upstream-model") {
+		t.Fatalf("upstream request missing: %#v", packets)
+	}
+	if !strings.Contains(packets.UpstreamResponse, "HTTP/1.1 429") {
+		t.Fatalf("upstream response missing: %#v", packets)
+	}
+	if !strings.Contains(packets.ClientResponse, "HTTP/1.1 429") {
+		t.Fatalf("client response missing: %#v", packets)
+	}
+}
+
 func TestCaptureFromUsageRecordStoresUnmarkedRawPackets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	if err := InitDefaultInLogDir(t.TempDir()); err != nil {
