@@ -245,41 +245,6 @@ func TestCodexClientModelsResponseMapsMaxCompletionTokensToMaxTokens(t *testing.
 	}
 }
 
-func TestCodexClientModelsResponseMapsMaxCompletionTokensToMaxTokens(t *testing.T) {
-	const wantTemplateLimit = 64000
-	const wantSynthesizedLimit = 32000
-
-	resp := BuildResponse([]map[string]any{
-		{"id": "gpt-5.5", "max_completion_tokens": wantTemplateLimit},
-		{"id": "custom-output-limit-model", "max_completion_tokens": wantSynthesizedLimit},
-	}, nil, false)
-	models, ok := resp["models"].([]map[string]any)
-	if !ok {
-		t.Fatalf("models type = %T, want []map[string]any", resp["models"])
-	}
-
-	bySlug := make(map[string]map[string]any, len(models))
-	for _, model := range models {
-		bySlug[stringModelValue(model, "slug")] = model
-	}
-
-	for _, testCase := range []struct {
-		slug string
-		want int
-	}{
-		{slug: "gpt-5.5", want: wantTemplateLimit},
-		{slug: "custom-output-limit-model", want: wantSynthesizedLimit},
-	} {
-		entry := bySlug[testCase.slug]
-		if entry == nil {
-			t.Fatalf("missing model %q", testCase.slug)
-		}
-		if got := intModelValue(entry, "max_tokens"); got != testCase.want {
-			t.Errorf("%s max_tokens = %d, want %d", testCase.slug, got, testCase.want)
-		}
-	}
-}
-
 func TestCodexClientModelsResponse_PreservesUltraReasoningEffort(t *testing.T) {
 	resp := BuildResponse([]map[string]any{{"id": "gpt-5.6-sol"}}, nil, false)
 	models, ok := resp["models"].([]map[string]any)

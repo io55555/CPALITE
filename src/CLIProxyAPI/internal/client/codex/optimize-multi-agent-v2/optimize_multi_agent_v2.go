@@ -403,30 +403,6 @@ func codexSpawnAgentModelsFromTemplates(availableModels []map[string]any, templa
 		return nil
 	}
 
-	return codexSpawnAgentModelsFromTemplates(availableModels, templates, defaultTemplate, lookupModel)
-}
-
-func codexSpawnAgentModelsFromTemplates(availableModels []map[string]any, templates map[string]map[string]any, defaultTemplate map[string]any, lookupModel func(string) *registry.ModelInfo) []codexSpawnAgentModel {
-	if defaultTemplate == nil {
-		return nil
-	}
-
-	return codexSpawnAgentModelsFromTemplates(availableModels, templates, defaultTemplate, lookupModel)
-}
-
-func codexSpawnAgentModelsFromTemplates(availableModels []map[string]any, templates map[string]map[string]any, defaultTemplate map[string]any, lookupModel func(string) *registry.ModelInfo) []codexSpawnAgentModel {
-	if defaultTemplate == nil {
-		return nil
-	}
-
-	return codexSpawnAgentModelsFromTemplates(availableModels, templates, defaultTemplate, lookupModel)
-}
-
-func codexSpawnAgentModelsFromTemplates(availableModels []map[string]any, templates map[string]map[string]any, defaultTemplate map[string]any, lookupModel func(string) *registry.ModelInfo) []codexSpawnAgentModel {
-	if defaultTemplate == nil {
-		return nil
-	}
-
 	seen := make(map[string]struct{}, len(availableModels))
 	templateModels := make([]codexSpawnAgentModel, 0, len(availableModels))
 	synthesizedModels := make([]codexSpawnAgentModel, 0, len(availableModels))

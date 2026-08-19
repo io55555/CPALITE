@@ -47,50 +47,6 @@ func rejectInvalidFingerprintProfile(c *gin.Context, field, profile string) bool
 	return false
 }
 
-// rejectInvalidFingerprintProfile fails a write that carries a value the request
-// path would silently ignore, so a typo surfaces here instead of as a warning
-// behind every later request.
-func rejectInvalidFingerprintProfile(c *gin.Context, field, profile string) bool {
-	if errValidate := config.ValidateClaudeFingerprintProfile(profile); errValidate != nil {
-		c.JSON(400, gin.H{"error": fmt.Sprintf("%s: %v", field, errValidate)})
-		return true
-	}
-	return false
-}
-
-// rejectInvalidFingerprintProfile fails a write that carries a value the request
-// path would silently ignore, so a typo surfaces here instead of as a warning
-// behind every later request.
-func rejectInvalidFingerprintProfile(c *gin.Context, field, profile string) bool {
-	if errValidate := config.ValidateClaudeFingerprintProfile(profile); errValidate != nil {
-		c.JSON(400, gin.H{"error": fmt.Sprintf("%s: %v", field, errValidate)})
-		return true
-	}
-	return false
-}
-
-// rejectInvalidFingerprintProfile fails a write that carries a value the request
-// path would silently ignore, so a typo surfaces here instead of as a warning
-// behind every later request.
-func rejectInvalidFingerprintProfile(c *gin.Context, field, profile string) bool {
-	if errValidate := config.ValidateClaudeFingerprintProfile(profile); errValidate != nil {
-		c.JSON(400, gin.H{"error": fmt.Sprintf("%s: %v", field, errValidate)})
-		return true
-	}
-	return false
-}
-
-// rejectInvalidFingerprintProfile fails a write that carries a value the request
-// path would silently ignore, so a typo surfaces here instead of as a warning
-// behind every later request.
-func rejectInvalidFingerprintProfile(c *gin.Context, field, profile string) bool {
-	if errValidate := config.ValidateClaudeFingerprintProfile(profile); errValidate != nil {
-		c.JSON(400, gin.H{"error": fmt.Sprintf("%s: %v", field, errValidate)})
-		return true
-	}
-	return false
-}
-
 // Generic helpers for list[string]
 func (h *Handler) putStringList(c *gin.Context, set func([]string), after func()) {
 	data, err := c.GetRawData()

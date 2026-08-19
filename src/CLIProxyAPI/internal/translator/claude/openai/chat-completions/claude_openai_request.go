@@ -504,12 +504,3 @@ func firstExisting(values ...gjson.Result) gjson.Result {
 	return gjson.Result{}
 }
 
-// firstExisting returns the first result that exists, or an empty result.
-func firstExisting(values ...gjson.Result) gjson.Result {
-	for _, value := range values {
-		if value.Exists() {
-			return value
-		}
-	}
-	return gjson.Result{}
-}

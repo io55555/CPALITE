@@ -192,30 +192,6 @@ func applyCodexClientMaxTokens(entry map[string]any, model map[string]any) {
 	}
 }
 
-func applyCodexClientMaxTokens(entry map[string]any, model map[string]any) {
-	if maxCompletionTokens := intModelValue(model, "max_completion_tokens"); maxCompletionTokens > 0 {
-		entry["max_tokens"] = maxCompletionTokens
-	}
-}
-
-func applyCodexClientMaxTokens(entry map[string]any, model map[string]any) {
-	if maxCompletionTokens := intModelValue(model, "max_completion_tokens"); maxCompletionTokens > 0 {
-		entry["max_tokens"] = maxCompletionTokens
-	}
-}
-
-func applyCodexClientMaxTokens(entry map[string]any, model map[string]any) {
-	if maxCompletionTokens := intModelValue(model, "max_completion_tokens"); maxCompletionTokens > 0 {
-		entry["max_tokens"] = maxCompletionTokens
-	}
-}
-
-func applyCodexClientMaxTokens(entry map[string]any, model map[string]any) {
-	if maxCompletionTokens := intModelValue(model, "max_completion_tokens"); maxCompletionTokens > 0 {
-		entry["max_tokens"] = maxCompletionTokens
-	}
-}
-
 func applyCodexClientSearchToolSupport(entry map[string]any, id string, templateModel bool, providersForModel ProvidersForModelFunc) {
 	supportsSearch, _ := entry["supports_search_tool"].(bool)
 	if !supportsSearch {
