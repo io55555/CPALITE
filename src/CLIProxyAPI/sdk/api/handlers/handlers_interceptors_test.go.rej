@@ -1,0 +1,20 @@
+diff a/src/CLIProxyAPI/sdk/api/handlers/handlers_interceptors_test.go b/src/CLIProxyAPI/sdk/api/handlers/handlers_interceptors_test.go	(rejected hunks)
+@@ -34,10 +34,18 @@ type handlerInterceptorNoStreamTestHost struct {
+ 	*handlerInterceptorTestHost
+ }
+ 
++type handlerInterceptorDisabledRequestTestHost struct {
++	*handlerInterceptorTestHost
++}
++
+ func (h *handlerInterceptorNoStreamTestHost) HasStreamInterceptors() bool {
+ 	return false
+ }
+ 
++func (h *handlerInterceptorDisabledRequestTestHost) HasRequestInterceptors() bool {
++	return false
++}
++
+ func (h *handlerInterceptorTestHost) InterceptRequestBeforeAuth(ctx context.Context, req pluginapi.RequestInterceptRequest) pluginapi.RequestInterceptResponse {
+ 	if h != nil && h.interceptRequestBeforeAuth != nil {
+ 		return h.interceptRequestBeforeAuth(ctx, req)

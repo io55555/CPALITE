@@ -1,0 +1,18 @@
+diff a/src/Cli-Proxy-API-Management-Center/src/i18n/locales/en.json b/src/Cli-Proxy-API-Management-Center/src/i18n/locales/en.json	(rejected hunks)
+@@ -1000,6 +1000,7 @@
+           "title": "Network Configuration",
+           "description": "Proxy, retry, and routing settings",
+           "proxy_url": "Proxy URL",
++          "proxy_url_sponsor_hint": "No suitable proxy?",
+           "request_retry": "Request Retry Count",
+           "max_retry_credentials": "Max Retry Credentials",
+           "max_retry_credentials_hint": "Leave empty to keep it unset. Set to 0 to preserve legacy behavior and try all available credentials.",
+@@ -1464,7 +1465,7 @@
+       "codex": "Codex",
+       "xai": "xAI",
+       "claude": "Claude",
+-      "claudeApi": "ClaudeAPI",
++      "claudeApi": "Claudeapi.com",
+       "vertex": "Vertex",
+       "openaiCompatibility": "OpenAI Compatible",
+       "apikeyFun": "APIKEY.FUN",

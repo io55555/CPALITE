@@ -1,0 +1,11 @@
+diff a/src/CLIProxyAPI/internal/util/claude_attribution.go b/src/CLIProxyAPI/internal/util/claude_attribution.go	(rejected hunks)
+@@ -3,6 +3,9 @@ package util
+ import (
+ 	"strings"
+ 	"unicode"
++
++	"github.com/tidwall/gjson"
++	"github.com/tidwall/sjson"
+ )
+ 
+ const claudeCodeAttributionSystemPrefix = "x-anthropic-billing-header:"

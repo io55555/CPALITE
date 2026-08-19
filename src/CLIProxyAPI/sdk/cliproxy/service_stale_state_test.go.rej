@@ -1,0 +1,19 @@
+diff a/src/CLIProxyAPI/sdk/cliproxy/service_stale_state_test.go b/src/CLIProxyAPI/sdk/cliproxy/service_stale_state_test.go	(rejected hunks)
+@@ -76,6 +76,7 @@ func TestServiceApplyCoreAuthAddOrUpdate_DeleteReAddDoesNotInheritStaleRuntimeSt
+ func TestForceHomeRuntimeConfigEnablesUsageStatistics(t *testing.T) {
+ 	cfg := &config.Config{
+ 		UsageStatisticsEnabled: false,
++		DisableCooling:         false,
+ 		SaveCooldownStatus:     true,
+ 	}
+ 
+@@ -84,6 +85,9 @@ func TestForceHomeRuntimeConfigEnablesUsageStatistics(t *testing.T) {
+ 	if !cfg.UsageStatisticsEnabled {
+ 		t.Fatal("expected home runtime config to force usage statistics enabled")
+ 	}
++	if !cfg.DisableCooling {
++		t.Fatal("expected home runtime config to force cooling disabled")
++	}
+ 	if cfg.SaveCooldownStatus {
+ 		t.Fatal("expected home runtime config to force cooldown status persistence disabled")
+ 	}

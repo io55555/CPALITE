@@ -1,0 +1,31 @@
+diff a/src/CLIProxyAPI/internal/registry/model_registry.go b/src/CLIProxyAPI/internal/registry/model_registry.go	(rejected hunks)
+@@ -151,6 +151,8 @@ type ModelRegistry struct {
+ 	mutex *sync.RWMutex
+ 	// availableModelsCache stores per-handler snapshots for GetAvailableModels.
+ 	availableModelsCache map[string]availableModelsCacheEntry
++	// generation tracks changes to model registrations and availability.
++	generation uint64
+ 	// hook is an optional callback sink for model registration changes
+ 	hook ModelRegistryHook
+ }
+@@ -180,12 +182,20 @@ func (r *ModelRegistry) ensureAvailableModelsCacheLocked() {
+ }
+ 
+ func (r *ModelRegistry) invalidateAvailableModelsCacheLocked() {
++	r.generation++
+ 	if len(r.availableModelsCache) == 0 {
+ 		return
+ 	}
+ 	clear(r.availableModelsCache)
+ }
+ 
++// GetGeneration returns the current generation counter of model registrations.
++func (r *ModelRegistry) GetGeneration() uint64 {
++	r.mutex.RLock()
++	defer r.mutex.RUnlock()
++	return r.generation
++}
++
+ // LookupModelInfo searches dynamic registry (provider-specific > global) then static definitions.
+ func LookupModelInfo(modelID string, provider ...string) *ModelInfo {
+ 	modelID = strings.TrimSpace(modelID)

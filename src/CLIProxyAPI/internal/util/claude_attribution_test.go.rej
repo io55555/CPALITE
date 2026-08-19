@@ -1,0 +1,14 @@
+diff a/src/CLIProxyAPI/internal/util/claude_attribution_test.go b/src/CLIProxyAPI/internal/util/claude_attribution_test.go	(rejected hunks)
+@@ -1,6 +1,11 @@
+ package util
+ 
+-import "testing"
++import (
++	"strings"
++	"testing"
++
++	"github.com/tidwall/gjson"
++)
+ 
+ func TestIsClaudeCodeAttributionSystemText(t *testing.T) {
+ 	tests := []struct {

@@ -1,0 +1,10 @@
+diff a/src/CLIProxyAPI/internal/translator/claude/openai/chat-completions/claude_openai_response.go b/src/CLIProxyAPI/internal/translator/claude/openai/chat-completions/claude_openai_response.go	(rejected hunks)
+@@ -286,6 +286,8 @@ func mapAnthropicStopReasonToOpenAI(anthropicReason string) string {
+ 		return "length"
+ 	case "stop_sequence":
+ 		return "stop"
++	case "refusal", "sensitive":
++		return "content_filter"
+ 	default:
+ 		return "stop"
+ 	}

@@ -21,12 +21,16 @@
       "multi_agent_version": "v2",
       "use_responses_lite": true,
       "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": true,
+      "include_plugin_usage_instructions": true,
+      "node_repl_auto_review_required": false,
+      "node_repl_disabled": false,
       "auto_review_model_override": null,
-      "context_window": 372000,
-      "max_context_window": 372000,
+      "model_specialty": null,
+      "context_window": 272000,
+      "max_context_window": 921000,
       "auto_compact_token_limit": null,
       "comp_hash": "3000",
-      "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.6-Sol",
       "description": "Latest frontier agentic coding model.",
@@ -96,6 +100,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],
@@ -135,12 +140,16 @@
       "multi_agent_version": "v2",
       "use_responses_lite": true,
       "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": true,
+      "include_plugin_usage_instructions": true,
+      "node_repl_auto_review_required": false,
+      "node_repl_disabled": false,
       "auto_review_model_override": null,
-      "context_window": 372000,
-      "max_context_window": 372000,
+      "model_specialty": null,
+      "context_window": 272000,
+      "max_context_window": 921000,
       "auto_compact_token_limit": null,
       "comp_hash": "3000",
-      "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.6-Terra",
       "description": "Balanced agentic coding model for everyday work.",
@@ -208,6 +217,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],
@@ -247,12 +257,16 @@
       "multi_agent_version": "v1",
       "use_responses_lite": true,
       "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": true,
+      "include_plugin_usage_instructions": true,
+      "node_repl_auto_review_required": false,
+      "node_repl_disabled": false,
       "auto_review_model_override": null,
-      "context_window": 372000,
-      "max_context_window": 372000,
+      "model_specialty": null,
+      "context_window": 272000,
+      "max_context_window": 921000,
       "auto_compact_token_limit": null,
       "comp_hash": "3000",
-      "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.6-Luna",
       "description": "Fast and affordable agentic coding model.",
@@ -316,6 +330,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],
@@ -355,12 +370,16 @@
       "multi_agent_version": null,
       "use_responses_lite": false,
       "include_skills_usage_instructions": true,
+      "include_apps_usage_instructions": true,
+      "include_plugin_usage_instructions": true,
+      "node_repl_auto_review_required": false,
+      "node_repl_disabled": false,
       "auto_review_model_override": null,
+      "model_specialty": null,
       "context_window": 272000,
       "max_context_window": 272000,
       "auto_compact_token_limit": null,
       "comp_hash": "2911",
-      "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.5",
       "description": "Frontier model for complex coding, research, and real-world work.",
@@ -381,6 +400,10 @@
         {
           "effort": "xhigh",
           "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
         }
       ],
       "shell_type": "shell_command",
@@ -420,6 +443,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],
@@ -485,6 +509,10 @@
         {
           "effort": "xhigh",
           "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
         }
       ],
       "shell_type": "shell_command",
@@ -521,6 +549,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],
@@ -586,6 +615,10 @@
         {
           "effort": "xhigh",
           "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
         }
       ],
       "shell_type": "shell_command",
@@ -625,6 +658,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],
@@ -681,6 +715,10 @@
         {
           "effort": "xhigh",
           "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
         }
       ],
       "shell_type": "shell_command",
@@ -720,6 +758,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],
@@ -777,6 +816,10 @@
         {
           "effort": "xhigh",
           "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
         }
       ],
       "shell_type": "shell_command",
@@ -813,6 +856,7 @@
         "prolite",
         "quorum",
         "sci",
+        "self_serve_business_prolite",
         "self_serve_business_usage_based",
         "team"
       ],

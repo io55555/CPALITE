@@ -1,0 +1,12 @@
+diff a/src/CLIProxyAPI/internal/runtime/executor/xai_executor_test.go b/src/CLIProxyAPI/internal/runtime/executor/xai_executor_test.go	(rejected hunks)
+@@ -2202,8 +2202,8 @@ func TestXAIExecutorExecuteStreamCompactionTriggerUsesCompactEndpoint(t *testing
+ 	if !strings.Contains(output, `"type":"compaction"`) || !strings.Contains(output, `"encrypted_content":"opaque"`) {
+ 		t.Fatalf("compaction output missing from stream: %s", output)
+ 	}
+-	if !strings.Contains(output, `"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}`) {
+-		t.Fatalf("usage missing from completed stream: %s", output)
++	if !strings.Contains(output, `"output_tokens_details":{"reasoning_tokens":0}`) || !strings.Contains(output, `"input_tokens_details":{"cached_tokens":0}`) {
++		t.Fatalf("usage details missing from completed stream: %s", output)
+ 	}
+ }
+ 

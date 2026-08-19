@@ -1,0 +1,32 @@
+diff a/src/CLIProxyAPI/sdk/api/handlers/claude/code_handlers.go b/src/CLIProxyAPI/sdk/api/handlers/claude/code_handlers.go	(rejected hunks)
+@@ -266,7 +266,7 @@ func (h *ClaudeCodeAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON [
+ 			return
+ 		case chunk, ok := <-dataChan:
+ 			if !ok {
+-				if errMsg, okPendingErr := pendingClaudeStreamError(errChan); okPendingErr {
++				if errMsg, hasPendingError := handlers.PendingStreamError(errChan); hasPendingError {
+ 					h.WriteErrorResponse(c, errMsg)
+ 					if errMsg != nil {
+ 						cliCancel(errMsg.Error)
+@@ -300,21 +300,6 @@ func (h *ClaudeCodeAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON [
+ 	}
+ }
+ 
+-func pendingClaudeStreamError(errs <-chan *interfaces.ErrorMessage) (*interfaces.ErrorMessage, bool) {
+-	if errs == nil {
+-		return nil, false
+-	}
+-	select {
+-	case errMsg, ok := <-errs:
+-		if !ok {
+-			return nil, false
+-		}
+-		return errMsg, true
+-	default:
+-		return nil, false
+-	}
+-}
+-
+ func (h *ClaudeCodeAPIHandler) forwardClaudeStream(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage) {
+ 	h.ForwardStream(c, flusher, cancel, data, errs, handlers.StreamForwardOptions{
+ 		WriteChunk: func(chunk []byte) {

@@ -1,0 +1,14 @@
+diff a/src/CLIProxyAPI/internal/translator/openai/claude/openai_claude_request.go b/src/CLIProxyAPI/internal/translator/openai/claude/openai_claude_request.go	(rejected hunks)
+@@ -60,11 +60,7 @@ func convertClaudeRequestToOpenAI(modelName string, inputRawJSON []byte, stream
+ 				return true
+ 			})
+ 			if len(stops) > 0 {
+-				if len(stops) == 1 {
+-					out, _ = sjson.SetBytes(out, "stop", stops[0])
+-				} else {
+-					out, _ = sjson.SetBytes(out, "stop", stops)
+-				}
++				out, _ = sjson.SetBytes(out, "stop", stops)
+ 			}
+ 		}
+ 	}

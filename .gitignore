@@ -34,6 +34,7 @@ cpa.back*
 .gobuild2.*
 .gotest.*
 .gotest2.*
+_upstream_merge/
 
 # Python
 __pycache__/

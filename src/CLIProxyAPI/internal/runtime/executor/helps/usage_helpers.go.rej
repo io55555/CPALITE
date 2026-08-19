@@ -1,0 +1,14 @@
+diff a/src/CLIProxyAPI/internal/runtime/executor/helps/usage_helpers.go b/src/CLIProxyAPI/internal/runtime/executor/helps/usage_helpers.go	(rejected hunks)
+@@ -908,7 +908,11 @@ func ParseGeminiStreamUsage(line []byte) (usage.Detail, bool) {
+ 	if !node.Exists() {
+ 		return usage.Detail{}, false
+ 	}
+-	return parseGeminiFamilyUsageDetail(node), true
++	detail := parseGeminiFamilyUsageDetail(node)
++	if !hasNonZeroTokenUsage(detail) {
++		return usage.Detail{}, false
++	}
++	return detail, true
+ }
+ 
+ func firstExistingUsageNode(root gjson.Result, paths ...string) gjson.Result {

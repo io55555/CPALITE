@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 

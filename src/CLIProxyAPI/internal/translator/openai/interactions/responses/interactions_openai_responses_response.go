@@ -13,6 +13,7 @@ import (
 )
 
 type interactionsToResponsesStreamState struct {
+	EnvironmentID      string
 	FunctionCalls      map[int]*interactionsFunctionCallState
 	ItemIDs            map[int]string
 	ItemTypes          map[int]string
@@ -93,12 +94,19 @@ func ConvertInteractionsResponseToOpenAIResponsesNonStream(ctx context.Context, 
 	if !steps.Exists() {
 		steps = root.Get("interaction.steps")
 	}
+	var outputs [][]byte
 	steps.ForEach(func(_, step gjson.Result) bool {
 		if item, ok := interactionsStepToResponsesOutput(step); ok {
-			out, _ = sjson.SetRawBytes(out, "output.-1", item)
+			outputs = append(outputs, item)
 		}
 		return true
 	})
+	if len(outputs) > 0 {
+		out, _ = sjson.SetRawBytes(out, "output", translatorcommon.JoinRawArray(outputs))
+	}
+	if envID := firstNonEmpty(root.Get("environment_id").String(), root.Get("interaction.environment_id").String(), root.Get("environment.id").String(), root.Get("interaction.environment.id").String()); envID != "" {
+		out, _ = sjson.SetBytes(out, "environment_id", envID)
+	}
 	out = setResponsesUsageFromInteractions(out, "usage", translatorcommon.InteractionsUsage(root))
 	return out
 }
@@ -151,14 +159,18 @@ func interactionsStepToResponsesOutput(step gjson.Result) ([]byte, bool) {
 		if content.Type == gjson.String {
 			part := []byte(`{"type":"output_text","text":""}`)
 			part, _ = sjson.SetBytes(part, "text", content.String())
-			item, _ = sjson.SetRawBytes(item, "content.-1", part)
+			item = translatorcommon.SetRawArrayItems(item, "content", [][]byte{part})
 		} else {
+			var parts [][]byte
 			content.ForEach(func(_, part gjson.Result) bool {
 				if converted, ok := interactionsContentPartToResponses(part, "assistant"); ok {
-					item, _ = sjson.SetRawBytes(item, "content.-1", converted)
+					parts = append(parts, converted)
 				}
 				return true
 			})
+			if len(parts) > 0 {
+				item = translatorcommon.SetRawArrayItems(item, "content", parts)
+			}
 		}
 		return item, true
 	case "thought":
@@ -166,10 +178,15 @@ func interactionsStepToResponsesOutput(step gjson.Result) ([]byte, bool) {
 		if signature := interactionsThoughtSignature(step); signature != "" {
 			item, _ = sjson.SetBytes(item, "encrypted_content", signature)
 		}
-		for _, text := range interactionsContentTexts(step.Get("content")) {
-			part := []byte(`{"type":"summary_text","text":""}`)
-			part, _ = sjson.SetBytes(part, "text", text)
-			item, _ = sjson.SetRawBytes(item, "summary.-1", part)
+		texts := interactionsContentTexts(step.Get("content"))
+		if len(texts) > 0 {
+			summaries := make([][]byte, 0, len(texts))
+			for _, text := range texts {
+				part := []byte(`{"type":"summary_text","text":""}`)
+				part, _ = sjson.SetBytes(part, "text", text)
+				summaries = append(summaries, part)
+			}
+			item = translatorcommon.SetRawArrayItems(item, "summary", summaries)
 		}
 		return item, true
 	case "function_call":
@@ -363,6 +380,13 @@ func responsesCompletedEvent(modelName string, root gjson.Result, st *interactio
 	interaction := root.Get("interaction")
 	payload, _ = sjson.SetBytes(payload, "response.id", firstNonEmpty(interaction.Get("id").String(), root.Get("id").String()))
 	payload, _ = sjson.SetBytes(payload, "response.model", firstNonEmpty(interaction.Get("model").String(), modelName))
+	envID := firstNonEmpty(interaction.Get("environment_id").String(), root.Get("environment_id").String(), interaction.Get("environment.id").String(), root.Get("environment.id").String())
+	if envID == "" && st != nil {
+		envID = st.EnvironmentID
+	}
+	if envID != "" {
+		payload, _ = sjson.SetBytes(payload, "response.environment_id", envID)
+	}
 	payload = setResponsesCompletedOutput(payload, st)
 	payload = setResponsesUsageFromInteractions(payload, "response.usage", translatorcommon.InteractionsUsage(root))
 	return emitResponsesEvent("response.completed", payload)
@@ -421,6 +445,7 @@ func setResponsesCompletedOutput(payload []byte, st *interactionsToResponsesStre
 			maxIndex = index
 		}
 	}
+	var outputItems [][]byte
 	for index := 0; index <= maxIndex; index++ {
 		itemType, ok := st.ItemTypes[index]
 		if !ok {
@@ -428,8 +453,11 @@ func setResponsesCompletedOutput(payload []byte, st *interactionsToResponsesStre
 		}
 		item, ok := responsesCompletedOutputItem(index, itemType, st)
 		if ok {
-			payload, _ = sjson.SetRawBytes(payload, "response.output.-1", item)
+			outputItems = append(outputItems, item)
 		}
+	}
+	if len(outputItems) > 0 {
+		payload = translatorcommon.SetRawArrayItems(payload, "response.output", outputItems)
 	}
 	return payload
 }
@@ -449,7 +477,7 @@ func responsesCompletedOutputItem(index int, itemType string, st *interactionsTo
 		if builder := st.TextOutputs[index]; builder != nil && builder.String() != "" {
 			part := []byte(`{"type":"output_text","text":""}`)
 			part, _ = sjson.SetBytes(part, "text", builder.String())
-			item, _ = sjson.SetRawBytes(item, "content.-1", part)
+			item = translatorcommon.SetRawArrayItems(item, "content", [][]byte{part})
 		}
 		return item, true
 	case "thought":
@@ -474,10 +502,15 @@ func responsesReasoningItem(index int, st *interactionsToResponsesStreamState) [
 	if signature := st.ReasoningEncrypted[index]; signature != "" {
 		item, _ = sjson.SetBytes(item, "encrypted_content", signature)
 	}
-	for _, text := range st.ReasoningSummaries[index] {
-		part := []byte(`{"type":"summary_text","text":""}`)
-		part, _ = sjson.SetBytes(part, "text", text)
-		item, _ = sjson.SetRawBytes(item, "summary.-1", part)
+	summaries := st.ReasoningSummaries[index]
+	if len(summaries) > 0 {
+		summaryBlocks := make([][]byte, 0, len(summaries))
+		for _, text := range summaries {
+			part := []byte(`{"type":"summary_text","text":""}`)
+			part, _ = sjson.SetBytes(part, "text", text)
+			summaryBlocks = append(summaryBlocks, part)
+		}
+		item = translatorcommon.SetRawArrayItems(item, "summary", summaryBlocks)
 	}
 	return item
 }
@@ -533,12 +566,16 @@ func ConvertOpenAIResponsesResponseToInteractionsNonStream(ctx context.Context, 
 	out := []byte(`{"id":"","object":"interaction","status":"completed","model":"","steps":[]}`)
 	out, _ = sjson.SetBytes(out, "id", root.Get("id").String())
 	out, _ = sjson.SetBytes(out, "model", responseModel(modelName, root))
+	var stepItems [][]byte
 	root.Get("output").ForEach(func(_, item gjson.Result) bool {
 		if step, ok := openAIResponsesOutputItemToInteractionsStep(item); ok {
-			out, _ = sjson.SetRawBytes(out, "steps.-1", step)
+			stepItems = append(stepItems, step)
 		}
 		return true
 	})
+	if len(stepItems) > 0 {
+		out, _ = sjson.SetRawBytes(out, "steps", translatorcommon.JoinRawArray(stepItems))
+	}
 	out = setInteractionsUsageFromResponses(out, "usage", root.Get("usage"))
 	return out
 }

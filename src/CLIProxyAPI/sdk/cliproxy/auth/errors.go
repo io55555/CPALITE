@@ -1,10 +1,19 @@
 package auth
 
-const requestScopedErrorCode = "request_scoped"
+// ErrorCodeRequestScoped identifies failures tied to the current request rather
+// than the selected credential.
+const ErrorCodeRequestScoped = "request_scoped"
 
-// connectionLifecycleErrorCode marks transport/session lifecycle failures that
+const requestScopedErrorCode = ErrorCodeRequestScoped
+
+// ErrorCodeConnectionLifecycle marks transport/session lifecycle failures that
 // must skip credential cooldown without being treated as request-scoped faults.
-const connectionLifecycleErrorCode = "connection_lifecycle"
+const ErrorCodeConnectionLifecycle = "connection_lifecycle"
+
+const connectionLifecycleErrorCode = ErrorCodeConnectionLifecycle
+
+// ErrorCodeForceCooldown marks failures that must enforce credential cooldown.
+const ErrorCodeForceCooldown = "force_cooldown"
 
 // Error describes an authentication related failure in a provider agnostic format.
 type Error struct {
