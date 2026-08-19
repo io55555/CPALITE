@@ -35,6 +35,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/store/authindex"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/synthesizer"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -278,8 +279,9 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 	})
 	files = filterAuthFileEntries(files, listOpts)
 	total := len(files)
+	summary := authFileListSummaryFromGinH(files, total)
 	files = paginateAuthFileEntries(files, listOpts)
-	h.respondAuthFileList(c, files, listOpts, total, false)
+	h.respondAuthFileList(c, files, listOpts, total, false, summary)
 }
 
 func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
@@ -302,6 +304,7 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 		log.WithError(err).Warn("auth index unavailable; falling back to legacy auth list")
 		return false
 	}
+	store.SetSynthesisContext(h.cfg, h.authIndexPluginParser())
 	defer func() { _ = store.Close() }()
 	if err = store.SyncDir(ctx); err != nil {
 		log.WithError(err).Warn("auth index sync failed; falling back to legacy auth list")
@@ -339,7 +342,11 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 		}
 		files = append(files, authIndexEntryToGinH(indexed))
 	}
-	h.respondAuthFileList(c, files, opts, result.Total, true)
+	summary := authIndexSummaryToGinH(result.Summary)
+	if runtimeSummary := h.authRuntimeSummary(opts); runtimeSummary != nil {
+		summary = runtimeSummary
+	}
+	h.respondAuthFileList(c, files, opts, result.Total, true, summary)
 	return true
 }
 
@@ -359,6 +366,88 @@ func mergeAuthIndexRuntimeState(entry gin.H, auth *coreauth.Auth) gin.H {
 		entry["cooldown_until"] = cooldownUntil
 		entry["cooldown_model"] = cooldownModel
 		entry["next_retry_after"] = cooldownUntil
+		if len(modelStates) > 0 {
+			entry["model_states"] = modelStates
+		}
+	}
+	return entry
+}
+
+func (h *Handler) authIndexPluginParser() synthesizer.PluginAuthParser {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	host := h.pluginHost
+	h.mu.Unlock()
+	if host == nil {
+		return nil
+	}
+	return host
+}
+
+func (h *Handler) authRuntimeSummary(opts authFileListOptions) gin.H {
+	if h == nil || h.authManager == nil {
+		return nil
+	}
+	auths := h.authManager.List()
+	files := make([]gin.H, 0, len(auths))
+	for _, auth := range auths {
+		if entry := authRuntimeSummaryEntry(auth); entry != nil {
+			files = append(files, entry)
+		}
+	}
+	files = filterAuthFileEntries(files, opts)
+	if len(files) == 0 {
+		return nil
+	}
+	return authFileListSummaryFromGinH(files, len(files))
+}
+
+func authRuntimeSummaryEntry(auth *coreauth.Auth) gin.H {
+	if auth == nil {
+		return nil
+	}
+	path := strings.TrimSpace(authAttribute(auth, "path"))
+	name := strings.TrimSpace(auth.FileName)
+	if path == "" && name == "" {
+		return nil
+	}
+	auth.EnsureIndex()
+	now := time.Now()
+	unavailable := auth.Unavailable || auth.NextRetryAfter.After(now)
+	entry := gin.H{
+		"id":          auth.ID,
+		"auth_index":  auth.Index,
+		"name":        name,
+		"type":        strings.TrimSpace(auth.Provider),
+		"provider":    strings.TrimSpace(auth.Provider),
+		"disabled":    auth.Disabled || auth.Status == coreauth.StatusDisabled,
+		"unavailable": unavailable,
+	}
+	if email := authEmail(auth); email != "" {
+		entry["email"] = email
+	}
+	if projectID := authProjectID(auth); projectID != "" {
+		entry["project_id"] = projectID
+	}
+	if accountType, account := auth.AccountInfo(); accountType != "" || account != "" {
+		if accountType != "" {
+			entry["account_type"] = accountType
+		}
+		if account != "" {
+			entry["account"] = account
+		}
+	}
+	if auth.NextRetryAfter.After(now) {
+		entry["cooldown_until"] = auth.NextRetryAfter
+		entry["next_retry_after"] = auth.NextRetryAfter
+	}
+	if cooldownUntil, cooldownModel, modelStates := authFileCooldownSummary(auth); !cooldownUntil.IsZero() {
+		entry["cooldown_until"] = cooldownUntil
+		entry["cooldown_model"] = cooldownModel
+		entry["next_retry_after"] = cooldownUntil
+		entry["unavailable"] = true
 		if len(modelStates) > 0 {
 			entry["model_states"] = modelStates
 		}
@@ -508,8 +597,9 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 	})
 	files = filterAuthFileEntries(files, listOpts)
 	total := len(files)
+	summary := authFileListSummaryFromGinH(files, total)
 	files = paginateAuthFileEntries(files, listOpts)
-	h.respondAuthFileList(c, files, listOpts, total, false)
+	h.respondAuthFileList(c, files, listOpts, total, false, summary)
 }
 
 type authFileListOptions struct {
@@ -632,20 +722,86 @@ func paginateAuthFileEntries(files []gin.H, opts authFileListOptions) []gin.H {
 	return files[start:end]
 }
 
-func (h *Handler) respondAuthFileList(c *gin.Context, files []gin.H, opts authFileListOptions, total int, indexed bool) {
+func (h *Handler) respondAuthFileList(c *gin.Context, files []gin.H, opts authFileListOptions, total int, indexed bool, summary gin.H) {
 	if total < len(files) {
 		total = len(files)
+	}
+	if summary == nil {
+		summary = authFileListSummaryFromGinH(files, total)
 	}
 	c.JSON(200, gin.H{
 		"files":       files,
 		"page":        opts.Page,
 		"page_size":   opts.PageSize,
 		"total":       total,
+		"summary":     summary,
 		"indexed":     indexed,
 		"has_more":    opts.Page > 0 && opts.PageSize > 0 && opts.Page*opts.PageSize < total,
 		"limited":     opts.PageSize > 0 && total > len(files),
 		"list_capped": opts.PageSize > 0 && len(files) == opts.PageSize && total > len(files),
 	})
+}
+
+func authIndexSummaryToGinH(summary authindex.QuerySummary) gin.H {
+	byProvider := gin.H{}
+	for provider, count := range summary.ByProvider {
+		provider = strings.TrimSpace(provider)
+		if provider == "" {
+			provider = "unknown"
+		}
+		byProvider[provider] = count
+	}
+	return gin.H{
+		"total":       summary.Total,
+		"active":      summary.Active,
+		"disabled":    summary.Disabled,
+		"unavailable": summary.Unavailable,
+		"by_provider": byProvider,
+	}
+}
+
+func authFileListSummaryFromGinH(files []gin.H, total int) gin.H {
+	byProvider := gin.H{}
+	disabled := 0
+	unavailable := 0
+	active := 0
+	for _, entry := range files {
+		isDisabled := authFileEntryBoolValue(entry["disabled"])
+		isUnavailable := authFileEntryBoolValue(entry["unavailable"])
+		switch {
+		case isDisabled:
+			disabled++
+		case isUnavailable:
+			unavailable++
+		default:
+			active++
+		}
+		provider := strings.ToLower(strings.TrimSpace(authFileEntryStringValue(entry["provider"])))
+		if provider == "" {
+			provider = strings.ToLower(strings.TrimSpace(authFileEntryStringValue(entry["type"])))
+		}
+		if provider == "" {
+			provider = "unknown"
+		}
+		current, _ := byProvider[provider].(int)
+		byProvider[provider] = current + 1
+	}
+	if total < len(files) {
+		total = len(files)
+	}
+	if total != len(files) {
+		active = total - disabled - unavailable
+		if active < 0 {
+			active = 0
+		}
+	}
+	return gin.H{
+		"total":       total,
+		"active":      active,
+		"disabled":    disabled,
+		"unavailable": unavailable,
+		"by_provider": byProvider,
+	}
 }
 
 func authIndexEntryToGinH(entry authindex.Entry) gin.H {
@@ -2276,6 +2432,7 @@ func (h *Handler) syncAuthIndexUpsert(ctx context.Context, path string) {
 		log.WithError(err).Warn("auth index upsert skipped")
 		return
 	}
+	store.SetSynthesisContext(h.cfg, h.authIndexPluginParser())
 	defer func() { _ = store.Close() }()
 	if err = store.UpsertFile(indexCtx, path); err != nil {
 		log.WithError(err).Warnf("auth index upsert failed for %s", filepath.Base(path))
@@ -2305,7 +2462,10 @@ func (h *Handler) syncAuthIndexDelete(ctx context.Context, path string) {
 		return
 	}
 	defer func() { _ = store.Close() }()
-	if err = store.Delete(indexCtx, id); err != nil {
+	if err = store.DeleteFileIndexOnly(indexCtx, path); err != nil {
+		log.WithError(err).Warnf("auth index delete by file failed for %s", filepath.Base(path))
+	}
+	if err = store.DeleteIndexOnly(indexCtx, id); err != nil {
 		log.WithError(err).Warnf("auth index delete failed for %s", filepath.Base(path))
 	}
 }

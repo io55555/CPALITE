@@ -8,7 +8,7 @@ import {
   normalizeRecentRequestUsageEntry,
   type RecentRequestBucket,
 } from '@/utils/recentRequests';
-import type { AuthFileItem } from '@/types/authFile';
+import type { AuthFileItem, AuthFilesResponse, AuthFilesSummary } from '@/types/authFile';
 import {
   TRAFFIC_BUCKET_MINUTES,
   type CredentialHealth,
@@ -96,6 +96,29 @@ const createAccumulator = (): ProviderAccumulator => ({
   bucketGroups: [],
 });
 
+const normalizeSummaryNumber = (value: unknown): number => {
+  const numberValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? Math.floor(numberValue) : 0;
+};
+
+const credentialsFromSummary = (summary: AuthFilesSummary | undefined): CredentialHealth | null => {
+  if (!summary) return null;
+  const total = normalizeSummaryNumber(summary.total);
+  const disabled = normalizeSummaryNumber(summary.disabled);
+  const unavailable = normalizeSummaryNumber(summary.unavailable);
+  const active = Math.max(0, normalizeSummaryNumber(summary.active) || total - disabled - unavailable);
+  const rawByProvider = summary.by_provider ?? summary.byProvider ?? {};
+  const byType = Object.entries(rawByProvider)
+    .map(([type, count]) => ({
+      type: String(type || 'unknown').toLowerCase(),
+      count: normalizeSummaryNumber(count),
+    }))
+    .filter((entry) => entry.count > 0)
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+
+  return { total, active, disabled, unavailable, byType };
+};
+
 /**
  * 汇总仪表盘所需的全部数据。
  *
@@ -121,7 +144,7 @@ export function useDashboardOverview() {
     enabled: connected,
   });
 
-  const [authFiles, setAuthFiles] = useState<AuthFileItem[] | null>(null);
+  const [authFilesResponse, setAuthFilesResponse] = useState<AuthFilesResponse | null>(null);
   const [authFilesLoading, setAuthFilesLoading] = useState(false);
 
   const loadAuthFiles = useCallback(async () => {
@@ -129,9 +152,9 @@ export function useDashboardOverview() {
     setAuthFilesLoading(true);
     try {
       const response = await authFilesApi.list();
-      setAuthFiles(response.files);
+      setAuthFilesResponse(response);
     } catch {
-      setAuthFiles(null);
+      setAuthFilesResponse(null);
     } finally {
       setAuthFilesLoading(false);
     }
@@ -206,7 +229,7 @@ export function useDashboardOverview() {
       });
     });
 
-    (authFiles ?? []).forEach((file) => {
+    (authFilesResponse?.files ?? []).forEach((file) => {
       const accountType = String(file.account_type ?? '')
         .trim()
         .toLowerCase();
@@ -248,9 +271,12 @@ export function useDashboardOverview() {
       traffic: buildTrafficWindow(allBucketGroups),
       providers: providerRows,
     };
-  }, [usageByProvider, authFiles]);
+  }, [usageByProvider, authFilesResponse]);
 
   const credentials = useMemo<CredentialHealth | null>(() => {
+    const summarized = credentialsFromSummary(authFilesResponse?.summary);
+    if (summarized) return summarized;
+    const authFiles = authFilesResponse?.files;
     if (!authFiles) return null;
 
     let disabled = 0;
@@ -276,7 +302,7 @@ export function useDashboardOverview() {
         .map(([type, count]) => ({ type, count }))
         .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type)),
     };
-  }, [authFiles]);
+  }, [authFilesResponse]);
 
   const counts = useMemo<DashboardCounts>(
     () => ({
@@ -284,10 +310,10 @@ export function useDashboardOverview() {
       providerKeys: providerKeyCounts
         ? Object.values(providerKeyCounts).reduce((sum, count) => sum + count, 0)
         : null,
-      credentials: authFiles ? authFiles.length : null,
+      credentials: credentials?.total ?? (authFilesResponse ? authFilesResponse.total ?? authFilesResponse.files.length : null),
       models: modelsLoading || modelsError ? null : models.length,
     }),
-    [config, providerKeyCounts, authFiles, models.length, modelsLoading, modelsError]
+    [config, providerKeyCounts, authFilesResponse, credentials, models.length, modelsLoading, modelsError]
   );
 
   return {
@@ -300,7 +326,7 @@ export function useDashboardOverview() {
     providers,
     credentials,
     /** 首屏骨架的判定：配置与凭证都还没回来 */
-    initialLoading: connected && !config && authFiles === null,
+    initialLoading: connected && !config && authFilesResponse === null,
     authFilesLoading,
     refresh,
   };

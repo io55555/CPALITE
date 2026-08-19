@@ -63,6 +63,16 @@ type QueryOptions struct {
 type QueryResult struct {
 	Entries []Entry
 	Total   int
+	Summary QuerySummary
+}
+
+// QuerySummary 记录匹配过滤条件后的全量聚合信息，不受分页影响。
+type QuerySummary struct {
+	Total       int
+	Active      int
+	Disabled    int
+	Unavailable int
+	ByProvider  map[string]int
 }
 
 // Open 打开或创建认证索引库。
@@ -228,21 +238,28 @@ func (s *Store) SyncDir(ctx context.Context) error {
 			continue
 		}
 		fullPath := filepath.Join(s.authDir, entry.Name())
-		id := authIDForPath(fullPath, s.authDir)
-		seen[id] = struct{}{}
 		info, errInfo := entry.Info()
 		if errInfo != nil {
 			continue
 		}
 		mtime := info.ModTime().Unix()
 		size := info.Size()
-		var count int
-		err = s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM auth_index WHERE id=? AND file_mtime=? AND file_size=?`, id, mtime, size).Scan(&count)
-		if err == nil && count > 0 {
+		indexedIDs, errIndexed := s.indexedIDsForUnchangedFile(ctx, fullPath, mtime, size)
+		if errIndexed == nil && len(indexedIDs) > 0 {
+			for _, id := range indexedIDs {
+				seen[id] = struct{}{}
+			}
 			continue
 		}
 		if err = s.UpsertFile(ctx, fullPath); err != nil {
 			return err
+		}
+		indexedIDs, errIndexed = s.indexedIDsForFile(ctx, fullPath)
+		if errIndexed != nil {
+			return errIndexed
+		}
+		for _, id := range indexedIDs {
+			seen[id] = struct{}{}
 		}
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM auth_index`)
@@ -270,6 +287,47 @@ func (s *Store) SyncDir(ctx context.Context) error {
 	}
 	_, _ = s.db.ExecContext(ctx, `INSERT INTO auth_meta(k, v) VALUES('last_full_scan_unix', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, strconv.FormatInt(time.Now().Unix(), 10))
 	return nil
+}
+
+func (s *Store) indexedIDsForUnchangedFile(ctx context.Context, path string, mtime int64, size int64) ([]string, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("auth index: store is nil")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM auth_index WHERE file_path=? AND file_mtime=? AND file_size=?`, path, mtime, size)
+	if err != nil {
+		return nil, fmt.Errorf("auth index: query unchanged file ids: %w", err)
+	}
+	defer rows.Close()
+	return scanIDs(rows)
+}
+
+func (s *Store) indexedIDsForFile(ctx context.Context, path string) ([]string, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("auth index: store is nil")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM auth_index WHERE file_path=?`, path)
+	if err != nil {
+		return nil, fmt.Errorf("auth index: query file ids: %w", err)
+	}
+	defer rows.Close()
+	return scanIDs(rows)
+}
+
+func scanIDs(rows *sql.Rows) ([]string, error) {
+	ids := make([]string, 0, 1)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("auth index: scan id: %w", err)
+		}
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("auth index: iterate ids: %w", err)
+	}
+	return ids, nil
 }
 
 // List 返回轻量认证对象，避免启动时常驻完整 JSON payload。
@@ -320,16 +378,27 @@ func (s *Store) UpsertFile(ctx context.Context, path string) error {
 		return fmt.Errorf("auth index: stat file %s: %w", path, err)
 	}
 	sum := sha256.Sum256(data)
-	entry := entryFromJSON(path, s.authDir, data, info, hex.EncodeToString(sum[:]))
-	if entry.Provider == "" {
-		return nil
+	hash := hex.EncodeToString(sum[:])
+	entries, err := s.entriesFromJSON(path, data, info, hash)
+	if err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("auth index: begin upsert: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `INSERT INTO auth_index (
+	if _, err = tx.ExecContext(ctx, `DELETE FROM auth_payload WHERE id IN (SELECT id FROM auth_index WHERE file_path=?)`, path); err != nil {
+		return fmt.Errorf("auth index: delete old payloads for file: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM auth_index WHERE file_path=?`, path); err != nil {
+		return fmt.Errorf("auth index: delete old rows for file: %w", err)
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Provider) == "" {
+			continue
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO auth_index (
 		id, file_name, file_path, provider, disabled, unavailable, status, email, project_id, account, account_type,
 		priority, file_mtime, file_size, file_sha256, cooldown_until, updated_unix
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -350,15 +419,16 @@ func (s *Store) UpsertFile(ctx context.Context, path string) error {
 		file_sha256=excluded.file_sha256,
 		cooldown_until=excluded.cooldown_until,
 		updated_unix=excluded.updated_unix`,
-		entry.ID, entry.FileName, entry.FilePath, entry.Provider, boolInt(entry.Disabled), boolInt(entry.Unavailable), entry.Status,
-		entry.Email, entry.ProjectID, entry.Account, entry.AccountType, entry.Priority, entry.ModTimeUnix, entry.Size, hex.EncodeToString(sum[:]),
-		entry.CooldownUntil, entry.UpdatedUnix)
-	if err != nil {
-		return fmt.Errorf("auth index: upsert index: %w", err)
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO auth_payload(id, json) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json`, entry.ID, string(data))
-	if err != nil {
-		return fmt.Errorf("auth index: upsert payload: %w", err)
+			entry.ID, entry.FileName, entry.FilePath, entry.Provider, boolInt(entry.Disabled), boolInt(entry.Unavailable), entry.Status,
+			entry.Email, entry.ProjectID, entry.Account, entry.AccountType, entry.Priority, entry.ModTimeUnix, entry.Size, hash,
+			entry.CooldownUntil, entry.UpdatedUnix)
+		if err != nil {
+			return fmt.Errorf("auth index: upsert index: %w", err)
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO auth_payload(id, json) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json`, entry.ID, string(data))
+		if err != nil {
+			return fmt.Errorf("auth index: upsert payload: %w", err)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("auth index: commit upsert: %w", err)
@@ -398,6 +468,24 @@ func (s *Store) DeleteIndexOnly(ctx context.Context, id string) error {
 	return s.deleteIndexOnly(ctx, id)
 }
 
+// DeleteFileIndexOnly 按真实文件路径清理该文件展开出的全部索引行。
+func (s *Store) DeleteFileIndexOnly(ctx context.Context, path string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM auth_payload WHERE id IN (SELECT id FROM auth_index WHERE file_path=?)`, path); err != nil {
+		return fmt.Errorf("auth index: delete file payloads: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM auth_index WHERE file_path=?`, path); err != nil {
+		return fmt.Errorf("auth index: delete file index: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) deleteIndexOnly(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -423,6 +511,10 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) (QueryResult, erro
 	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return QueryResult{}, fmt.Errorf("auth index: count: %w", err)
 	}
+	summary, err := s.Summary(ctx, opts)
+	if err != nil {
+		return QueryResult{}, err
+	}
 	if opts.Page <= 0 {
 		opts.Page = 1
 	}
@@ -438,7 +530,7 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) (QueryResult, erro
 		return QueryResult{}, fmt.Errorf("auth index: query: %w", err)
 	}
 	defer rows.Close()
-	result := QueryResult{Total: total}
+	result := QueryResult{Total: total, Summary: summary}
 	for rows.Next() {
 		var entry Entry
 		var disabled, unavailable int
@@ -455,6 +547,45 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) (QueryResult, erro
 		return QueryResult{}, fmt.Errorf("auth index: rows: %w", err)
 	}
 	return result, nil
+}
+
+// Summary 返回匹配过滤条件后的全量健康统计，供分页列表和仪表盘复用。
+func (s *Store) Summary(ctx context.Context, opts QueryOptions) (QuerySummary, error) {
+	if s == nil || s.db == nil {
+		return QuerySummary{}, fmt.Errorf("auth index: store is nil")
+	}
+	where, args := buildWhere(opts)
+	var summary QuerySummary
+	if err := s.db.QueryRowContext(ctx, `SELECT
+		COUNT(1),
+		COALESCE(SUM(CASE WHEN disabled != 0 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN disabled = 0 AND unavailable != 0 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN disabled = 0 AND unavailable = 0 THEN 1 ELSE 0 END), 0)
+		FROM auth_index`+where, args...).Scan(&summary.Total, &summary.Disabled, &summary.Unavailable, &summary.Active); err != nil {
+		return QuerySummary{}, fmt.Errorf("auth index: summary: %w", err)
+	}
+	summary.ByProvider = make(map[string]int)
+	rows, err := s.db.QueryContext(ctx, `SELECT lower(provider), COUNT(1) FROM auth_index`+where+` GROUP BY lower(provider)`, args...)
+	if err != nil {
+		return QuerySummary{}, fmt.Errorf("auth index: provider summary: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var provider string
+		var count int
+		if errScan := rows.Scan(&provider, &count); errScan != nil {
+			return QuerySummary{}, fmt.Errorf("auth index: scan provider summary: %w", errScan)
+		}
+		provider = strings.TrimSpace(provider)
+		if provider == "" {
+			provider = "unknown"
+		}
+		summary.ByProvider[provider] = count
+	}
+	if err = rows.Err(); err != nil {
+		return QuerySummary{}, fmt.Errorf("auth index: iterate provider summary: %w", err)
+	}
+	return summary, nil
 }
 
 // ListLightweight 返回不含完整 Metadata 的轻量认证对象，用于降低常驻内存。
@@ -592,6 +723,126 @@ func authFromEntry(entry Entry) *coreauth.Auth {
 	}
 	auth.EnsureIndex()
 	return auth
+}
+
+func (s *Store) entriesFromJSON(path string, data []byte, info os.FileInfo, hash string) ([]Entry, error) {
+	sctx := &synthesizer.SynthesisContext{
+		Config:           s.cfg,
+		AuthDir:          s.authDir,
+		Now:              info.ModTime(),
+		IDGenerator:      synthesizer.NewStableIDGenerator(),
+		PluginAuthParser: s.parser,
+	}
+	auths, err := synthesizer.SynthesizeAuthFile(sctx, path, data)
+	if err != nil {
+		return nil, fmt.Errorf("auth index: synthesize %s: %w", filepath.Base(path), err)
+	}
+	if err == nil && len(auths) > 0 {
+		entries := make([]Entry, 0, len(auths))
+		for _, auth := range auths {
+			if entry, ok := entryFromAuth(path, data, info, hash, auth); ok {
+				entries = append(entries, entry)
+			}
+		}
+		return entries, nil
+	}
+	entry := entryFromJSON(path, s.authDir, data, info, hash)
+	if strings.TrimSpace(entry.Provider) == "" {
+		return nil, nil
+	}
+	return []Entry{entry}, nil
+}
+
+func entryFromAuth(path string, data []byte, info os.FileInfo, hash string, auth *coreauth.Auth) (Entry, bool) {
+	if auth == nil {
+		return Entry{}, false
+	}
+	id := strings.TrimSpace(auth.ID)
+	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	if id == "" || provider == "" {
+		return Entry{}, false
+	}
+	fileName := strings.TrimSpace(auth.FileName)
+	if fileName == "" {
+		fileName = filepath.Base(path)
+	}
+	accountType, account := auth.AccountInfo()
+	entry := Entry{
+		ID:            id,
+		FileName:      fileName,
+		FilePath:      path,
+		Provider:      provider,
+		Disabled:      auth.Disabled || auth.Status == coreauth.StatusDisabled,
+		Unavailable:   auth.Unavailable,
+		Status:        strings.TrimSpace(string(auth.Status)),
+		Email:         firstNonEmpty(metadataString(auth.Metadata, "email"), authAttribute(auth, "email")),
+		ProjectID:     firstNonEmpty(metadataString(auth.Metadata, "project_id"), authAttribute(auth, "project_id")),
+		Account:       firstNonEmpty(account, metadataString(auth.Metadata, "account")),
+		AccountType:   firstNonEmpty(accountType, metadataString(auth.Metadata, "account_type"), metadataString(auth.Metadata, "auth_kind"), authAttribute(auth, coreauth.AttributeAuthKind)),
+		Priority:      parsePriority(auth, data),
+		Size:          info.Size(),
+		ModTimeUnix:   info.ModTime().Unix(),
+		CooldownUntil: auth.NextRetryAfter.Unix(),
+		UpdatedUnix:   time.Now().Unix(),
+	}
+	_ = hash
+	if entry.Status == "" {
+		if entry.Disabled {
+			entry.Status = string(coreauth.StatusDisabled)
+		} else {
+			entry.Status = string(coreauth.StatusActive)
+		}
+	}
+	if !auth.NextRetryAfter.After(time.Now()) {
+		entry.CooldownUntil = 0
+	}
+	if entry.Account == "" && strings.EqualFold(entry.AccountType, coreauth.AuthKindOAuth) {
+		entry.Account = entry.Email
+	}
+	return entry, true
+}
+
+func authAttribute(auth *coreauth.Auth, key string) string {
+	if auth == nil || len(auth.Attributes) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(auth.Attributes[key])
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if len(metadata) == 0 || key == "" {
+		return ""
+	}
+	if value, ok := metadata[key].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func parsePriority(auth *coreauth.Auth, data []byte) int {
+	if auth != nil {
+		if priority := authAttribute(auth, coreauth.AttributeWeight); priority != "" {
+			if parsed, err := strconv.Atoi(priority); err == nil {
+				return parsed
+			}
+		}
+		if priority := authAttribute(auth, "priority"); priority != "" {
+			if parsed, err := strconv.Atoi(priority); err == nil {
+				return parsed
+			}
+		}
+	}
+	if priority := gjson.GetBytes(data, "priority"); priority.Exists() {
+		switch priority.Type {
+		case gjson.Number:
+			return int(priority.Int())
+		case gjson.String:
+			if parsed, err := strconv.Atoi(strings.TrimSpace(priority.String())); err == nil {
+				return parsed
+			}
+		}
+	}
+	return 0
 }
 
 func entryFromJSON(path, authDir string, data []byte, info os.FileInfo, hash string) Entry {

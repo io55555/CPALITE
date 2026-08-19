@@ -214,8 +214,12 @@ const dedupeAuthFilesResponse = (payload: AuthFilesResponse): AuthFilesResponse 
   const grouped = new Map<string, AuthFileEntry[]>();
 
   files.forEach((entry) => {
+    const stableId =
+      readTextField(entry, 'auth_index') ||
+      readTextField(entry, 'authIndex') ||
+      readTextField(entry, 'id');
     const name = readTextField(entry, 'name');
-    const key = name || JSON.stringify(entry);
+    const key = stableId || name || JSON.stringify(entry);
     const bucket = grouped.get(key);
     if (bucket) {
       bucket.push(entry);
@@ -234,7 +238,7 @@ const dedupeAuthFilesResponse = (payload: AuthFilesResponse): AuthFilesResponse 
   return {
     ...payload,
     files: normalizedFiles,
-    total: normalizedFiles.length,
+    total: typeof payload.total === 'number' ? payload.total : normalizedFiles.length,
   };
 };
 

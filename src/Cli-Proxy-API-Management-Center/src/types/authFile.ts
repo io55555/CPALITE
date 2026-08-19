@@ -47,7 +47,17 @@ export interface AuthFileItem {
   [key: string]: unknown;
 }
 
+export interface AuthFilesSummary {
+  total: number;
+  active: number;
+  disabled: number;
+  unavailable: number;
+  by_provider?: Record<string, number>;
+  byProvider?: Record<string, number>;
+}
+
 export interface AuthFilesResponse {
   files: AuthFileItem[];
   total?: number;
+  summary?: AuthFilesSummary;
 }
