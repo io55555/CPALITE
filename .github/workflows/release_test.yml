@@ -116,8 +116,28 @@ jobs:
       - name: Install CGO toolchains
         run: |
           set -euo pipefail
-          # Avoid full apt upgrade; install only required packages.
-          sudo apt-get update -o Acquire::Retries=3
+          # ubuntu-24.04 默认 mirrorlist 指向 azure.archive.ubuntu.com
+          # 该镜像超时后 apt 按 Timeout(120s) x Retries 卡住数分钟到十几分钟
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            sudo tee /etc/apt/apt-mirrors.txt >/dev/null <<'EOF'
+http://archive.ubuntu.com/ubuntu/
+http://security.ubuntu.com/ubuntu/
+EOF
+          fi
+          if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+            sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu|g' \
+              /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          if [[ -f /etc/apt/sources.list ]]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+              /etc/apt/sources.list
+          fi
+          sudo apt-get update \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            -o Acquire::http::Pipeline-Depth=0
+          echo 'apt update done, installing CGO packages'
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             gcc g++ \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \

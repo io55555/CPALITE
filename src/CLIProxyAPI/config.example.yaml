@@ -35,6 +35,18 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: "~/.cli-proxy-api"
 
+# SQLite 认证文件索引缓存。默认关闭；认证文件很多时再启用。
+# 文件目录仍是唯一事实来源；缓存默认位于 <auth-dir>/.auth-cache/index.db。
+# auth-index-cache:
+#   enabled: true
+#   db-path: ""
+#   lru-size: 128
+#   page-cache-kb: 8192
+#   sync-mode: queued
+#   rebuild-on-start: false
+#   list-max-default: 100
+#   list-max-hard: 500
+
 # API keys for authentication
 api-keys:
   - "your-api-key-1"

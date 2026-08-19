@@ -33,6 +33,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/store/authindex"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -255,10 +256,14 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "handler not initialized"})
 		return
 	}
+	if h.listAuthFilesFromIndex(c) {
+		return
+	}
 	if h.authManager == nil {
 		h.listAuthFilesFromDisk(c)
 		return
 	}
+	listOpts := h.authFileListOptions(c, false)
 	auths := h.authManager.List()
 	files := make([]gin.H, 0, len(auths))
 	for _, auth := range auths {
@@ -271,7 +276,64 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 		nameJ, _ := files[j]["name"].(string)
 		return strings.ToLower(nameI) < strings.ToLower(nameJ)
 	})
-	c.JSON(200, gin.H{"files": files})
+	files = filterAuthFileEntries(files, listOpts)
+	total := len(files)
+	files = paginateAuthFileEntries(files, listOpts)
+	h.respondAuthFileList(c, files, listOpts, total, false)
+}
+
+func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
+	if h == nil || h.cfg == nil || !h.cfg.AuthIndexCache.Enabled {
+		return false
+	}
+	cfg := h.cfg.AuthIndexCache
+	normalizedCfg := &config.Config{AuthIndexCache: cfg}
+	normalizedCfg.NormalizeAuthIndexCacheConfig()
+	cfg = normalizedCfg.AuthIndexCache
+	authDir, err := util.ResolveAuthDir(h.cfg.AuthDir)
+	if err != nil || strings.TrimSpace(authDir) == "" {
+		log.WithError(err).Warn("auth index disabled for this request: resolve auth dir failed")
+		return false
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	store, err := authindex.Open(ctx, authDir, cfg)
+	if err != nil {
+		log.WithError(err).Warn("auth index unavailable; falling back to legacy auth list")
+		return false
+	}
+	defer func() { _ = store.Close() }()
+	if err = store.SyncDir(ctx); err != nil {
+		log.WithError(err).Warn("auth index sync failed; falling back to legacy auth list")
+		return false
+	}
+	opts := h.authFileListOptions(c, true)
+	result, err := store.Query(ctx, authindex.QueryOptions{
+		Page:         opts.Page,
+		PageSize:     opts.PageSize,
+		Provider:     opts.Provider,
+		Disabled:     opts.Disabled,
+		Keyword:      opts.Keyword,
+		CooldownOnly: opts.CooldownOnly,
+	})
+	if err != nil {
+		log.WithError(err).Warn("auth index query failed; falling back to legacy auth list")
+		return false
+	}
+	files := make([]gin.H, 0, len(result.Entries))
+	for _, indexed := range result.Entries {
+		if h.authManager != nil {
+			if auth, ok := h.authManager.GetByID(indexed.ID); ok && auth != nil {
+				if entry := h.buildAuthFileEntry(auth); entry != nil {
+					files = append(files, entry)
+					continue
+				}
+			}
+		}
+		files = append(files, authIndexEntryToGinH(indexed))
+	}
+	h.respondAuthFileList(c, files, opts, result.Total, true)
+	return true
 }
 
 // GetAuthFileModels returns the models supported by a specific auth file
@@ -329,6 +391,7 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 		c.JSON(500, gin.H{"error": fmt.Sprintf("failed to read auth dir: %v", err)})
 		return
 	}
+	listOpts := h.authFileListOptions(c, false)
 	files := make([]gin.H, 0)
 	for _, e := range entries {
 		if e.IsDir() {
@@ -408,7 +471,250 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 			files = append(files, fileData)
 		}
 	}
-	c.JSON(200, gin.H{"files": files})
+	sort.Slice(files, func(i, j int) bool {
+		nameI, _ := files[i]["name"].(string)
+		nameJ, _ := files[j]["name"].(string)
+		return strings.ToLower(nameI) < strings.ToLower(nameJ)
+	})
+	files = filterAuthFileEntries(files, listOpts)
+	total := len(files)
+	files = paginateAuthFileEntries(files, listOpts)
+	h.respondAuthFileList(c, files, listOpts, total, false)
+}
+
+type authFileListOptions struct {
+	Page         int
+	PageSize     int
+	Provider     string
+	Disabled     *bool
+	Keyword      string
+	CooldownOnly bool
+}
+
+func (h *Handler) authFileListOptions(c *gin.Context, indexed bool) authFileListOptions {
+	cfg := config.DefaultAuthIndexCacheConfig()
+	if h != nil && h.cfg != nil {
+		cfg = h.cfg.AuthIndexCache
+		normalizer := &config.Config{AuthIndexCache: cfg}
+		normalizer.NormalizeAuthIndexCacheConfig()
+		cfg = normalizer.AuthIndexCache
+	}
+	page := parsePositiveQueryInt(c, "page", 1)
+	defaultSize := cfg.ListMaxDefault
+	if !indexed && c.Query("page_size") == "" && c.Query("limit") == "" {
+		defaultSize = cfg.ListMaxHard
+	}
+	pageSize := parsePositiveQueryInt(c, "page_size", defaultSize)
+	if c.Query("page_size") == "" {
+		pageSize = parsePositiveQueryInt(c, "limit", defaultSize)
+	}
+	if pageSize > cfg.ListMaxHard {
+		pageSize = cfg.ListMaxHard
+	}
+	if pageSize <= 0 {
+		pageSize = defaultSize
+	}
+	opts := authFileListOptions{
+		Page:         page,
+		PageSize:     pageSize,
+		Provider:     strings.ToLower(strings.TrimSpace(c.Query("provider"))),
+		Keyword:      strings.TrimSpace(c.Query("keyword")),
+		CooldownOnly: parseBoolQuery(c.Query("cooldown_only")) || parseBoolQuery(c.Query("cooldownOnly")),
+	}
+	if rawDisabled := strings.TrimSpace(c.Query("disabled")); rawDisabled != "" {
+		if parsed, err := strconv.ParseBool(rawDisabled); err == nil {
+			opts.Disabled = &parsed
+		}
+	}
+	return opts
+}
+
+func parsePositiveQueryInt(c *gin.Context, key string, fallback int) int {
+	if c == nil {
+		return fallback
+	}
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func parseBoolQuery(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func filterAuthFileEntries(files []gin.H, opts authFileListOptions) []gin.H {
+	if len(files) == 0 {
+		return files
+	}
+	out := files[:0]
+	for _, entry := range files {
+		if opts.Provider != "" {
+			provider := strings.ToLower(strings.TrimSpace(stringValue(entry["provider"])))
+			if provider == "" {
+				provider = strings.ToLower(strings.TrimSpace(stringValue(entry["type"])))
+			}
+			if provider != opts.Provider {
+				continue
+			}
+		}
+		if opts.Disabled != nil {
+			if boolValue(entry["disabled"]) != *opts.Disabled {
+				continue
+			}
+		}
+		if opts.Keyword != "" && !authFileEntryMatchesKeyword(entry, opts.Keyword) {
+			continue
+		}
+		if opts.CooldownOnly && !authFileEntryInCooldown(entry) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func paginateAuthFileEntries(files []gin.H, opts authFileListOptions) []gin.H {
+	if opts.Page <= 0 {
+		opts.Page = 1
+	}
+	if opts.PageSize <= 0 || len(files) == 0 {
+		return files
+	}
+	start := (opts.Page - 1) * opts.PageSize
+	if start >= len(files) {
+		return []gin.H{}
+	}
+	end := start + opts.PageSize
+	if end > len(files) {
+		end = len(files)
+	}
+	return files[start:end]
+}
+
+func (h *Handler) respondAuthFileList(c *gin.Context, files []gin.H, opts authFileListOptions, total int, indexed bool) {
+	if total < len(files) {
+		total = len(files)
+	}
+	c.JSON(200, gin.H{
+		"files":       files,
+		"page":        opts.Page,
+		"page_size":   opts.PageSize,
+		"total":       total,
+		"indexed":     indexed,
+		"has_more":    opts.Page > 0 && opts.PageSize > 0 && opts.Page*opts.PageSize < total,
+		"limited":     opts.PageSize > 0 && total > len(files),
+		"list_capped": opts.PageSize > 0 && len(files) == opts.PageSize && total > len(files),
+	})
+}
+
+func authIndexEntryToGinH(entry authindex.Entry) gin.H {
+	out := gin.H{
+		"id":          entry.ID,
+		"auth_index":  entry.ID,
+		"name":        entry.FileName,
+		"type":        entry.Provider,
+		"provider":    entry.Provider,
+		"status":      entry.Status,
+		"disabled":    entry.Disabled,
+		"unavailable": entry.Unavailable,
+		"source":      "file",
+		"path":        entry.FilePath,
+		"size":        entry.Size,
+		"modtime":     time.Unix(entry.ModTimeUnix, 0).UTC(),
+		"updated_at":  time.Unix(entry.UpdatedUnix, 0).UTC(),
+	}
+	if entry.Email != "" {
+		out["email"] = entry.Email
+	}
+	if entry.ProjectID != "" {
+		out["project_id"] = entry.ProjectID
+	}
+	if entry.AccountType != "" {
+		out["account_type"] = entry.AccountType
+	}
+	if entry.Account != "" {
+		out["account"] = entry.Account
+	}
+	if entry.Priority != 0 {
+		out["priority"] = entry.Priority
+	}
+	if entry.CooldownUntil > 0 {
+		out["cooldown_until"] = time.Unix(entry.CooldownUntil, 0).UTC()
+		out["next_retry_after"] = time.Unix(entry.CooldownUntil, 0).UTC()
+	}
+	return out
+}
+
+func authFileEntryMatchesKeyword(entry gin.H, keyword string) bool {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return true
+	}
+	for _, key := range []string{"name", "id", "email", "project_id", "account", "label"} {
+		if strings.Contains(strings.ToLower(stringValue(entry[key])), keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func authFileEntryInCooldown(entry gin.H) bool {
+	now := time.Now()
+	for _, key := range []string{"cooldown_until", "next_retry_after"} {
+		if ts, ok := timeValue(entry[key]); ok && ts.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		if value == nil {
+			return ""
+		}
+		return fmt.Sprint(value)
+	}
+}
+
+func boolValue(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		parsed, _ := strconv.ParseBool(strings.TrimSpace(v))
+		return parsed
+	default:
+		return false
+	}
+}
+
+func timeValue(value any) (time.Time, bool) {
+	switch v := value.(type) {
+	case time.Time:
+		return v, !v.IsZero()
+	case string:
+		if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(v)); err == nil {
+			return ts, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
@@ -1875,7 +2181,11 @@ func (h *Handler) deleteTokenRecord(ctx context.Context, path string) error {
 	if store == nil {
 		return fmt.Errorf("token store unavailable")
 	}
-	return store.Delete(ctx, path)
+	if err := store.Delete(ctx, path); err != nil {
+		return err
+	}
+	h.syncAuthIndexDelete(ctx, path)
+	return nil
 }
 
 func (h *Handler) tokenStoreWithBaseDir() coreauth.Store {
@@ -1912,12 +2222,69 @@ func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (s
 	if errSave != nil {
 		return savedPath, errSave
 	}
+	h.syncAuthIndexUpsert(ctx, savedPath)
 	if h.postAuthPersistHook != nil {
 		if errHook := h.postAuthPersistHook(ctx, record); errHook != nil {
 			return savedPath, fmt.Errorf("post-auth persist hook failed: %w", errHook)
 		}
 	}
 	return savedPath, nil
+}
+
+func (h *Handler) syncAuthIndexUpsert(ctx context.Context, path string) {
+	if h == nil || h.cfg == nil || !h.cfg.AuthIndexCache.Enabled || strings.TrimSpace(path) == "" {
+		return
+	}
+	authDir, err := util.ResolveAuthDir(h.cfg.AuthDir)
+	if err != nil || strings.TrimSpace(authDir) == "" {
+		return
+	}
+	indexCtx, cancel := context.WithTimeout(detachedContext(ctx), 3*time.Second)
+	defer cancel()
+	store, err := authindex.Open(indexCtx, authDir, h.cfg.AuthIndexCache)
+	if err != nil {
+		log.WithError(err).Warn("auth index upsert skipped")
+		return
+	}
+	defer func() { _ = store.Close() }()
+	if err = store.UpsertFile(indexCtx, path); err != nil {
+		log.WithError(err).Warnf("auth index upsert failed for %s", filepath.Base(path))
+	}
+}
+
+func (h *Handler) syncAuthIndexDelete(ctx context.Context, path string) {
+	if h == nil || h.cfg == nil || !h.cfg.AuthIndexCache.Enabled || strings.TrimSpace(path) == "" {
+		return
+	}
+	authDir, err := util.ResolveAuthDir(h.cfg.AuthDir)
+	if err != nil || strings.TrimSpace(authDir) == "" {
+		return
+	}
+	id := path
+	if rel, errRel := filepath.Rel(authDir, path); errRel == nil && rel != "" {
+		id = rel
+	}
+	if runtime.GOOS == "windows" {
+		id = strings.ToLower(id)
+	}
+	indexCtx, cancel := context.WithTimeout(detachedContext(ctx), 3*time.Second)
+	defer cancel()
+	store, err := authindex.Open(indexCtx, authDir, h.cfg.AuthIndexCache)
+	if err != nil {
+		log.WithError(err).Warn("auth index delete skipped")
+		return
+	}
+	defer func() { _ = store.Close() }()
+	if err = store.Delete(indexCtx, id); err != nil {
+		log.WithError(err).Warnf("auth index delete failed for %s", filepath.Base(path))
+	}
+}
+
+func detachedContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 func (h *Handler) RequestAnthropicToken(c *gin.Context) {

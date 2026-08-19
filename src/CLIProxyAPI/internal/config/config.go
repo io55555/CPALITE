@@ -51,6 +51,11 @@ type Config struct {
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 
+	// AuthIndexCache 控制可选的 SQLite 认证文件索引缓存。
+	AuthIndexCache AuthIndexCacheConfig `yaml:"auth-index-cache" json:"auth-index-cache"`
+	// SQLiteCache 兼容旧规格中的 sqlite-cache 配置名。
+	SQLiteCache AuthIndexCacheConfig `yaml:"sqlite-cache" json:"sqlite-cache,omitempty"`
+
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
 
@@ -221,6 +226,26 @@ type Config struct {
 
 	// CredentialInFlight configures credential observation snapshots.
 	CredentialInFlight CredentialInFlightConfig `yaml:"credential-in-flight" json:"credential-in-flight"`
+}
+
+// AuthIndexCacheConfig 控制可选的 SQLite 认证文件索引。
+type AuthIndexCacheConfig struct {
+	// Enabled 控制是否启用 SQLite 认证索引。
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// DBPath 覆盖默认的 <auth-dir>/.auth-cache/index.db 路径。
+	DBPath string `yaml:"db-path" json:"db-path"`
+	// LRUSize 预留完整认证对象 hydrate 缓存容量。
+	LRUSize int `yaml:"lru-size" json:"lru-size"`
+	// PageCacheKB 控制 SQLite page cache 大小，单位 KB。
+	PageCacheKB int `yaml:"page-cache-kb" json:"page-cache-kb"`
+	// SyncMode 兼容 queued 或 sync 两种同步模式配置。
+	SyncMode string `yaml:"sync-mode" json:"sync-mode"`
+	// RebuildOnStart 预留启动时强制重建索引开关。
+	RebuildOnStart bool `yaml:"rebuild-on-start" json:"rebuild-on-start"`
+	// ListMaxDefault 是启用索引后的管理列表默认分页大小。
+	ListMaxDefault int `yaml:"list-max-default" json:"list-max-default"`
+	// ListMaxHard 是单次管理列表响应的硬上限。
+	ListMaxHard int `yaml:"list-max-hard" json:"list-max-hard"`
 }
 
 // PluginsConfig holds dynamic plugin system settings.
@@ -1108,6 +1133,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
 	cfg.SaveCooldownStatus = false
+	cfg.AuthIndexCache = DefaultAuthIndexCacheConfig()
 	cfg.TransientErrorCooldownSeconds = 0
 	cfg.CodexQuotaCooldownBaseSeconds = 600
 	cfg.CodexQuotaCooldownMaxSeconds = 43200
@@ -1128,6 +1154,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 		}
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+	cfg.NormalizeAuthIndexCacheConfig()
 
 	// NOTE: Startup legacy key migration is intentionally disabled.
 	// Reason: avoid mutating config.yaml during server startup.
@@ -1322,6 +1349,57 @@ func (cfg *Config) NormalizePluginsConfig() {
 	cfg.Plugins.StoreAuth = sdkpluginstore.NormalizeAuthConfigs(cfg.Plugins.StoreAuth)
 	if cfg.Plugins.Configs == nil {
 		cfg.Plugins.Configs = map[string]PluginInstanceConfig{}
+	}
+}
+
+// DefaultAuthIndexCacheConfig 返回可选认证索引缓存的保守默认值。
+func DefaultAuthIndexCacheConfig() AuthIndexCacheConfig {
+	return AuthIndexCacheConfig{
+		Enabled:        false,
+		LRUSize:        128,
+		PageCacheKB:    8192,
+		SyncMode:       "queued",
+		RebuildOnStart: false,
+		ListMaxDefault: 200,
+		ListMaxHard:    2000,
+	}
+}
+
+// NormalizeAuthIndexCacheConfig 应用默认值，并兼容 sqlite-cache 别名。
+func (cfg *Config) NormalizeAuthIndexCacheConfig() {
+	if cfg == nil {
+		return
+	}
+	primary := cfg.AuthIndexCache
+	alias := cfg.SQLiteCache
+	if !primary.Enabled && alias.Enabled {
+		primary = alias
+	}
+	defaults := DefaultAuthIndexCacheConfig()
+	if primary.LRUSize <= 0 {
+		primary.LRUSize = defaults.LRUSize
+	}
+	if primary.PageCacheKB <= 0 {
+		primary.PageCacheKB = defaults.PageCacheKB
+	}
+	mode := strings.ToLower(strings.TrimSpace(primary.SyncMode))
+	if mode != "sync" && mode != "queued" {
+		mode = defaults.SyncMode
+	}
+	primary.SyncMode = mode
+	if primary.ListMaxDefault <= 0 {
+		primary.ListMaxDefault = defaults.ListMaxDefault
+	}
+	if primary.ListMaxHard <= 0 {
+		primary.ListMaxHard = defaults.ListMaxHard
+	}
+	if primary.ListMaxDefault > primary.ListMaxHard {
+		primary.ListMaxDefault = primary.ListMaxHard
+	}
+	primary.DBPath = strings.TrimSpace(primary.DBPath)
+	cfg.AuthIndexCache = primary
+	if cfg.SQLiteCache.Enabled {
+		cfg.SQLiteCache = primary
 	}
 }
 

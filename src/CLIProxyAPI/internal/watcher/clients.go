@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/store/authindex"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/diff"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/synthesizer"
@@ -63,6 +65,7 @@ func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string
 	var authFileCount int
 	if rescanAuth {
 		authFileCount = w.loadFileClients(cfg)
+		w.syncAuthIndexDir(cfg)
 		log.Debugf("loaded %d file-based clients", authFileCount)
 	} else {
 		w.clientsMutex.RLock()
@@ -268,6 +271,7 @@ func (w *Watcher) addOrUpdateClientLocked(path string) {
 	w.clientsMutex.Unlock()
 
 	if errSynthesize == nil {
+		w.syncAuthIndexFile(cfg, path)
 		w.persistAuthAsync(fmt.Sprintf("Sync auth %s", filepath.Base(path)), path)
 	}
 	w.dispatchAuthUpdates(updates)
@@ -295,9 +299,86 @@ func (w *Watcher) removeClientLocked(path string) {
 	updates := w.computePerPathUpdatesLocked(oldByID, map[string]*coreauth.Auth{})
 	w.clientsMutex.Unlock()
 
+	w.syncAuthIndexDelete(path)
 	w.persistAuthAsync(fmt.Sprintf("Remove auth %s", filepath.Base(path)), path)
 	w.dispatchAuthUpdates(updates)
 	redisqueue.NotifyUsageRefresh()
+}
+
+func (w *Watcher) syncAuthIndexDir(cfg *config.Config) {
+	if w == nil || cfg == nil || !cfg.AuthIndexCache.Enabled {
+		return
+	}
+	authDir, err := util.ResolveAuthDir(cfg.AuthDir)
+	if err != nil || strings.TrimSpace(authDir) == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	store, err := authindex.Open(ctx, authDir, cfg.AuthIndexCache)
+	if err != nil {
+		log.WithError(err).Warn("auth index startup sync skipped")
+		return
+	}
+	defer func() { _ = store.Close() }()
+	if err = store.SyncDir(ctx); err != nil {
+		log.WithError(err).Warn("auth index startup sync failed")
+	}
+}
+
+func (w *Watcher) syncAuthIndexFile(cfg *config.Config, path string) {
+	if w == nil || cfg == nil || !cfg.AuthIndexCache.Enabled || strings.TrimSpace(path) == "" {
+		return
+	}
+	authDir, err := util.ResolveAuthDir(cfg.AuthDir)
+	if err != nil || strings.TrimSpace(authDir) == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store, err := authindex.Open(ctx, authDir, cfg.AuthIndexCache)
+	if err != nil {
+		log.WithError(err).Warn("auth index file sync skipped")
+		return
+	}
+	defer func() { _ = store.Close() }()
+	if err = store.UpsertFile(ctx, path); err != nil {
+		log.WithError(err).Warnf("auth index file sync failed for %s", filepath.Base(path))
+	}
+}
+
+func (w *Watcher) syncAuthIndexDelete(path string) {
+	if w == nil || strings.TrimSpace(path) == "" {
+		return
+	}
+	w.clientsMutex.RLock()
+	cfg := w.config
+	w.clientsMutex.RUnlock()
+	if cfg == nil || !cfg.AuthIndexCache.Enabled {
+		return
+	}
+	authDir, err := util.ResolveAuthDir(cfg.AuthDir)
+	if err != nil || strings.TrimSpace(authDir) == "" {
+		return
+	}
+	id := path
+	if rel, errRel := filepath.Rel(authDir, path); errRel == nil && rel != "" {
+		id = rel
+	}
+	if runtime.GOOS == "windows" {
+		id = strings.ToLower(id)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store, err := authindex.Open(ctx, authDir, cfg.AuthIndexCache)
+	if err != nil {
+		log.WithError(err).Warn("auth index delete sync skipped")
+		return
+	}
+	defer func() { _ = store.Close() }()
+	if err = store.Delete(ctx, id); err != nil {
+		log.WithError(err).Warnf("auth index delete sync failed for %s", filepath.Base(path))
+	}
 }
 
 func (w *Watcher) computePerPathUpdatesLocked(oldByID, newByID map[string]*coreauth.Auth) []AuthUpdate {
