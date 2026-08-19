@@ -529,14 +529,14 @@ func (h *Handler) authFileListOptions(c *gin.Context, indexed bool) authFileList
 		normalizer.NormalizeAuthIndexCacheConfig()
 		cfg = normalizer.AuthIndexCache
 	}
-	page := parsePositiveQueryInt(c, "page", 1)
+	page := parseAuthFilePositiveQueryInt(c, "page", 1)
 	defaultSize := cfg.ListMaxDefault
 	if !indexed && c.Query("page_size") == "" && c.Query("limit") == "" {
 		defaultSize = cfg.ListMaxHard
 	}
-	pageSize := parsePositiveQueryInt(c, "page_size", defaultSize)
+	pageSize := parseAuthFilePositiveQueryInt(c, "page_size", defaultSize)
 	if c.Query("page_size") == "" {
-		pageSize = parsePositiveQueryInt(c, "limit", defaultSize)
+		pageSize = parseAuthFilePositiveQueryInt(c, "limit", defaultSize)
 	}
 	if pageSize > cfg.ListMaxHard {
 		pageSize = cfg.ListMaxHard
@@ -559,7 +559,7 @@ func (h *Handler) authFileListOptions(c *gin.Context, indexed bool) authFileList
 	return opts
 }
 
-func parsePositiveQueryInt(c *gin.Context, key string, fallback int) int {
+func parseAuthFilePositiveQueryInt(c *gin.Context, key string, fallback int) int {
 	if c == nil {
 		return fallback
 	}
@@ -590,16 +590,16 @@ func filterAuthFileEntries(files []gin.H, opts authFileListOptions) []gin.H {
 	out := files[:0]
 	for _, entry := range files {
 		if opts.Provider != "" {
-			provider := strings.ToLower(strings.TrimSpace(stringValue(entry["provider"])))
+			provider := strings.ToLower(strings.TrimSpace(authFileEntryStringValue(entry["provider"])))
 			if provider == "" {
-				provider = strings.ToLower(strings.TrimSpace(stringValue(entry["type"])))
+				provider = strings.ToLower(strings.TrimSpace(authFileEntryStringValue(entry["type"])))
 			}
 			if provider != opts.Provider {
 				continue
 			}
 		}
 		if opts.Disabled != nil {
-			if boolValue(entry["disabled"]) != *opts.Disabled {
+			if authFileEntryBoolValue(entry["disabled"]) != *opts.Disabled {
 				continue
 			}
 		}
@@ -692,7 +692,7 @@ func authFileEntryMatchesKeyword(entry gin.H, keyword string) bool {
 		return true
 	}
 	for _, key := range []string{"name", "id", "email", "project_id", "account", "label"} {
-		if strings.Contains(strings.ToLower(stringValue(entry[key])), keyword) {
+		if strings.Contains(strings.ToLower(authFileEntryStringValue(entry[key])), keyword) {
 			return true
 		}
 	}
@@ -709,7 +709,7 @@ func authFileEntryInCooldown(entry gin.H) bool {
 	return false
 }
 
-func stringValue(value any) string {
+func authFileEntryStringValue(value any) string {
 	switch v := value.(type) {
 	case string:
 		return v
@@ -723,7 +723,7 @@ func stringValue(value any) string {
 	}
 }
 
-func boolValue(value any) bool {
+func authFileEntryBoolValue(value any) bool {
 	switch v := value.(type) {
 	case bool:
 		return v
