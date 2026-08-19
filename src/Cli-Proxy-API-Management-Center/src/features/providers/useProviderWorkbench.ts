@@ -62,7 +62,12 @@ import {
   isQiniuCloudOpenAIProvider,
 } from './qiniuCloud';
 import { buildKimiRaw, isKimiClaudeProvider, isKimiOpenAIProvider } from './kimi';
-import { getSponsorProviderDefinition, type SponsorProtocolUrls } from './sponsorDefinitions';
+import {
+  getSponsorProviderDefinition,
+  isTemporarilyHiddenSponsorBrand,
+  TEMPORARILY_HIDDEN_SPONSOR_BRANDS,
+  type SponsorProtocolUrls,
+} from './sponsorDefinitions';
 import { runSponsorMutationWithRecovery } from './sponsorMutationRecovery';
 
 export interface UseProviderWorkbenchResult {
@@ -434,7 +439,10 @@ export function useProviderWorkbench(): UseProviderWorkbenchResult {
         case 'gemini':
           resources = (config.geminiApiKeys ?? []).reduce<ProviderResource[]>(
             (out, item, index) => {
-              if (!isCode0GeminiProvider(item) && !isQiniuCloudGeminiProvider(item)) {
+              if (
+                !isCode0GeminiProvider(item) &&
+                (qiniuCloudHidden || !isQiniuCloudGeminiProvider(item))
+              ) {
                 out.push(geminiToResource(item, index));
               }
               return out;
@@ -447,8 +455,8 @@ export function useProviderWorkbench(): UseProviderWorkbenchResult {
             if (
               !isApiKeyFunCodexProvider(item) &&
               !isCode0CodexProvider(item) &&
-              !isFennoAICodexProvider(item) &&
-              !isQiniuCloudCodexProvider(item)
+              (fennoAIHidden || !isFennoAICodexProvider(item)) &&
+              (qiniuCloudHidden || !isQiniuCloudCodexProvider(item))
             ) {
               out.push(codexToResource(item, index));
             }
@@ -464,8 +472,8 @@ export function useProviderWorkbench(): UseProviderWorkbenchResult {
               if (
                 !isApiKeyFunClaudeProvider(item) &&
                 !isCode0ClaudeProvider(item) &&
-                !isFennoAIClaudeProvider(item) &&
-                !isQiniuCloudClaudeProvider(item) &&
+                (fennoAIHidden || !isFennoAIClaudeProvider(item)) &&
+                (qiniuCloudHidden || !isQiniuCloudClaudeProvider(item)) &&
                 !isKimiClaudeProvider(item) &&
                 !isClaudeApiProvider(item)
               ) {
@@ -496,7 +504,7 @@ export function useProviderWorkbench(): UseProviderWorkbenchResult {
               if (
                 !isApiKeyFunOpenAIProvider(item) &&
                 !isCode0OpenAIProvider(item) &&
-                !isQiniuCloudOpenAIProvider(item) &&
+                (qiniuCloudHidden || !isQiniuCloudOpenAIProvider(item)) &&
                 !isKimiOpenAIProvider(item)
               ) {
                 out.push(openaiToResource(item, index));

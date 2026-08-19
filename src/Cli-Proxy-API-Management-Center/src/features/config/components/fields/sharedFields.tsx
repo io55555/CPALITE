@@ -108,48 +108,6 @@ export function SponsorHintSpacer() {
   );
 }
 
-/**
- * 与代理 URL 字段同排时的隐形占位行：渲染在标签上方（Input 的 topExtra），
- * 赞助商存在时把同排字段整体下移与赞助行同高，让输入框水平对齐，
- * 同时标签与输入框之间保持正常间距；无赞助商则不渲染。
- */
-export function SponsorHintSpacer() {
-  if (SPONSORS.length === 0) return null;
-  return (
-    <p className={fieldStyles.fieldSponsorSpacer} aria-hidden="true">
-      &nbsp;
-    </p>
-  );
-}
-
-/**
- * 与代理 URL 字段同排时的隐形占位行：渲染在标签上方（Input 的 topExtra），
- * 赞助商存在时把同排字段整体下移与赞助行同高，让输入框水平对齐，
- * 同时标签与输入框之间保持正常间距；无赞助商则不渲染。
- */
-export function SponsorHintSpacer() {
-  if (SPONSORS.length === 0) return null;
-  return (
-    <p className={fieldStyles.fieldSponsorSpacer} aria-hidden="true">
-      &nbsp;
-    </p>
-  );
-}
-
-/**
- * 与代理 URL 字段同排时的隐形占位行：渲染在标签上方（Input 的 topExtra），
- * 赞助商存在时把同排字段整体下移与赞助行同高，让输入框水平对齐，
- * 同时标签与输入框之间保持正常间距；无赞助商则不渲染。
- */
-export function SponsorHintSpacer() {
-  if (SPONSORS.length === 0) return null;
-  return (
-    <p className={fieldStyles.fieldSponsorSpacer} aria-hidden="true">
-      &nbsp;
-    </p>
-  );
-}
-
 export function ApiKeysField({ values, disabled, onChange }: SharedFieldProps) {
   return (
     <FieldAnchor fieldId="apiKeys">
