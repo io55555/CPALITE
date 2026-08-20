@@ -65,7 +65,6 @@ func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string
 	var authFileCount int
 	if rescanAuth {
 		authFileCount = w.loadFileClients(cfg)
-		w.syncAuthIndexDir(cfg)
 		log.Debugf("loaded %d file-based clients", authFileCount)
 	} else {
 		w.clientsMutex.RLock()
@@ -243,27 +242,6 @@ func (w *Watcher) removeClientLocked(path string) {
 	w.persistAuthAsync(fmt.Sprintf("Remove auth %s", filepath.Base(path)), path)
 	w.dispatchAuthUpdates(updates)
 	redisqueue.NotifyUsageRefresh()
-}
-
-func (w *Watcher) syncAuthIndexDir(cfg *config.Config) {
-	if w == nil || cfg == nil || !cfg.AuthIndexCache.Enabled {
-		return
-	}
-	authDir, err := util.ResolveAuthDir(cfg.AuthDir)
-	if err != nil || strings.TrimSpace(authDir) == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	store, err := authindex.Open(ctx, authDir, cfg.AuthIndexCache)
-	if err != nil {
-		log.WithError(err).Warn("auth index startup sync skipped")
-		return
-	}
-	defer func() { _ = store.Close() }()
-	if err = store.SyncDir(ctx); err != nil {
-		log.WithError(err).Warn("auth index startup sync failed")
-	}
 }
 
 func (w *Watcher) loadAuthIndexSnapshot(cfg *config.Config) {

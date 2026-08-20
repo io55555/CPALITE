@@ -619,6 +619,16 @@ func (m *Manager) SetStore(store Store) {
 	m.clearHydrateCacheLocked()
 }
 
+// Store 返回当前持久化层，供管理接口复用长生命周期缓存连接。
+func (m *Manager) Store() Store {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.store
+}
+
 // SetCooldownStateStore swaps the independent runtime cooldown state store.
 func (m *Manager) SetCooldownStateStore(store CooldownStateStore) {
 	if m == nil {

@@ -299,13 +299,14 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
-	store, err := authindex.Open(ctx, authDir, cfg)
+	store, closeStore, err := h.authIndexStoreForList(ctx, authDir, cfg)
 	if err != nil {
 		log.WithError(err).Warn("auth index unavailable; falling back to legacy auth list")
 		return false
 	}
-	store.SetSynthesisContext(h.cfg, h.authIndexPluginParser())
-	defer func() { _ = store.Close() }()
+	if closeStore != nil {
+		defer closeStore()
+	}
 	opts := h.authFileListOptions(c, true)
 	result, err := store.Query(ctx, authindex.QueryOptions{
 		Page:         opts.Page,
@@ -344,6 +345,20 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 	}
 	h.respondAuthFileList(c, files, opts, result.Total, true, summary)
 	return true
+}
+
+func (h *Handler) authIndexStoreForList(ctx context.Context, authDir string, cfg config.AuthIndexCacheConfig) (*authindex.Store, func(), error) {
+	if h != nil && h.authManager != nil {
+		if store, ok := h.authManager.Store().(*authindex.Store); ok && store != nil {
+			return store, nil, nil
+		}
+	}
+	store, err := authindex.Open(ctx, authDir, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	store.SetSynthesisContext(h.cfg, h.authIndexPluginParser())
+	return store, func() { _ = store.Close() }, nil
 }
 
 func mergeAuthIndexRuntimeState(entry gin.H, auth *coreauth.Auth) gin.H {
@@ -1520,7 +1535,7 @@ func (h *Handler) writeAuthFile(ctx context.Context, name string, data []byte) e
 	if errWrite := os.WriteFile(dst, data, 0o600); errWrite != nil {
 		return fmt.Errorf("failed to write file: %w", errWrite)
 	}
-	if err := h.upsertAuthRecord(ctx, auth); err != nil {
+	if err := h.upsertAuthRecord(coreauth.WithSkipPersist(ctx), auth); err != nil {
 		return err
 	}
 	return nil
