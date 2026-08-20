@@ -5969,6 +5969,16 @@ func (m *Manager) useSchedulerFastPath() bool {
 	return isBuiltInSelector(m.selector)
 }
 
+func (m *Manager) usesLightweightAuthStore() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	_, ok := m.store.(LightweightAuthProvider)
+	m.mu.RUnlock()
+	return ok
+}
+
 func shouldRetrySchedulerPick(err error) bool {
 	if err == nil {
 		return false
@@ -5986,6 +5996,9 @@ func shouldRetrySchedulerPick(err error) bool {
 
 func (m *Manager) routeAwareSelectionRequired(auth *Auth, routeModel string) bool {
 	if auth == nil || strings.TrimSpace(routeModel) == "" {
+		return false
+	}
+	if IsSQLiteAuthStub(auth) {
 		return false
 	}
 	return m.selectionModelKeyForAuth(auth, routeModel) != canonicalModelKey(routeModel)
@@ -6181,7 +6194,7 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 	if m.hasPluginScheduler() || !m.useSchedulerFastPath() {
 		return m.pickNextLegacy(ctx, provider, model, opts, tried)
 	}
-	if strings.TrimSpace(model) != "" {
+	if strings.TrimSpace(model) != "" && !m.usesLightweightAuthStore() {
 		m.mu.RLock()
 		for _, candidate := range m.auths {
 			if candidate == nil || executorKeyFromAuth(candidate) != provider || candidate.Disabled {
@@ -6365,7 +6378,7 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 	if len(eligibleProviders) == 0 {
 		return nil, nil, "", &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
-	if strings.TrimSpace(model) != "" {
+	if strings.TrimSpace(model) != "" && !m.usesLightweightAuthStore() {
 		providerSet := make(map[string]struct{}, len(eligibleProviders))
 		for _, providerKey := range eligibleProviders {
 			providerSet[providerKey] = struct{}{}

@@ -286,10 +286,6 @@ func (w *Watcher) loadAuthIndexSnapshot(cfg *config.Config) {
 		return
 	}
 	defer func() { _ = store.Close() }()
-	if err = store.SyncDir(ctx); err != nil {
-		log.WithError(err).Warn("auth index snapshot sync failed")
-		return
-	}
 	auths, err := store.ListLightweight(ctx)
 	if err != nil {
 		log.WithError(err).Warn("auth index snapshot load failed")

@@ -306,10 +306,6 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 	}
 	store.SetSynthesisContext(h.cfg, h.authIndexPluginParser())
 	defer func() { _ = store.Close() }()
-	if err = store.SyncDir(ctx); err != nil {
-		log.WithError(err).Warn("auth index sync failed; falling back to legacy auth list")
-		return false
-	}
 	opts := h.authFileListOptions(c, true)
 	result, err := store.Query(ctx, authindex.QueryOptions{
 		Page:         opts.Page,
