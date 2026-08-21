@@ -30,15 +30,25 @@ type DeleteAllOptions = {
 
 type LoadFilesOptions = AuthFilesListOptions;
 
-const buildSummaryOptions = (): LoadFilesOptions => ({
+const buildTotalSummaryOptions = (): LoadFilesOptions => ({
   page: 1,
   pageSize: 1,
+});
+
+const buildFilteredSummaryOptions = (options: LoadFilesOptions = {}): LoadFilesOptions => ({
+  page: 1,
+  pageSize: 1,
+  cooldownOnly: options.cooldownOnly,
+  disabled: options.disabled,
+  keyword: options.keyword,
+  status: options.status,
 });
 
 export type UseAuthFilesDataResult = {
   files: AuthFileItem[];
   total: number;
-  summary?: AuthFilesSummary;
+  totalSummary?: AuthFilesSummary;
+  filteredSummary?: AuthFilesSummary;
   serverPage: number;
   serverPageSize: number;
   selectedFiles: Set<string>;
@@ -75,7 +85,8 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
 
   const [files, setFiles] = useState<AuthFileItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState<AuthFilesSummary | undefined>();
+  const [totalSummary, setTotalSummary] = useState<AuthFilesSummary | undefined>();
+  const [filteredSummary, setFilteredSummary] = useState<AuthFilesSummary | undefined>();
   const [serverPage, setServerPage] = useState(1);
   const [serverPageSize, setServerPageSize] = useState(100);
   const [loading, setLoading] = useState(true);
@@ -181,12 +192,16 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     setLoading(true);
     setError('');
     try {
-      const summaryData = await authFilesApi.list(buildSummaryOptions());
-      const data = await authFilesApi.list(options);
+      const [totalSummaryData, filteredSummaryData, data] = await Promise.all([
+        authFilesApi.list(buildTotalSummaryOptions()),
+        authFilesApi.list(buildFilteredSummaryOptions(options)),
+        authFilesApi.list(options),
+      ]);
       const nextFiles = data?.files || [];
       setFiles(nextFiles);
       setTotal(typeof data.total === 'number' ? data.total : nextFiles.length);
-      setSummary(summaryData.summary ?? data.summary);
+      setTotalSummary(totalSummaryData.summary ?? data.summary);
+      setFilteredSummary(filteredSummaryData.summary ?? data.summary);
       setServerPage(typeof data.page === 'number' && data.page > 0 ? data.page : options.page ?? 1);
       setServerPageSize(
         typeof data.page_size === 'number' && data.page_size > 0
@@ -713,7 +728,8 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
   return {
     files,
     total,
-    summary,
+    totalSummary,
+    filteredSummary,
     serverPage,
     serverPageSize,
     selectedFiles,

@@ -173,7 +173,8 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   const {
     files,
     total,
-    summary,
+    totalSummary,
+    filteredSummary,
     serverPage,
     selectedFiles,
     selectionCount,
@@ -501,7 +502,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   );
 
   const existingTypes = useMemo(() => {
-    const providerCounts = getSummaryProviderCounts(summary);
+    const providerCounts = getSummaryProviderCounts(totalSummary);
     const types = new Set<string>(['all']);
     Object.keys(providerCounts).forEach((type) => {
       if (type) types.add(type);
@@ -511,7 +512,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
       if (type) types.add(type);
     });
     return Array.from(types);
-  }, [files, summary]);
+  }, [files, totalSummary]);
 
   const filesMatchingStatusFilters = useMemo(
     () =>
@@ -575,16 +576,27 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   );
 
   const typeCounts = useMemo(() => {
-    const providerCounts = getSummaryProviderCounts(summary);
-    const counts: Record<string, number> = {
-      ...providerCounts,
-      all:
-        typeof summary?.total === 'number' && Number.isFinite(summary.total)
-          ? summary.total
-          : filesMatchingStatusFilters.length,
-    };
+    const totalProviderCounts = getSummaryProviderCounts(totalSummary);
+    const filteredProviderCounts = getSummaryProviderCounts(filteredSummary);
+    const counts: Record<string, { filtered: number; total: number }> = {};
+    const providers = new Set([...Object.keys(totalProviderCounts), ...Object.keys(filteredProviderCounts)]);
+    providers.forEach((provider) => {
+      counts[provider] = {
+        filtered: filteredProviderCounts[provider] ?? 0,
+        total: totalProviderCounts[provider] ?? 0,
+      };
+    });
+    const totalCount =
+      typeof totalSummary?.total === 'number' && Number.isFinite(totalSummary.total)
+        ? totalSummary.total
+        : filesMatchingStatusFilters.length;
+    const filteredCount =
+      typeof filteredSummary?.total === 'number' && Number.isFinite(filteredSummary.total)
+        ? filteredSummary.total
+        : filesMatchingStatusFilters.length;
+    counts.all = { filtered: filteredCount, total: totalCount };
     return counts;
-  }, [filesMatchingStatusFilters.length, summary]);
+  }, [filesMatchingStatusFilters.length, filteredSummary, totalSummary]);
 
   const wildcardSearch = useMemo(() => buildWildcardSearch(normalizedSearch), [normalizedSearch]);
 
@@ -816,7 +828,9 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
                 )}
                 <span className={styles.filterTagText}>{getTypeLabel(t, type)}</span>
               </span>
-              <span className={styles.filterTagCount}>{typeCounts[type] ?? 0}</span>
+              <span className={styles.filterTagCount}>
+                {`${typeCounts[type]?.filtered ?? 0}/${typeCounts[type]?.total ?? 0}`}
+              </span>
             </button>
           );
         })}

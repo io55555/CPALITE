@@ -25,6 +25,8 @@ interface LoadQuotaResult<TData> {
   errorStatus?: number;
 }
 
+const QUOTA_REFRESH_CONCURRENCY = 4;
+
 export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>) {
   const { t } = useTranslation();
   const quota = useQuotaStore(config.storeSelector);
@@ -54,18 +56,35 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
           return nextState;
         });
 
-        const results = await Promise.all(
-          targets.map(async (file): Promise<LoadQuotaResult<TData>> => {
+        const results: LoadQuotaResult<TData>[] = [];
+        let nextIndex = 0;
+        const runNext = async (): Promise<void> => {
+          while (nextIndex < targets.length) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            const file = targets[currentIndex];
+            if (!file) continue;
+
             try {
               const data = await config.fetchQuota(file, t);
-              return { name: file.name, status: 'success', data };
+              results[currentIndex] = { name: file.name, status: 'success', data };
             } catch (err: unknown) {
               const message = err instanceof Error ? err.message : t('common.unknown_error');
               const errorStatus = getStatusFromError(err);
-              return { name: file.name, status: 'error', error: message, errorStatus };
+              results[currentIndex] = {
+                name: file.name,
+                status: 'error',
+                error: message,
+                errorStatus,
+              };
             }
-          })
+          }
+        };
+        const workers = Array.from(
+          { length: Math.min(QUOTA_REFRESH_CONCURRENCY, targets.length) },
+          () => runNext()
         );
+        await Promise.all(workers);
 
         if (requestId !== requestIdRef.current) return;
 

@@ -140,7 +140,7 @@ func (h *Handler) APICall(c *gin.Context) {
 	}
 
 	authIndex := firstNonEmptyString(body.AuthIndexSnake, body.AuthIndexCamel, body.AuthIndexPascal)
-	auth := h.authByIndex(authIndex)
+	auth := h.authByIndexForRequest(c.Request.Context(), authIndex)
 
 	reqHeaders := body.Header
 	if reqHeaders == nil {
@@ -659,6 +659,22 @@ func (h *Handler) authByIndex(authIndex string) *coreauth.Auth {
 		}
 	}
 	return nil
+}
+
+func (h *Handler) authByIndexForRequest(ctx context.Context, authIndex string) *coreauth.Auth {
+	auth := h.authByIndex(authIndex)
+	if auth == nil || h == nil || h.authManager == nil {
+		return auth
+	}
+	full, err := h.authManager.HydrateAuthForRequest(ctx, auth)
+	if err != nil {
+		log.WithError(err).WithField("auth_index", authIndex).Debug("management APICall hydrate auth failed")
+		return auth
+	}
+	if full == nil {
+		return auth
+	}
+	return full
 }
 
 func (h *Handler) apiCallTransport(auth *coreauth.Auth, requestProxyURL string) http.RoundTripper {

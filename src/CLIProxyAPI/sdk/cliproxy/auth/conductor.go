@@ -2777,6 +2777,11 @@ func (m *Manager) hydrateRequestAuth(ctx context.Context, auth *Auth) (*Auth, er
 	return full.Clone(), nil
 }
 
+// HydrateAuthForRequest 按需恢复请求执行所需的完整认证对象，不替换运行态常驻 Stub。
+func (m *Manager) HydrateAuthForRequest(ctx context.Context, auth *Auth) (*Auth, error) {
+	return m.hydrateRequestAuth(ctx, auth)
+}
+
 func mergeStubRuntimeState(full *Auth, stub *Auth) {
 	if full == nil || stub == nil {
 		return
