@@ -121,10 +121,16 @@ const getSummaryProviderCounts = (summary: unknown): Record<string, number> => {
     (summary as { by_provider?: unknown; byProvider?: unknown }).by_provider ??
     (summary as { byProvider?: unknown }).byProvider;
   if (!raw || typeof raw !== 'object') return {};
-  return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>)
-      .map(([key, value]) => [normalizeProviderKey(key), Number(value)])
-      .filter(([key, value]) => key && Number.isFinite(value) && value > 0)
+  return Object.entries(raw as Record<string, unknown>).reduce<Record<string, number>>(
+    (result, [key, value]) => {
+      const provider = normalizeProviderKey(key);
+      const count = Number(value);
+      if (provider && Number.isFinite(count) && count > 0) {
+        result[provider] = count;
+      }
+      return result;
+    },
+    {}
   );
 };
 

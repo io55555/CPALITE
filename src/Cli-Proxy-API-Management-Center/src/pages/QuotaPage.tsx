@@ -26,10 +26,16 @@ const summaryProviderCounts = (summary: unknown): Record<string, number> => {
   const record = summary as { by_provider?: unknown; byProvider?: unknown };
   const raw = record.by_provider ?? record.byProvider;
   if (!raw || typeof raw !== 'object') return {};
-  return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>)
-      .map(([key, value]) => [key.trim().toLowerCase(), Number(value)])
-      .filter(([key, value]) => key && Number.isFinite(value) && value > 0)
+  return Object.entries(raw as Record<string, unknown>).reduce<Record<string, number>>(
+    (result, [key, value]) => {
+      const provider = key.trim().toLowerCase();
+      const count = Number(value);
+      if (provider && Number.isFinite(count) && count > 0) {
+        result[provider] = count;
+      }
+      return result;
+    },
+    {}
   );
 };
 
