@@ -195,12 +195,7 @@ func (h *Handler) APICall(c *gin.Context) {
 		req.Host = hostOverride
 	}
 
-	httpClient := &http.Client{
-		Timeout: defaultAPICallTimeout,
-	}
-	httpClient.Transport = h.apiCallTransport(auth, requestProxyURL)
-
-	resp, errDo := httpClient.Do(req)
+	resp, errDo := h.doAPICallRequest(c.Request.Context(), auth, req, requestProxyURL)
 	if errDo != nil {
 		log.WithError(errDo).Debug("management APICall request failed")
 		c.JSON(http.StatusBadGateway, gin.H{"error": "request failed"})
@@ -223,6 +218,36 @@ func (h *Handler) APICall(c *gin.Context) {
 		Header:     resp.Header,
 		Body:       string(respBody),
 	})
+}
+
+func (h *Handler) doAPICallRequest(ctx context.Context, auth *coreauth.Auth, req *http.Request, requestProxyURL string) (*http.Response, error) {
+	if ctx == nil && req != nil {
+		ctx = req.Context()
+	}
+	if strings.TrimSpace(requestProxyURL) == "" && h != nil && h.authManager != nil && auth != nil {
+		if resp, err := h.authManager.HttpRequest(ctx, auth, req); err == nil || !isAPICallProviderUnsupported(err) {
+			return resp, err
+		}
+	}
+	httpClient := &http.Client{
+		Timeout: defaultAPICallTimeout,
+	}
+	httpClient.Transport = h.apiCallTransport(auth, requestProxyURL)
+	return httpClient.Do(req)
+}
+
+func isAPICallProviderUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	if coreErr, ok := err.(*coreauth.Error); ok && coreErr != nil {
+		switch coreErr.Code {
+		case "provider_not_found", "not_supported":
+			return true
+		}
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "executor not registered") || strings.Contains(message, "does not support")
 }
 
 func firstNonEmptyString(values ...*string) string {

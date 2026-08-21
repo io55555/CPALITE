@@ -263,7 +263,6 @@ func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequ
 	updateAggregatedRequest(ginCtx, attempts)
 }
 
-
 func deferAPIRequest(ginCtx *gin.Context, info UpstreamRequestLog) {
 	if ginCtx == nil {
 		return
@@ -329,6 +328,9 @@ func newAPIRequestLogBuilder(index int, info UpstreamRequestLog, timestamp time.
 // RecordAPIResponseMetadata captures upstream response status/header information for the latest attempt.
 func RecordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status int, headers http.Header) {
 	logging.SetResponseHeaders(ctx, headers)
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 	ginCtx := ginContextFrom(ctx)
 	if ginCtx == nil {
 		return
@@ -348,14 +350,14 @@ func RecordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status i
 	}
 
 	updateAggregatedResponse(ginCtx, attempts)
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 }
 
 // RecordAPIResponseError adds an error entry for the latest attempt when no HTTP response is available.
 func RecordAPIResponseError(ctx context.Context, cfg *config.Config, err error) {
 	if err == nil {
+		return
+	}
+	if cfg == nil || !cfg.RequestLog {
 		return
 	}
 	ginCtx := ginContextFrom(ctx)
@@ -376,13 +378,13 @@ func RecordAPIResponseError(ctx context.Context, cfg *config.Config, err error) 
 	attempt.errorWritten = true
 
 	updateAggregatedResponse(ginCtx, attempts)
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 }
 
 // AppendAPIResponseChunk appends an upstream response chunk to Gin context for request logging.
 func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byte) {
+	if cfg == nil || !cfg.RequestLog {
+		return
+	}
 	data := bytes.TrimSpace(chunk)
 	if len(data) == 0 {
 		return
@@ -418,9 +420,6 @@ func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byt
 	attempt.prevWasSSEEvent = currentChunkIsSSEEvent
 
 	updateAggregatedResponse(ginCtx, attempts)
-	if cfg == nil || !cfg.RequestLog {
-		return
-	}
 }
 
 // RecordAPIWebsocketRequest stores an upstream websocket request event in Gin context.

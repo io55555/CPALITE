@@ -8250,6 +8250,11 @@ func (m *Manager) PrepareHttpRequest(ctx context.Context, auth *Auth, req *http.
 	if req == nil {
 		return &Error{Code: "invalid_request", Message: "http request is nil"}
 	}
+	hydrated, errHydrate := m.hydrateRequestAuth(ctx, auth)
+	if errHydrate != nil {
+		return errHydrate
+	}
+	auth = hydrated
 	if ctx != nil {
 		*req = *req.WithContext(ctx)
 	}
@@ -8305,6 +8310,11 @@ func (m *Manager) HttpRequest(ctx context.Context, auth *Auth, req *http.Request
 	if req == nil {
 		return nil, &Error{Code: "invalid_request", Message: "http request is nil"}
 	}
+	hydrated, errHydrate := m.hydrateRequestAuth(ctx, auth)
+	if errHydrate != nil {
+		return nil, errHydrate
+	}
+	auth = hydrated
 	providerKey := executorKeyFromAuth(auth)
 	if providerKey == "" {
 		return nil, &Error{Code: "provider_not_found", Message: "auth provider is empty"}

@@ -122,6 +122,8 @@ func (e *XAIExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Auth, 
 	if errPrepare := e.PrepareRequest(httpReq, auth); errPrepare != nil {
 		return nil, errPrepare
 	}
+	token, _ := xaiCreds(auth)
+	applyXAIProxyRequestHeaders(e.cfg, httpReq, auth, token)
 	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	return httpClient.Do(httpReq)
 }
@@ -1236,6 +1238,30 @@ func applyXAIChatHeaders(cfg *config.Config, r *http.Request, auth *cliproxyauth
 	applyXAICustomHeaders(r, auth)
 	// 配置开启时覆盖为固定拟真 Header（含 User-Agent）。
 	applyXAIGrokBuildHeaderDefaults(cfg, r)
+}
+
+func applyXAIProxyRequestHeaders(cfg *config.Config, r *http.Request, auth *cliproxyauth.Auth, token string) {
+	if r == nil || !xaiIsCLIChatProxyRequest(r.URL) {
+		return
+	}
+	if strings.TrimSpace(token) != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
+	r.Header.Set(xaiTokenAuthHeader, xaiTokenAuthValue)
+	r.Header.Set(xaiClientVersionHeader, xaiClientVersionValue)
+	r.Header.Set("x-grok-client-version", xaiClientVersionValue)
+	if r.Header.Get("User-Agent") == "" || strings.Contains(r.Header.Get("User-Agent"), "grok-shell/0.2.91") {
+		r.Header.Set("User-Agent", "xai-grok-workspace/"+xaiClientVersionValue)
+	}
+	applyXAICustomHeaders(r, auth)
+	applyXAIGrokBuildHeaderDefaults(cfg, r)
+}
+
+func xaiIsCLIChatProxyRequest(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	return xaiIsCLIChatProxyBaseURL(u.Scheme + "://" + u.Host)
 }
 
 func xaiResolveComposerSessionID(ctx context.Context, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, baseModel string) (string, error) {

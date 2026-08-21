@@ -162,8 +162,8 @@ export const XAI_BILLING_MONTHLY_URL = 'https://cli-chat-proxy.grok.com/v1/billi
 export const XAI_API_ME_URL = 'https://api.x.ai/v1/me';
 export const XAI_API_CHAT_URL = 'https://api.x.ai/v1/chat/completions';
 export const XAI_PAID_HEALTH_MODEL = 'grok-4.3-mini';
-export const XAI_GROK_CLIENT_VERSION = '0.2.91';
-export const XAI_GROK_USER_AGENT = 'grok-pager/0.2.91 grok-shell/0.2.91 (macos; aarch64)';
+export const XAI_GROK_CLIENT_VERSION = '0.2.93';
+export const XAI_GROK_USER_AGENT = 'xai-grok-workspace/0.2.93';
 
 export const XAI_REQUEST_HEADERS = {
   Authorization: 'Bearer $TOKEN$',
