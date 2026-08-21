@@ -193,6 +193,104 @@ func (s *Store) RuntimeStats(ctx context.Context) RuntimeStats {
 	return stats
 }
 
+func (s *Store) databasePath(ctx context.Context) string {
+	if s == nil || s.db == nil {
+		return ""
+	}
+	rows, err := s.db.QueryContext(ctx, "PRAGMA database_list")
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq int
+		var name, file string
+		if errScan := rows.Scan(&seq, &name, &file); errScan != nil {
+			return ""
+		}
+		if strings.EqualFold(strings.TrimSpace(name), "main") {
+			return strings.TrimSpace(file)
+		}
+	}
+	return ""
+}
+
+func (s *Store) pragmaString(ctx context.Context, name string) string {
+	if s == nil || s.db == nil || strings.TrimSpace(name) == "" {
+		return ""
+	}
+	var value string
+	if err := s.db.QueryRowContext(ctx, "PRAGMA "+name).Scan(&value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func (s *Store) pragmaInt(ctx context.Context, name string) int {
+	if s == nil || s.db == nil || strings.TrimSpace(name) == "" {
+		return 0
+	}
+	var value int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA "+name).Scan(&value); err != nil {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) cacheSizeKB(ctx context.Context) int {
+	cacheSize := s.pragmaInt(ctx, "cache_size")
+	if cacheSize < 0 {
+		return -cacheSize
+	}
+	pageSize := s.pragmaInt(ctx, "page_size")
+	if cacheSize <= 0 || pageSize <= 0 {
+		return 0
+	}
+	return cacheSize * pageSize / 1024
+}
+
+func (s *Store) metaInt64(ctx context.Context, key string) int64 {
+	if s == nil || s.db == nil || strings.TrimSpace(key) == "" {
+		return 0
+	}
+	var raw string
+	if err := s.db.QueryRowContext(ctx, "SELECT v FROM auth_meta WHERE k=?", key).Scan(&raw); err != nil {
+		return 0
+	}
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func (s *Store) tableCount(ctx context.Context, table string) int {
+	if s == nil || s.db == nil {
+		return 0
+	}
+	switch table {
+	case "auth_index", "auth_payload", "auth_meta":
+	default:
+		return 0
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM "+table).Scan(&count); err != nil {
+		return 0
+	}
+	return count
+}
+
+func fileSize(path string) int64 {
+	if strings.TrimSpace(path) == "" {
+		return 0
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
 // SetBaseDir 同步文件 store 的认证目录，并更新索引目录。
 func (s *Store) SetBaseDir(dir string) {
 	if s == nil {
