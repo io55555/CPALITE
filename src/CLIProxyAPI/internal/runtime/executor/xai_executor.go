@@ -184,17 +184,14 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 		return resp, e.xaiStatusErrWithPacketRules(ctx, auth, token, prepared.baseModel, httpResp.StatusCode, httpResp.Header.Clone(), data)
 	}
 
-	data, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		helps.RecordAPIResponseError(ctx, e.cfg, err)
-		return resp, err
-	}
-	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
-
 	outputItemsByIndex := make(map[int64][]byte)
 	var outputItemsFallback [][]byte
 	responseFilter := newXAIInternalXSearchResponseFilter(prepared.filterInternalXSearch, prepared.clientDeclaredTools)
-	for _, line := range bytes.Split(data, []byte("\n")) {
+	scanner := bufio.NewScanner(httpResp.Body)
+	scanner.Buffer(nil, 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		helps.AppendAPIResponseChunk(ctx, e.cfg, line)
 		if !bytes.HasPrefix(line, xaiDataTag) {
 			continue
 		}
@@ -229,6 +226,10 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 			}
 			return cliproxyexecutor.Response{Payload: out, Headers: headers}, nil
 		}
+	}
+	if errScan := scanner.Err(); errScan != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, errScan)
+		return resp, errScan
 	}
 
 	return resp, statusErr{code: http.StatusRequestTimeout, msg: "xai stream error: stream disconnected before response.completed"}
@@ -1234,6 +1235,7 @@ func applyXAIChatHeaders(cfg *config.Config, r *http.Request, auth *cliproxyauth
 		r.Header.Set(xaiTokenAuthHeader, xaiTokenAuthValue)
 		r.Header.Set(xaiClientVersionHeader, xaiClientVersionValue)
 		r.Header.Set("User-Agent", "xai-grok-workspace/"+xaiClientVersionValue)
+		applyXAIUserIDHeader(r, auth)
 	}
 	applyXAICustomHeaders(r, auth)
 	// 配置开启时覆盖为固定拟真 Header（含 User-Agent）。
@@ -1253,6 +1255,7 @@ func applyXAIProxyRequestHeaders(cfg *config.Config, r *http.Request, auth *clip
 	if r.Header.Get("User-Agent") == "" || strings.Contains(r.Header.Get("User-Agent"), "grok-shell/0.2.91") {
 		r.Header.Set("User-Agent", "xai-grok-workspace/"+xaiClientVersionValue)
 	}
+	applyXAIUserIDHeader(r, auth)
 	applyXAICustomHeaders(r, auth)
 	applyXAIGrokBuildHeaderDefaults(cfg, r)
 }
@@ -1435,6 +1438,61 @@ func xaiMetadataString(meta map[string]any, key string) string {
 		return strings.TrimSpace(typed.String())
 	default:
 		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func applyXAIUserIDHeader(r *http.Request, auth *cliproxyauth.Auth) {
+	if r == nil || auth == nil || r.Header.Get("x-userid") != "" {
+		return
+	}
+	if userID := xaiAuthUserID(auth); userID != "" {
+		r.Header.Set("x-userid", userID)
+	}
+}
+
+func xaiAuthUserID(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	for _, key := range []string{"sub", "subject", "user_id", "userId"} {
+		if value := xaiMetadataString(auth.Metadata, key); value != "" {
+			return value
+		}
+		if auth.Attributes != nil {
+			if value := strings.TrimSpace(auth.Attributes[key]); value != "" {
+				return value
+			}
+		}
+	}
+	for _, parent := range []string{"oauth", "user"} {
+		if value := xaiNestedMetadataString(auth.Metadata, parent, "sub"); value != "" {
+			return value
+		}
+		if value := xaiNestedMetadataString(auth.Metadata, parent, "subject"); value != "" {
+			return value
+		}
+		if value := xaiNestedMetadataString(auth.Metadata, parent, "id"); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func xaiNestedMetadataString(meta map[string]any, parent, key string) string {
+	if len(meta) == 0 || parent == "" || key == "" {
+		return ""
+	}
+	raw, ok := meta[parent]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch typed := raw.(type) {
+	case map[string]any:
+		return xaiMetadataString(typed, key)
+	case map[string]string:
+		return strings.TrimSpace(typed[key])
+	default:
+		return ""
 	}
 }
 

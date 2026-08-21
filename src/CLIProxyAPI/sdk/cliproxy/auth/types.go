@@ -174,6 +174,10 @@ func compactSQLiteStubAttributes(auth *Auth) map[string]string {
 		AttributeWeight,
 		"email",
 		"project_id",
+		"sub",
+		"subject",
+		"user_id",
+		"userId",
 		"account",
 		"account_type",
 		"priority",
@@ -203,6 +207,14 @@ func compactSQLiteStubAttributes(auth *Auth) map[string]string {
 	if attrs["project_id"] == "" {
 		if projectID := compactMetadataString(auth, "project_id"); projectID != "" {
 			attrs["project_id"] = projectID
+		}
+	}
+	if attrs["user_id"] == "" {
+		for _, key := range []string{"sub", "subject", "user_id", "userId"} {
+			if userID := compactMetadataString(auth, key); userID != "" {
+				attrs["user_id"] = userID
+				break
+			}
 		}
 	}
 	if attrs["account"] == "" {

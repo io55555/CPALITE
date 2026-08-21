@@ -5076,7 +5076,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		m.saveCooldownStates(ctx)
 	}
 	if m.scheduler != nil && authSnapshot != nil {
-		m.scheduler.upsertAuth(authSnapshot)
+		m.scheduler.upsertAuthForModel(authSnapshot, result.Model)
 	}
 
 	if clearModelQuota && result.Model != "" {

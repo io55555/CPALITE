@@ -40,6 +40,7 @@ type Entry struct {
 	Status        string
 	Email         string
 	ProjectID     string
+	UserID        string
 	Account       string
 	AccountType   string
 	Priority      int
@@ -344,6 +345,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 			status TEXT NOT NULL DEFAULT '',
 			email TEXT NOT NULL DEFAULT '',
 			project_id TEXT NOT NULL DEFAULT '',
+			user_id TEXT NOT NULL DEFAULT '',
 			account TEXT NOT NULL DEFAULT '',
 			account_type TEXT NOT NULL DEFAULT '',
 			priority INTEGER NOT NULL DEFAULT 0,
@@ -369,6 +371,46 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("auth index: ensure schema: %w", err)
 		}
+	}
+	if err := s.ensureColumn(ctx, "auth_index", "user_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("auth index: store is nil")
+	}
+	table = strings.TrimSpace(table)
+	column = strings.TrimSpace(column)
+	definition = strings.TrimSpace(definition)
+	if table == "" || column == "" || definition == "" {
+		return fmt.Errorf("auth index: invalid schema migration")
+	}
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return fmt.Errorf("auth index: inspect schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if errScan := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); errScan != nil {
+			return fmt.Errorf("auth index: scan schema: %w", errScan)
+		}
+		if strings.EqualFold(strings.TrimSpace(name), column) {
+			return nil
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("auth index: iterate schema: %w", err)
+	}
+	if _, err = s.db.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition); err != nil {
+		return fmt.Errorf("auth index: add column %s.%s: %w", table, column, err)
 	}
 	return nil
 }
@@ -549,9 +591,9 @@ func (s *Store) UpsertFile(ctx context.Context, path string) error {
 			continue
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO auth_index (
-		id, file_name, file_path, provider, disabled, unavailable, status, email, project_id, account, account_type,
+		id, file_name, file_path, provider, disabled, unavailable, status, email, project_id, user_id, account, account_type,
 		priority, file_mtime, file_size, file_sha256, cooldown_until, updated_unix
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		file_name=excluded.file_name,
 		file_path=excluded.file_path,
@@ -561,6 +603,7 @@ func (s *Store) UpsertFile(ctx context.Context, path string) error {
 		status=excluded.status,
 		email=excluded.email,
 		project_id=excluded.project_id,
+		user_id=excluded.user_id,
 		account=excluded.account,
 		account_type=excluded.account_type,
 		priority=excluded.priority,
@@ -570,7 +613,7 @@ func (s *Store) UpsertFile(ctx context.Context, path string) error {
 		cooldown_until=excluded.cooldown_until,
 		updated_unix=excluded.updated_unix`,
 			entry.ID, entry.FileName, entry.FilePath, entry.Provider, boolInt(entry.Disabled), boolInt(entry.Unavailable), entry.Status,
-			entry.Email, entry.ProjectID, entry.Account, entry.AccountType, entry.Priority, entry.ModTimeUnix, entry.Size, hash,
+			entry.Email, entry.ProjectID, entry.UserID, entry.Account, entry.AccountType, entry.Priority, entry.ModTimeUnix, entry.Size, hash,
 			entry.CooldownUntil, entry.UpdatedUnix)
 		if err != nil {
 			return fmt.Errorf("auth index: upsert index: %w", err)
@@ -672,7 +715,7 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) (QueryResult, erro
 		opts.PageSize = 200
 	}
 	offset := (opts.Page - 1) * opts.PageSize
-	querySQL := `SELECT id, file_name, file_path, provider, disabled, unavailable, status, email, project_id, account, account_type,
+	querySQL := `SELECT id, file_name, file_path, provider, disabled, unavailable, status, email, project_id, user_id, account, account_type,
 		priority, file_mtime, file_size, cooldown_until, updated_unix FROM auth_index` + where + ` ORDER BY lower(file_name) ASC LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any(nil), args...), opts.PageSize, offset)
 	rows, err := s.db.QueryContext(ctx, querySQL, queryArgs...)
@@ -685,7 +728,7 @@ func (s *Store) Query(ctx context.Context, opts QueryOptions) (QueryResult, erro
 		var entry Entry
 		var disabled, unavailable int
 		if errScan := rows.Scan(&entry.ID, &entry.FileName, &entry.FilePath, &entry.Provider, &disabled, &unavailable, &entry.Status,
-			&entry.Email, &entry.ProjectID, &entry.Account, &entry.AccountType, &entry.Priority, &entry.ModTimeUnix, &entry.Size,
+			&entry.Email, &entry.ProjectID, &entry.UserID, &entry.Account, &entry.AccountType, &entry.Priority, &entry.ModTimeUnix, &entry.Size,
 			&entry.CooldownUntil, &entry.UpdatedUnix); errScan != nil {
 			return QueryResult{}, fmt.Errorf("auth index: scan row: %w", errScan)
 		}
@@ -811,9 +854,9 @@ func buildWhere(opts QueryOptions) (string, []any) {
 		args = append(args, boolInt(*opts.Disabled))
 	}
 	if keyword := strings.ToLower(strings.TrimSpace(opts.Keyword)); keyword != "" {
-		clauses = append(clauses, "(lower(file_name) LIKE ? OR lower(email) LIKE ? OR lower(project_id) LIKE ? OR lower(account) LIKE ?)")
+		clauses = append(clauses, "(lower(file_name) LIKE ? OR lower(email) LIKE ? OR lower(project_id) LIKE ? OR lower(user_id) LIKE ? OR lower(account) LIKE ?)")
 		like := "%" + keyword + "%"
-		args = append(args, like, like, like, like)
+		args = append(args, like, like, like, like, like)
 	}
 	if opts.CooldownOnly {
 		clauses = append(clauses, "cooldown_until>?")
@@ -869,6 +912,10 @@ func authFromEntry(entry Entry) *coreauth.Auth {
 	}
 	if entry.ProjectID != "" {
 		auth.Attributes["project_id"] = entry.ProjectID
+	}
+	if entry.UserID != "" {
+		auth.Attributes["user_id"] = entry.UserID
+		auth.Attributes["sub"] = entry.UserID
 	}
 	if entry.AccountType != "" {
 		auth.Attributes[coreauth.AttributeAuthKind] = entry.AccountType
@@ -940,6 +987,7 @@ func entryFromAuth(path string, data []byte, info os.FileInfo, hash string, auth
 		Status:        strings.TrimSpace(string(auth.Status)),
 		Email:         firstNonEmpty(metadataString(auth.Metadata, "email"), authAttribute(auth, "email")),
 		ProjectID:     firstNonEmpty(metadataString(auth.Metadata, "project_id"), authAttribute(auth, "project_id")),
+		UserID:        firstNonEmpty(authUserID(auth), metadataString(auth.Metadata, "user_id"), authAttribute(auth, "user_id")),
 		Account:       firstNonEmpty(account, metadataString(auth.Metadata, "account")),
 		AccountType:   firstNonEmpty(accountType, metadataString(auth.Metadata, "account_type"), metadataString(auth.Metadata, "auth_kind"), authAttribute(auth, coreauth.AttributeAuthKind)),
 		Priority:      parsePriority(auth, data),
@@ -982,6 +1030,21 @@ func metadataString(metadata map[string]any, key string) string {
 	return ""
 }
 
+func authUserID(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	for _, key := range []string{"sub", "subject", "user_id", "userId"} {
+		if value := metadataString(auth.Metadata, key); value != "" {
+			return value
+		}
+		if value := authAttribute(auth, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func parsePriority(auth *coreauth.Auth, data []byte) int {
 	if auth != nil {
 		if priority := authAttribute(auth, coreauth.AttributeWeight); priority != "" {
@@ -1017,6 +1080,7 @@ func entryFromJSON(path, authDir string, data []byte, info os.FileInfo, hash str
 		Provider:    strings.ToLower(strings.TrimSpace(gjson.GetBytes(data, "type").String())),
 		Email:       strings.TrimSpace(gjson.GetBytes(data, "email").String()),
 		ProjectID:   strings.TrimSpace(gjson.GetBytes(data, "project_id").String()),
+		UserID:      firstNonEmpty(gjson.GetBytes(data, "sub").String(), gjson.GetBytes(data, "subject").String(), gjson.GetBytes(data, "user_id").String(), gjson.GetBytes(data, "userId").String()),
 		Account:     strings.TrimSpace(gjson.GetBytes(data, "account").String()),
 		AccountType: firstNonEmpty(gjson.GetBytes(data, "account_type").String(), gjson.GetBytes(data, "accountType").String(), gjson.GetBytes(data, "auth_kind").String(), gjson.GetBytes(data, "authKind").String()),
 		Status:      strings.TrimSpace(gjson.GetBytes(data, "status").String()),

@@ -42,9 +42,10 @@ type authScheduler struct {
 
 // providerScheduler stores auth metadata and model shards for a single provider.
 type providerScheduler struct {
-	providerKey string
-	auths       map[string]*scheduledAuthMeta
-	modelShards map[string]*modelScheduler
+	providerKey     string
+	auths           map[string]*scheduledAuthMeta
+	modelShards     map[string]*modelScheduler
+	sharedModelKeys map[string]struct{}
 }
 
 // scheduledAuthMeta stores the immutable scheduling fields derived from an auth snapshot.
@@ -219,7 +220,33 @@ func (s *authScheduler) upsertAuth(auth *Auth) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.clearSharedModelKeysForAuthLocked(auth)
 	s.upsertAuthLocked(auth, time.Now())
+}
+
+// upsertAuthForModel 同步认证状态；只有该模型存在真实阻断状态时才创建模型专用 shard。
+func (s *authScheduler) upsertAuthForModel(auth *Auth, model string) {
+	if s == nil {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.upsertAuthLocked(auth, now)
+	modelKey := canonicalModelKey(model)
+	if auth == nil || modelKey == "" || !authBlockedForSchedulerModel(auth, modelKey, now) {
+		return
+	}
+	providerKey := executorKeyFromAuth(auth)
+	if providerKey == "" {
+		return
+	}
+	providerState := s.providers[providerKey]
+	if providerState == nil {
+		return
+	}
+	delete(providerState.sharedModelKeys, modelKey)
+	providerState.ensureModelLocked(modelKey, now)
 }
 
 // removeAuth deletes one auth from every scheduler shard that references it.
@@ -259,7 +286,7 @@ func (s *authScheduler) pickSingleWithStrategy(ctx context.Context, provider, mo
 	if providerState == nil {
 		return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
-	shard := providerState.ensureModelLocked(modelKey, time.Now())
+	shard := providerState.pickModelShardLocked(modelKey, time.Now())
 	if shard == nil {
 		return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
@@ -335,7 +362,7 @@ func (s *authScheduler) pickMixedWithStrategy(ctx context.Context, providers []s
 		if providerState == nil {
 			return nil, "", &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
-		shard := providerState.ensureModelLocked(modelKey, time.Now())
+		shard := providerState.pickModelShardLocked(modelKey, time.Now())
 		predicate := func(entry *scheduledAuth) bool {
 			if entry == nil || entry.auth == nil || entry.auth.ID != pinnedAuthID {
 				return false
@@ -362,7 +389,7 @@ func (s *authScheduler) pickMixedWithStrategy(ctx context.Context, providers []s
 		if providerState == nil {
 			continue
 		}
-		shard := providerState.ensureModelLocked(modelKey, now)
+		shard := providerState.pickModelShardLocked(modelKey, now)
 		candidateShards[providerIndex] = shard
 		if shard == nil {
 			continue
@@ -461,7 +488,7 @@ func (s *authScheduler) mixedUnavailableErrorLocked(providers []string, model st
 		if providerState == nil {
 			continue
 		}
-		shard := providerState.ensureModelLocked(canonicalModelKey(model), now)
+		shard := providerState.pickModelShardLocked(canonicalModelKey(model), now)
 		if shard == nil {
 			continue
 		}
@@ -561,6 +588,19 @@ func (s *authScheduler) removeAuthLocked(authID string) {
 	}
 }
 
+func (s *authScheduler) clearSharedModelKeysForAuthLocked(auth *Auth) {
+	if s == nil || auth == nil {
+		return
+	}
+	providerKey := executorKeyFromAuth(auth)
+	if providerKey == "" {
+		return
+	}
+	if providerState := s.providers[providerKey]; providerState != nil {
+		clear(providerState.sharedModelKeys)
+	}
+}
+
 // ensureProviderLocked returns the provider scheduler for providerKey, creating it when needed.
 func (s *authScheduler) ensureProviderLocked(providerKey string) *providerScheduler {
 	if s.providers == nil {
@@ -569,9 +609,10 @@ func (s *authScheduler) ensureProviderLocked(providerKey string) *providerSchedu
 	providerState := s.providers[providerKey]
 	if providerState == nil {
 		providerState = &providerScheduler{
-			providerKey: providerKey,
-			auths:       make(map[string]*scheduledAuthMeta),
-			modelShards: make(map[string]*modelScheduler),
+			providerKey:     providerKey,
+			auths:           make(map[string]*scheduledAuthMeta),
+			modelShards:     make(map[string]*modelScheduler),
+			sharedModelKeys: make(map[string]struct{}),
 		}
 		s.providers[providerKey] = providerState
 	}
@@ -673,6 +714,53 @@ func (p *providerScheduler) ensureModelLocked(modelKey string, now time.Time) *m
 	}
 	p.modelShards[modelKey] = shard
 	return shard
+}
+
+func (p *providerScheduler) pickModelShardLocked(modelKey string, now time.Time) *modelScheduler {
+	if p == nil {
+		return nil
+	}
+	modelKey = canonicalModelKey(modelKey)
+	if shard, ok := p.modelShards[modelKey]; ok && shard != nil {
+		shard.promoteExpiredLocked(now)
+		return shard
+	}
+	if modelKey != "" {
+		if _, ok := p.sharedModelKeys[modelKey]; ok {
+			return p.ensureModelLocked("", now)
+		}
+	}
+	if modelKey != "" && p.sharedShardCanServeModelLocked(modelKey) {
+		if p.sharedModelKeys == nil {
+			p.sharedModelKeys = make(map[string]struct{})
+		}
+		p.sharedModelKeys[modelKey] = struct{}{}
+		return p.ensureModelLocked("", now)
+	}
+	return p.ensureModelLocked(modelKey, now)
+}
+
+func (p *providerScheduler) sharedShardCanServeModelLocked(modelKey string) bool {
+	if p == nil || strings.TrimSpace(modelKey) == "" {
+		return false
+	}
+	for _, meta := range p.auths {
+		if meta == nil {
+			continue
+		}
+		if !meta.supportsModel(modelKey) {
+			return false
+		}
+	}
+	return true
+}
+
+func authBlockedForSchedulerModel(auth *Auth, modelKey string, now time.Time) bool {
+	if auth == nil || strings.TrimSpace(modelKey) == "" {
+		return false
+	}
+	blocked, _, _ := isAuthBlockedForModel(auth, modelKey, now)
+	return blocked
 }
 
 // supportsModel reports whether the auth metadata currently supports modelKey.

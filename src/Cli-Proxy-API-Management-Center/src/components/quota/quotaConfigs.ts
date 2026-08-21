@@ -1539,6 +1539,54 @@ const requestXaiBilling = async (
   return buildXaiBillingSummary(payload?.config ?? null);
 };
 
+const toXaiRecord = (value: unknown): Record<string, unknown> | null => {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+};
+
+const resolveXaiUserId = (file: AuthFileItem): string | null => {
+  const metadata = toXaiRecord(file.metadata);
+  const attributes = toXaiRecord(file.attributes);
+  const oauth = toXaiRecord(file.oauth ?? metadata?.oauth ?? attributes?.oauth);
+  const user = toXaiRecord(file.user ?? metadata?.user ?? attributes?.user);
+
+  const candidates = [
+    file.sub,
+    file.subject,
+    file.user_id,
+    file.userId,
+    metadata?.sub,
+    metadata?.subject,
+    metadata?.user_id,
+    metadata?.userId,
+    attributes?.sub,
+    attributes?.subject,
+    attributes?.user_id,
+    attributes?.userId,
+    oauth?.sub,
+    oauth?.subject,
+    user?.sub,
+    user?.id,
+  ];
+
+  for (const candidate of candidates) {
+    const userId = normalizeStringValue(candidate);
+    if (userId) return userId;
+  }
+
+  return null;
+};
+
+const buildXaiRequestHeaders = (file: AuthFileItem): Record<string, string> => {
+  const headers: Record<string, string> = { ...XAI_REQUEST_HEADERS };
+  const userId = resolveXaiUserId(file);
+  if (userId) {
+    headers['x-userid'] = userId;
+  }
+  return headers;
+};
+
 const requestXaiPaidHealth = async (authIndex: string): Promise<XaiBillingSummary> => {
   const [profileRequest, chatRequest] = await Promise.allSettled([
     apiCallApi.request(
@@ -1595,9 +1643,10 @@ const fetchXaiQuota = async (file: AuthFileItem, t: TFunction): Promise<XaiBilli
     return requestXaiPaidHealth(authIndex);
   }
 
+  const requestHeaders = buildXaiRequestHeaders(file);
   const [weeklyResult, monthlyResult] = await Promise.allSettled([
-    requestXaiBilling(authIndex, XAI_BILLING_WEEKLY_URL, { ...XAI_REQUEST_HEADERS }),
-    requestXaiBilling(authIndex, XAI_BILLING_MONTHLY_URL, { ...XAI_REQUEST_HEADERS }),
+    requestXaiBilling(authIndex, XAI_BILLING_WEEKLY_URL, { ...requestHeaders }),
+    requestXaiBilling(authIndex, XAI_BILLING_MONTHLY_URL, { ...requestHeaders }),
   ]);
   const weeklySummary = weeklyResult.status === 'fulfilled' ? weeklyResult.value : null;
   const monthlySummary = monthlyResult.status === 'fulfilled' ? monthlyResult.value : null;

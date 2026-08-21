@@ -441,6 +441,10 @@ func authRuntimeSummaryEntry(auth *coreauth.Auth) gin.H {
 	if projectID := authProjectID(auth); projectID != "" {
 		entry["project_id"] = projectID
 	}
+	if userID := authUserID(auth); userID != "" {
+		entry["user_id"] = userID
+		entry["sub"] = userID
+	}
 	if accountType, account := auth.AccountInfo(); accountType != "" || account != "" {
 		if accountType != "" {
 			entry["account_type"] = accountType
@@ -871,6 +875,10 @@ func authIndexEntryToGinH(entry authindex.Entry) gin.H {
 	if entry.ProjectID != "" {
 		out["project_id"] = entry.ProjectID
 	}
+	if entry.UserID != "" {
+		out["user_id"] = entry.UserID
+		out["sub"] = entry.UserID
+	}
 	if entry.AccountType != "" {
 		out["account_type"] = entry.AccountType
 	}
@@ -989,6 +997,10 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	}
 	if projectID := authProjectID(auth); projectID != "" {
 		entry["project_id"] = projectID
+	}
+	if userID := authUserID(auth); userID != "" {
+		entry["user_id"] = userID
+		entry["sub"] = userID
 	}
 	if accountType, account := auth.AccountInfo(); accountType != "" || account != "" {
 		if accountType != "" {
@@ -1297,6 +1309,23 @@ func authAttribute(auth *coreauth.Auth, key string) string {
 		return ""
 	}
 	return auth.Attributes[key]
+}
+
+func authUserID(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	for _, key := range []string{"sub", "subject", "user_id", "userId"} {
+		if auth.Metadata != nil {
+			if value, ok := auth.Metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+		if value := strings.TrimSpace(authAttribute(auth, key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func isRuntimeOnlyAuth(auth *coreauth.Auth) bool {
