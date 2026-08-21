@@ -644,7 +644,9 @@ func (m *Manager) RuntimeStats() RuntimeStats {
 	stats := RuntimeStats{}
 	m.mu.RLock()
 	stats.AuthCount = len(m.auths)
-	stats.RuntimeAuthCount = len(m.runtimeAuths)
+	for _, auths := range m.homeRuntimeAuths {
+		stats.RuntimeAuthCount += len(auths)
+	}
 	for _, auth := range m.auths {
 		if IsSQLiteAuthStub(auth) {
 			stats.SQLiteStubCount++
