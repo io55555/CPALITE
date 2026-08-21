@@ -72,8 +72,9 @@ const easePower3Out = (progress: number) => 1 - (1 - progress) ** 4;
 const easePower2In = (progress: number) => progress ** 3;
 const BATCH_BAR_BASE_TRANSFORM = 'translateX(-50%)';
 const BATCH_BAR_HIDDEN_TRANSFORM = 'translateX(-50%) translateY(56px)';
-const DEFAULT_REGULAR_PAGE_SIZE = 9;
-const DEFAULT_COMPACT_PAGE_SIZE = 12;
+const DEFAULT_REGULAR_PAGE_SIZE = 100;
+const DEFAULT_COMPACT_PAGE_SIZE = 100;
+const LEGACY_DEFAULT_PAGE_SIZES = new Set([9, 12, 30]);
 const STATUS_FILTER_LABELS: Record<AuthFilesStatusFilterMode, string> = {
   all: '全部',
   enabled: '已启用',
@@ -159,7 +160,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
     regular: DEFAULT_REGULAR_PAGE_SIZE,
     compact: DEFAULT_COMPACT_PAGE_SIZE,
   });
-  const [pageSizeInput, setPageSizeInput] = useState('9');
+  const [pageSizeInput, setPageSizeInput] = useState(String(DEFAULT_REGULAR_PAGE_SIZE));
   const [viewMode, setViewMode] = useState<'diagram' | 'list'>('list');
   const [sortMode, setSortMode] = useState<AuthFilesSortMode>('default');
   const [batchActionBarVisible, setBatchActionBarVisible] = useState(false);
@@ -315,14 +316,22 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
         typeof persisted.pageSize === 'number' && Number.isFinite(persisted.pageSize)
           ? clampCardPageSize(persisted.pageSize)
           : null;
-      const regularPageSize =
+      const persistedRegularPageSize =
         typeof persisted.regularPageSize === 'number' && Number.isFinite(persisted.regularPageSize)
           ? clampCardPageSize(persisted.regularPageSize)
-          : (legacyPageSize ?? DEFAULT_REGULAR_PAGE_SIZE);
-      const compactPageSize =
+          : legacyPageSize;
+      const persistedCompactPageSize =
         typeof persisted.compactPageSize === 'number' && Number.isFinite(persisted.compactPageSize)
           ? clampCardPageSize(persisted.compactPageSize)
-          : (legacyPageSize ?? DEFAULT_COMPACT_PAGE_SIZE);
+          : legacyPageSize;
+      const regularPageSize =
+        persistedRegularPageSize === null || LEGACY_DEFAULT_PAGE_SIZES.has(persistedRegularPageSize)
+          ? DEFAULT_REGULAR_PAGE_SIZE
+          : persistedRegularPageSize;
+      const compactPageSize =
+        persistedCompactPageSize === null || LEGACY_DEFAULT_PAGE_SIZES.has(persistedCompactPageSize)
+          ? DEFAULT_COMPACT_PAGE_SIZE
+          : persistedCompactPageSize;
       setPageSizeByMode({
         regular: regularPageSize,
         compact: compactPageSize,

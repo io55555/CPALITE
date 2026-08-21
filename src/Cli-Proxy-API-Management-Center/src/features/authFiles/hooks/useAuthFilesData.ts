@@ -33,9 +33,6 @@ type LoadFilesOptions = AuthFilesListOptions;
 const buildSummaryOptions = (options: LoadFilesOptions): LoadFilesOptions => ({
   page: 1,
   pageSize: 1,
-  cooldownOnly: options.cooldownOnly,
-  disabled: options.disabled,
-  status: options.status,
 });
 
 export type UseAuthFilesDataResult = {

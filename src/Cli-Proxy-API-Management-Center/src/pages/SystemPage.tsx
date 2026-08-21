@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -15,6 +15,7 @@ import {
 import { configApi, runtimeMetricsApi, type RuntimeMetrics, versionApi } from '@/services/api';
 import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
 import { formatDateTimeValue } from '@/utils/format';
+import { copyToClipboard } from '@/utils/clipboard';
 import { classifyModels } from '@/utils/models';
 import { STORAGE_KEY_AUTH } from '@/utils/constants';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
@@ -76,6 +77,8 @@ const RUNTIME_REFRESH_OPTIONS = [
   { value: '900000', label: '15分钟' },
   { value: '0', label: '手动' },
 ];
+const DEFAULT_RUNTIME_REFRESH_MS = 900_000;
+const RUNTIME_REFRESH_STORAGE_KEY = 'system.runtimeRefreshMs';
 
 const formatBytes = (value: unknown) => {
   const bytes = typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -124,6 +127,27 @@ const formatUnixSeconds = (value: unknown, language: string) => {
   return formatDateTimeValue(new Date(seconds * 1000).toISOString(), language);
 };
 
+const readRuntimeRefreshMs = () => {
+  if (typeof window === 'undefined') return DEFAULT_RUNTIME_REFRESH_MS;
+  try {
+    const raw = window.localStorage.getItem(RUNTIME_REFRESH_STORAGE_KEY);
+    const parsed = Number(raw);
+    const allowed = new Set(RUNTIME_REFRESH_OPTIONS.map((option) => Number(option.value)));
+    return allowed.has(parsed) ? parsed : DEFAULT_RUNTIME_REFRESH_MS;
+  } catch {
+    return DEFAULT_RUNTIME_REFRESH_MS;
+  }
+};
+
+const writeRuntimeRefreshMs = (value: number) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(RUNTIME_REFRESH_STORAGE_KEY, String(value));
+  } catch {
+    // 忽略浏览器存储异常，刷新周期仍在当前会话生效。
+  }
+};
+
 export function SystemPage() {
   const { t, i18n } = useTranslation();
   const { showNotification, showConfirmation } = useNotificationStore();
@@ -151,7 +175,7 @@ export function SystemPage() {
   const [runtimeMetrics, setRuntimeMetrics] = useState<RuntimeMetrics | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
   const [runtimeError, setRuntimeError] = useState('');
-  const [runtimeRefreshMs, setRuntimeRefreshMs] = useState(300_000);
+  const [runtimeRefreshMs, setRuntimeRefreshMs] = useState(readRuntimeRefreshMs);
 
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -336,6 +360,117 @@ export function SystemPage() {
     }
   }, [auth.connectionStatus]);
 
+  const runtimeSnapshotText = useMemo(() => {
+    const metrics = runtimeMetrics;
+    const gcCPU =
+      typeof metrics?.process?.gc_cpu_fraction === 'number'
+        ? metrics.process.gc_cpu_fraction * 100
+        : 0;
+    const loadValues = [metrics?.system?.load1, metrics?.system?.load5, metrics?.system?.load15]
+      .map((value) =>
+        typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '0.00'
+      )
+      .join(' / ');
+
+    return [
+      '运行数据',
+      `更新时间: ${
+        metrics?.timestamp ? formatDateTimeValue(metrics.timestamp, i18n.language) : '-'
+      }`,
+      '',
+      '进程资源',
+      `CPU: ${formatPercent(metrics?.process?.cpu_percent)}`,
+      `RSS/VMS: ${formatBytes(metrics?.process?.rss_bytes)} / ${formatBytes(
+        metrics?.process?.vms_bytes
+      )}`,
+      `线程/FD: ${formatNumber(metrics?.process?.threads)} / ${formatNumber(
+        metrics?.process?.fd_count
+      )}`,
+      `Goroutine: ${formatNumber(metrics?.process?.goroutines)}`,
+      `运行时长: ${formatSeconds(metrics?.process?.uptime_seconds)}`,
+      '',
+      'Go 内存与 GC',
+      `HeapAlloc/Inuse: ${formatBytes(metrics?.process?.heap_alloc)} / ${formatBytes(
+        metrics?.process?.heap_inuse
+      )}`,
+      `HeapSys/Released: ${formatBytes(metrics?.process?.heap_sys)} / ${formatBytes(
+        metrics?.process?.heap_released
+      )}`,
+      `对象数/GC: ${formatNumber(metrics?.process?.heap_objects)} / ${formatNumber(
+        metrics?.process?.gc_count
+      )}`,
+      `分配/释放: ${formatNumber(metrics?.process?.mallocs)} / ${formatNumber(
+        metrics?.process?.frees
+      )}`,
+      `GC CPU/暂停: ${formatPercent(gcCPU)} / ${formatNanoseconds(
+        metrics?.process?.gc_pause_total_ns
+      )}`,
+      '',
+      '系统负载',
+      `Load 1/5/15: ${loadValues}`,
+      `Load/CPU: ${
+        typeof metrics?.system?.load1_per_cpu === 'number'
+          ? metrics.system.load1_per_cpu.toFixed(2)
+          : '0.00'
+      }`,
+      `系统内存: ${formatPercent(metrics?.system?.memory_used_percent)}`,
+      `可用内存: ${formatBytes(metrics?.system?.memory_available_bytes)}`,
+      `上下文切换: ${formatNumber(
+        metrics?.process?.voluntary_context_switches
+      )} / ${formatNumber(metrics?.process?.nonvoluntary_context_switches)}`,
+      '',
+      '认证与索引',
+      `认证总数/Stub: ${formatNumber(metrics?.auth?.auth_count)} / ${formatNumber(
+        metrics?.auth?.sqlite_stub_count
+      )}`,
+      `完整 Auth/LRU: ${formatNumber(metrics?.auth?.full_auth_count)} / ${formatNumber(
+        metrics?.auth?.hydrated_cache_count
+      )}`,
+      `索引启用/可用: ${formatBoolean(metrics?.auth_index?.enabled)} / ${formatBoolean(
+        metrics?.auth_index?.available
+      )}`,
+      `索引/payload 行: ${formatNumber(metrics?.auth_index?.rows)} / ${formatNumber(
+        metrics?.auth_index?.payload_rows
+      )}`,
+      `连接等待/耗时: ${formatNumber(metrics?.auth_index?.wait_count)} / ${formatNumber(
+        metrics?.auth_index?.wait_duration_ms
+      )} ms`,
+      '',
+      '缓存与磁盘',
+      `LRU/page-cache: ${formatNumber(metrics?.auth_index?.lru_size)} / ${formatNumber(
+        metrics?.auth_index?.page_cache_kb
+      )} KB`,
+      `DB/WAL: ${formatBytes(metrics?.auth_index?.db_bytes)} / ${formatBytes(
+        metrics?.auth_index?.wal_bytes
+      )}`,
+      `进程 IO: ${formatBytes(metrics?.process?.io_read_bytes)} / ${formatBytes(
+        metrics?.process?.io_write_bytes
+      )}`,
+      `列表默认/上限: ${formatNumber(metrics?.auth_index?.list_max_default)} / ${formatNumber(
+        metrics?.auth_index?.list_max_hard
+      )}`,
+      `最后全量扫描: ${formatUnixSeconds(
+        metrics?.auth_index?.last_full_scan_unix,
+        i18n.language
+      )}`,
+    ].join('\n');
+  }, [i18n.language, runtimeMetrics]);
+
+  const handleRuntimeRefreshChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    const next = Number(event.currentTarget.value);
+    setRuntimeRefreshMs(next);
+    writeRuntimeRefreshMs(next);
+  }, []);
+
+  const handleCopyRuntimeMetrics = useCallback(async () => {
+    if (!runtimeMetrics) {
+      showNotification('暂无可复制的运行数据', 'warning');
+      return;
+    }
+    const copied = await copyToClipboard(runtimeSnapshotText);
+    showNotification(copied ? '运行数据已复制' : '运行数据复制失败', copied ? 'success' : 'error');
+  }, [runtimeMetrics, runtimeSnapshotText, showNotification]);
+
   useEffect(() => {
     fetchConfig().catch(() => {
       // ignore
@@ -434,7 +569,7 @@ export function SystemPage() {
               <select
                 className={styles.runtimeSelect}
                 value={String(runtimeRefreshMs)}
-                onChange={(event) => setRuntimeRefreshMs(Number(event.currentTarget.value))}
+                onChange={handleRuntimeRefreshChange}
                 aria-label="运行数据刷新周期"
               >
                 {RUNTIME_REFRESH_OPTIONS.map((option) => (
@@ -450,6 +585,9 @@ export function SystemPage() {
                 loading={runtimeLoading}
               >
                 立即刷新
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => void handleCopyRuntimeMetrics()}>
+                一键复制数据
               </Button>
             </div>
           }
