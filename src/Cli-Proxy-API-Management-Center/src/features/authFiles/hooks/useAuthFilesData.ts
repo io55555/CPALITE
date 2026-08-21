@@ -30,7 +30,7 @@ type DeleteAllOptions = {
 
 type LoadFilesOptions = AuthFilesListOptions;
 
-const buildSummaryOptions = (options: LoadFilesOptions): LoadFilesOptions => ({
+const buildSummaryOptions = (): LoadFilesOptions => ({
   page: 1,
   pageSize: 1,
 });
@@ -181,7 +181,7 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     setLoading(true);
     setError('');
     try {
-      const summaryData = await authFilesApi.list(buildSummaryOptions(options));
+      const summaryData = await authFilesApi.list(buildSummaryOptions());
       const data = await authFilesApi.list(options);
       const nextFiles = data?.files || [];
       setFiles(nextFiles);
