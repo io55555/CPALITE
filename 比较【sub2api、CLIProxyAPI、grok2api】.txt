@@ -1,0 +1,56 @@
+比较【sub2api、CLIProxyAPI、grok2api】：xAI 认证文件/账号数量超过 2 万时的最少资源占用与 1核1GB VPS 适配性
+
+结论时间：2026-08-21
+分析范围：
+- ./src原始代码/sub2api/
+- ./src/CLIProxyAPI/
+- ./src原始代码/grok2api/
+
+重要前提：
+- 本报告是源码级静态分析与保守资源估算，不是实机压测结果。
+- “2万个以上 xAI 认证文件”在 CLIProxyAPI 中按 2 万个 auth JSON 文件理解；在 sub2api/grok2api 中按 2 万个 xAI/Grok OAuth/SSO 账号记录理解，因为两者主要不是文件型热路径。
+- “最少资源占用”按只运行后端服务、不开前端 dev server、不主动导入/批量扫描/大规模管理页导出、不计算数据库外部服务峰值的最低可用状态估算。
+
+一、核心源码证据
+
+| 程序 | 认证/账号存储方式 | 热路径选择方式 | 后台刷新/调度方式 | 关键证据 |
+|---|---|---|---|---|
+| sub2api | 数据库 accounts 表，credentials 为 JSONB；Redis SchedulerCache 保存调度快照 | 通过可调度账号查询/快照读取，按 platform/group 过滤 active、schedulable、冷却、过期等状态 | token refresh 使用分页扫描，默认 page=200、provider 并发=4、QPS=2 | src原始代码/sub2api/backend/ent/schema/account.go；internal/repository/account_repo.go::ListSchedulableByPlatform/ListSchedulableByPlatforms；internal/repository/scheduler_cache.go::NewSchedulerCache；internal/service/token_refresh_service.go |
+| CLIProxyAPI | 文件型 auth store；启动/刷新时 WalkDir 读取 auth JSON，解析为 Auth 对象并常驻 Manager.auths | 内存 Manager + authScheduler；按 provider/model 建 providerScheduler、modelScheduler、ready bucket、cooldown queue | auto-refresh loop 维护 2 万 auth 的最小堆，默认 16 worker；到期触发 refresh | src/CLIProxyAPI/sdk/auth/filestore.go::List/readAuthFiles；sdk/cliproxy/auth/types.go::Auth；sdk/cliproxy/auth/conductor.go::Manager；sdk/cliproxy/auth/scheduler.go；sdk/cliproxy/auth/auto_refresh_loop.go |
+| grok2api | 数据库 provider_accounts + account_credentials；路由候选不加载加密 token，选中后才 GetCredentialMaterial | Selector 缓存 RoutingCandidate；支持 layered base/overlay cache、30s TTL、stale fallback、分段选择 | 账号 refresh/额度恢复走 DB/运行态队列；启动只做有限修复/补偿，不需要把全部密钥常驻 | src原始代码/grok2api/backend/internal/domain/account/account.go；internal/infra/persistence/relational/account_repository.go::ListRoutingCandidates/ListRoutingAccountBases/GetCredentialMaterial；internal/application/gateway/selector.go |
+
+二、2 万账号时的最低资源估算
+
+| 程序 | 后端进程最低常驻内存估算 | 外部/隐含资源 | 启动与热路径 CPU | 2 万规模主要瓶颈 |
+|---|---:|---|---|---|
+| sub2api | 约 180MB-350MB；若 Redis 快照命中且单桶装入 2 万账号，单次快照反序列化/切片可能额外几十到一两百 MB | 必须有数据库；SchedulerCache 明确是 Redis，Redis 也会持有调度快照 | 正常请求不应逐文件扫描；刷新分页 200、默认并发 4，CPU 可控 | 数据库/Redis 内存与查询延迟；管理页或全量统计会放大内存与 SQL 压力 |
+| CLIProxyAPI | 约 350MB-700MB；2 万 JSON auth 全量解析为 map/string/时间/状态对象，并额外维护 scheduler 索引、refresh heap | 文件系统目录含 2 万 JSON；无独立数据库时外部资源少，但本进程承担全部状态 | 启动 WalkDir + 2 万 JSON 解析明显慢；热路径内存调度很快，但 GC 压力较高 | Go map/对象开销、GC、管理接口序列化 2 万 auth、刷新到期集中时的网络并发 |
+| grok2api | 约 160MB-320MB；候选缓存有上限：candidate 10万、base 15万、overlay 25万 values，2 万账号在设计范围内 | 必须有数据库；可选 Redis runtime store；数据库索引质量决定延迟 | 正常热路径先读缓存；缓存失效时批量 DB 查询；分段选择减少大池遍历成本 | DB 查询与候选快照内存；如果多模型/多路由同时缓存，内存会上升 |
+
+三、1核1GB VPS 是否能稳定快速服务
+
+| 程序 | 结论 | 原因 |
+|---|---|---|
+| sub2api | 不建议把“后端 + 数据库 + Redis + 2万账号”全部放在 1核1GB 上；外置 DB/Redis 时可低并发运行，但不保证快速 | 架构把热状态拆到 DB/Redis，单进程压力小于 CLIProxyAPI；但 1GB 同机跑 PostgreSQL/Redis/后端会被缓存、连接池、快照和管理查询挤压 |
+| CLIProxyAPI | 不建议；能启动不等于稳定快速。1核1GB 下属于高风险勉强运行 | 2 万 auth 文件全量常驻内存，调度索引和刷新堆也常驻；启动扫描慢，GC 和管理接口全量 JSON 输出容易造成卡顿或 OOM |
+| grok2api | 三者中最适合 2 万规模；外置或轻量数据库配置下，1核1GB 可低并发稳定运行；同机重负载数据库仍不建议 | 路由候选不加载密钥，选中后才取 credential material；candidate/base/overlay 缓存有上限和 TTL；分段选择对大池更友好 |
+
+四、排序
+
+| 维度 | 排名 |
+|---|---|
+| 2 万账号最低内存压力 | grok2api 最低；sub2api 次之；CLIProxyAPI 最高 |
+| 1核1GB 稳定性 | grok2api 最好；sub2api 依赖外置 DB/Redis；CLIProxyAPI 风险最大 |
+| 请求选择速度 | CLIProxyAPI 内存命中最快但 GC 风险高；grok2api 缓存命中较快且可控；sub2api 取决于 Redis/DB 快照命中 |
+| 扩展到 2 万以上的工程合理性 | grok2api 最合理；sub2api 可用但外部组件压力更明显；CLIProxyAPI 不适合大量文件型 auth 常驻 |
+
+五、最终判断
+
+| 程序 | 1核1GB VPS 最终建议 |
+|---|---|
+| sub2api | 可测试低并发，但推荐至少 2核2GB，并把数据库/Redis 外置或严格限流。 |
+| CLIProxyAPI | 不推荐 2 万 xAI auth 文件部署在 1核1GB；推荐至少 2核2GB-4GB，且关闭不必要管理全量查询、分散刷新时间。 |
+| grok2api | 若只跑后端 + SQLite/轻量 DB + 低并发，可作为三者中唯一相对可接受的 1核1GB 方案；生产稳定快速仍建议 2核2GB 起步。 |
+
+一句话结论：
+2 万以上 xAI 认证规模下，grok2api 的数据库投影 + 延迟加载密钥 + 分段候选选择最适合小 VPS；sub2api 依赖 DB/Redis，能跑但不轻；CLIProxyAPI 的文件型 auth 全量常驻内存方案在 1核1GB 上最不稳，不应作为稳定快速服务方案。

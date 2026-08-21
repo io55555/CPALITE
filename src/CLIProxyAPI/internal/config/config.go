@@ -1356,7 +1356,7 @@ func (cfg *Config) NormalizePluginsConfig() {
 func DefaultAuthIndexCacheConfig() AuthIndexCacheConfig {
 	return AuthIndexCacheConfig{
 		Enabled:        false,
-		LRUSize:        128,
+		LRUSize:        32768,
 		PageCacheKB:    8192,
 		SyncMode:       "queued",
 		RebuildOnStart: false,
@@ -1376,7 +1376,7 @@ func (cfg *Config) NormalizeAuthIndexCacheConfig() {
 		primary = alias
 	}
 	defaults := DefaultAuthIndexCacheConfig()
-	if primary.LRUSize <= 0 {
+	if primary.LRUSize <= 0 || primary.LRUSize == 128 {
 		primary.LRUSize = defaults.LRUSize
 	}
 	if primary.PageCacheKB <= 0 {

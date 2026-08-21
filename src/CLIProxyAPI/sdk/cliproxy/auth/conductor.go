@@ -5063,8 +5063,10 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			appendCooldownAudit("RESTORE after openai_compat wipe auth=%s provider=%s before_until=%s", auth.ID, auth.Provider, beforeCompat.NextRetryAfter.UTC().Format(time.RFC3339))
 		}
 		authSnapshot = auth.Clone()
-		persistSnapshot = authSnapshot.Clone()
 		saveCooldownState = cooldownStateChanged(beforeSnapshot, authSnapshot, now)
+		if shouldPersistResultAuthState(beforeSnapshot, authSnapshot, saveCooldownState, now) {
+			persistSnapshot = authSnapshot.Clone()
+		}
 		if authSnapshot != nil && authKeepsTopLevelCooldown(authSnapshot, now) {
 			appendCooldownAudit("MARKRESULT auth=%s provider=%s model=%s success=%v status=%s unavailable=%v until=%s msg=%q",
 				authSnapshot.ID, authSnapshot.Provider, result.Model, result.Success, authSnapshot.Status, authSnapshot.Unavailable, authSnapshot.NextRetryAfter.UTC().Format(time.RFC3339), authSnapshot.StatusMessage)
@@ -5094,6 +5096,64 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	m.hook.OnResult(ctx, result)
 	m.publishErrorEvent(result, authSnapshot)
 	logAuthStateTransition(ctx, beforeSnapshot, authSnapshot)
+}
+
+func shouldPersistResultAuthState(before, after *Auth, cooldownChanged bool, now time.Time) bool {
+	if after == nil || after.Metadata == nil {
+		return false
+	}
+	if cooldownChanged {
+		return true
+	}
+	if before == nil {
+		return true
+	}
+	if before.Disabled != after.Disabled || before.Unavailable != after.Unavailable || before.Status != after.Status || before.StatusMessage != after.StatusMessage {
+		return true
+	}
+	if !before.NextRetryAfter.Equal(after.NextRetryAfter) || before.Quota != after.Quota {
+		return true
+	}
+	if !errorsEqual(before.LastError, after.LastError) {
+		return true
+	}
+	return meaningfulModelStateChangedForPersist(before.ModelStates, after.ModelStates, now)
+}
+
+func meaningfulModelStateChangedForPersist(before, after map[string]*ModelState, now time.Time) bool {
+	keys := make(map[string]struct{}, len(before)+len(after))
+	for key := range before {
+		keys[key] = struct{}{}
+	}
+	for key := range after {
+		keys[key] = struct{}{}
+	}
+	for key := range keys {
+		left := before[key]
+		right := after[key]
+		if stateUnavailableForPersistence(left, now) || stateUnavailableForPersistence(right, now) {
+			if !modelStatesEqualForPersist(left, right) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func modelStatesEqualForPersist(a, b *ModelState) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Status != b.Status || a.StatusMessage != b.StatusMessage || a.Unavailable != b.Unavailable {
+		return false
+	}
+	if !a.NextRetryAfter.Equal(b.NextRetryAfter) || !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return false
+	}
+	if a.Quota != b.Quota {
+		return false
+	}
+	return errorsEqual(a.LastError, b.LastError)
 }
 
 // ApplyPacketFilterAction applies an action emitted by the packet-capture

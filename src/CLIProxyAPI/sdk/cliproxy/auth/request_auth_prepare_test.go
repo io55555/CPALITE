@@ -506,6 +506,59 @@ func TestManagerLoadUsesLightweightStoreAndHydratesBeforeRequest(t *testing.T) {
 	}
 }
 
+func TestManagerExecuteWithSQLiteStubDoesNotPersistSuccessCounters(t *testing.T) {
+	const model = "gemini-3.1-pro"
+	stub := &Auth{
+		ID:       "sqlite-success-auth",
+		Provider: "antigravity",
+		Status:   StatusActive,
+		Attributes: map[string]string{
+			AttributeSQLiteStub: "true",
+			AttributePath:       "sqlite-success-auth.json",
+		},
+	}
+	full := &Auth{
+		ID:       "sqlite-success-auth",
+		Provider: "antigravity",
+		Status:   StatusActive,
+		Metadata: map[string]any{
+			"access_token": "secret",
+			"project_id":   "prepared-project",
+		},
+	}
+	store := &lightweightHydrateStore{stub: stub, full: full}
+	executor := &requestPrepareExecutor{}
+	manager := NewManager(store, nil, nil)
+	manager.RegisterExecutor(executor)
+
+	if err := manager.Load(context.Background()); err != nil {
+		t.Fatalf("load manager: %v", err)
+	}
+	registry.GetGlobalRegistry().RegisterClient(stub.ID, "antigravity", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(stub.ID) })
+
+	for i := 0; i < 2; i++ {
+		resp, errExecute := manager.Execute(context.Background(), []string{"antigravity"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+		if errExecute != nil {
+			t.Fatalf("Execute #%d error: %v", i+1, errExecute)
+		}
+		if string(resp.Payload) != "ok" {
+			t.Fatalf("payload #%d = %q, want ok", i+1, string(resp.Payload))
+		}
+	}
+	manager.flushQueuedPersist(context.Background())
+
+	if got := store.hydrateCalls.Load(); got != 1 {
+		t.Fatalf("hydrate calls = %d, want 1", got)
+	}
+	if got := store.saveCalls.Load(); got != 0 {
+		t.Fatalf("save calls = %d, want 0 for success-only runtime counters", got)
+	}
+	if got := executor.prepareCalls.Load(); got != 0 {
+		t.Fatalf("prepare calls = %d, want 0 for already prepared auth", got)
+	}
+}
+
 func TestManagerRegisterAndUpdatePersistFullFileAuthButKeepSQLiteStubInMemory(t *testing.T) {
 	fileAuth := &Auth{
 		ID:       "file-auth",

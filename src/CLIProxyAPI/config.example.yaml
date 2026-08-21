@@ -40,7 +40,7 @@ auth-dir: "~/.cli-proxy-api"
 # auth-index-cache:
 #   enabled: true
 #   db-path: ""
-#   lru-size: 128
+#   lru-size: 32768
 #   page-cache-kb: 8192
 #   sync-mode: queued
 #   rebuild-on-start: false
