@@ -31,6 +31,7 @@ const (
 	creditsUsedKey                 = "__antigravity_credits_used__"
 	usageRawPacketMaxBytes         = 256 * 1024
 	maxDeferredAPIRequestBodyBytes = 32 << 20 // 32 MiB
+	maxAPIResponseLogBodyBytes     = 1 << 20  // 1 MiB
 )
 
 // UpstreamRequestLog captures the outbound upstream request details for logging.
@@ -57,6 +58,8 @@ type upstreamAttempt struct {
 	bodyHasContent       bool
 	prevWasSSEEvent      bool
 	errorWritten         bool
+	responseBodyBytes    int
+	responseTruncated    bool
 }
 
 func RecordUsageRawRequest(ctx context.Context, raw string) {
@@ -406,6 +409,19 @@ func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byt
 		attempt.response.WriteString("Body:\n")
 		attempt.bodyStarted = true
 	}
+	if attempt.responseTruncated {
+		return
+	}
+	if attempt.responseBodyBytes >= maxAPIResponseLogBodyBytes {
+		attempt.response.WriteString(fmt.Sprintf("\n[API RESPONSE BODY TRUNCATED: captured first %d bytes]", maxAPIResponseLogBodyBytes))
+		attempt.responseTruncated = true
+		updateAggregatedResponse(ginCtx, attempts)
+		return
+	}
+	if remaining := maxAPIResponseLogBodyBytes - attempt.responseBodyBytes; len(data) > remaining {
+		data = data[:remaining]
+		attempt.responseTruncated = true
+	}
 	currentChunkIsSSEEvent := bytes.HasPrefix(data, []byte("event:"))
 	currentChunkIsSSEData := bytes.HasPrefix(data, []byte("data:"))
 	if attempt.bodyHasContent {
@@ -416,6 +432,10 @@ func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byt
 		attempt.response.WriteString(separator)
 	}
 	attempt.response.WriteString(string(data))
+	attempt.responseBodyBytes += len(data)
+	if attempt.responseTruncated {
+		attempt.response.WriteString(fmt.Sprintf("\n[API RESPONSE BODY TRUNCATED: captured first %d bytes]", maxAPIResponseLogBodyBytes))
+	}
 	attempt.bodyHasContent = true
 	attempt.prevWasSSEEvent = currentChunkIsSSEEvent
 

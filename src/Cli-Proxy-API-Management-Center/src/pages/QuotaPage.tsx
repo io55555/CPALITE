@@ -20,7 +20,7 @@ import type { AuthFileItem } from '@/types';
 import styles from './QuotaPage.module.scss';
 
 const QUOTA_PROVIDERS = ['claude', 'antigravity', 'codex', 'gemini-cli', 'kimi', 'xai'];
-const DEFAULT_QUOTA_PAGE_SIZE = 25;
+const DEFAULT_QUOTA_PAGE_SIZE = 50;
 
 type ProviderPageState = {
   files: AuthFileItem[];
@@ -95,6 +95,7 @@ export function QuotaPage() {
           provider: normalizedProvider,
           page,
           pageSize,
+          status: 'enabled',
         });
         setProviderPages((current) => ({
           ...current,
@@ -130,7 +131,7 @@ export function QuotaPage() {
     setLoading(true);
     setError('');
     try {
-      const summaryPage = await authFilesApi.list({ page: 1, pageSize: 1 });
+      const summaryPage = await authFilesApi.list({ page: 1, pageSize: 1, status: 'enabled' });
       const counts = summaryProviderCounts(summaryPage.summary);
       const providers = QUOTA_PROVIDERS.filter((provider) => counts[provider] > 0);
       setProviderPages((current) => {
@@ -152,6 +153,7 @@ export function QuotaPage() {
             provider,
             page: 1,
             pageSize: DEFAULT_QUOTA_PAGE_SIZE,
+            status: 'enabled',
           });
           return { provider, payload };
         })

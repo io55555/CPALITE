@@ -119,6 +119,20 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     }
     setLocalPage(nextPage);
   }, [currentPage, onPageChange, pageSize, serverPaging, totalPages]);
+  const goToFirst = useCallback(() => {
+    if (serverPaging) {
+      void onPageChange?.(1, pageSize);
+      return;
+    }
+    setLocalPage(1);
+  }, [onPageChange, pageSize, serverPaging]);
+  const goToLast = useCallback(() => {
+    if (serverPaging) {
+      void onPageChange?.(totalPages, pageSize);
+      return;
+    }
+    setLocalPage(totalPages);
+  }, [onPageChange, pageSize, serverPaging, totalPages]);
 
   useEffect(() => {
     if (showAllAllowed) return;
@@ -138,7 +152,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
 
   // Update page size based on view mode and columns
   useEffect(() => {
-    if (serverPaging && totalItems === 0) return;
+    if (serverPaging) return;
     if (effectiveViewMode === 'all') {
       setPageSize(Math.max(1, totalItems));
     } else {
@@ -404,6 +418,14 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
           </div>
           {totalItems > pageSize && effectiveViewMode === 'paged' && (
             <div className={styles.pagination}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={goToFirst}
+                disabled={currentPage <= 1}
+              >
+                首页
+              </Button>
               <Button variant="secondary" size="sm" onClick={goToPrev} disabled={currentPage <= 1}>
                 {t('auth_files.pagination_prev')}
               </Button>
@@ -421,6 +443,14 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
                 disabled={currentPage >= totalPages}
               >
                 {t('auth_files.pagination_next')}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={goToLast}
+                disabled={currentPage >= totalPages}
+              >
+                尾页
               </Button>
             </div>
           )}

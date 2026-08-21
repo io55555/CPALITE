@@ -678,6 +678,9 @@ func (h *Handler) authByIndex(authIndex string) *coreauth.Auth {
 		if auth == nil {
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(auth.ID), authIndex) {
+			return auth
+		}
 		auth.EnsureIndex()
 		if auth.Index == authIndex {
 			return auth
