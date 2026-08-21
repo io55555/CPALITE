@@ -46,6 +46,9 @@ type lightweightHydrateStore struct {
 	listCalls        atomic.Int32
 	lightweightCalls atomic.Int32
 	hydrateCalls     atomic.Int32
+	saveCalls        atomic.Int32
+	mu               sync.Mutex
+	lastSaved        *Auth
 	stub             *Auth
 	full             *Auth
 }
@@ -68,8 +71,21 @@ func (s *lightweightHydrateStore) HydrateAuth(_ context.Context, id string) (*Au
 	return s.full.Clone(), nil
 }
 
-func (s *lightweightHydrateStore) Save(context.Context, *Auth) (string, error) { return "", nil }
-func (s *lightweightHydrateStore) Delete(context.Context, string) error        { return nil }
+func (s *lightweightHydrateStore) Save(_ context.Context, auth *Auth) (string, error) {
+	s.saveCalls.Add(1)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSaved = auth.Clone()
+	return "", nil
+}
+
+func (s *lightweightHydrateStore) Delete(context.Context, string) error { return nil }
+
+func (s *lightweightHydrateStore) savedAuth() *Auth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastSaved.Clone()
+}
 
 type requestPrepareExecutor struct {
 	prepareCalls atomic.Int32
@@ -487,6 +503,59 @@ func TestManagerLoadUsesLightweightStoreAndHydratesBeforeRequest(t *testing.T) {
 	observed := executor.lastObservedAuth()
 	if observed == nil || testStringValue(observed.Metadata["access_token"]) != "secret" {
 		t.Fatalf("executor observed auth = %#v, want hydrated metadata", observed)
+	}
+}
+
+func TestManagerRegisterAndUpdatePersistFullFileAuthButKeepSQLiteStubInMemory(t *testing.T) {
+	fileAuth := &Auth{
+		ID:       "file-auth",
+		Provider: "xai",
+		Status:   StatusActive,
+		FileName: "xai-auth.json",
+		Attributes: map[string]string{
+			AttributePath:          "xai-auth.json",
+			AttributeSourceBackend: AuthSourceFile,
+			AttributeAuthKind:      AuthKindOAuth,
+		},
+		Metadata: map[string]any{
+			"access_token": "secret-token",
+			"email":        "user@example.com",
+		},
+	}
+	store := &lightweightHydrateStore{
+		stub: CompactSQLiteAuthStub(fileAuth),
+		full: fileAuth,
+	}
+	manager := NewManager(store, nil, nil)
+
+	if _, err := manager.Register(context.Background(), fileAuth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+	if saved := store.savedAuth(); saved == nil || IsSQLiteAuthStub(saved) || testStringValue(saved.Metadata["access_token"]) != "secret-token" {
+		t.Fatalf("saved auth = %#v, want full auth with metadata", saved)
+	}
+	current, ok := manager.GetByID(fileAuth.ID)
+	if !ok {
+		t.Fatal("expected registered auth")
+	}
+	if !IsSQLiteAuthStub(current) || current.Metadata != nil {
+		t.Fatalf("manager auth after register = %#v, want sqlite stub without metadata", current)
+	}
+
+	updated := fileAuth.Clone()
+	updated.Metadata["access_token"] = "updated-token"
+	if _, err := manager.Update(context.Background(), updated); err != nil {
+		t.Fatalf("update auth: %v", err)
+	}
+	if saved := store.savedAuth(); saved == nil || IsSQLiteAuthStub(saved) || testStringValue(saved.Metadata["access_token"]) != "updated-token" {
+		t.Fatalf("saved auth after update = %#v, want full auth with updated metadata", saved)
+	}
+	current, ok = manager.GetByID(fileAuth.ID)
+	if !ok {
+		t.Fatal("expected updated auth")
+	}
+	if !IsSQLiteAuthStub(current) || current.Metadata != nil {
+		t.Fatalf("manager auth after update = %#v, want sqlite stub without metadata", current)
 	}
 }
 

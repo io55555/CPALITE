@@ -52,6 +52,11 @@ func (h *Handler) GetRuntimeMetrics(c *gin.Context) {
 	}
 	indexStats := h.runtimeAuthIndexStats(c.Request.Context())
 	authIndexConfig := h.runtimeAuthIndexConfig()
+	authIndexReady := authIndexConfig.Enabled && indexStats.Available && indexStats.Rows > 0 && indexStats.LastFullScanUnix > 0
+	authIndexReadyReason := "ready"
+	if !authIndexReady {
+		authIndexReadyReason = authIndexNotReadyReason(authIndexConfig, indexStats)
+	}
 
 	c.JSON(200, gin.H{
 		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
@@ -110,6 +115,9 @@ func (h *Handler) GetRuntimeMetrics(c *gin.Context) {
 		},
 		"auth_index": gin.H{
 			"enabled":             authIndexConfig.Enabled,
+			"ready":               authIndexReady,
+			"ready_reason":        authIndexReadyReason,
+			"store_type":          h.runtimeAuthStoreType(),
 			"db_path":             indexStats.DBPath,
 			"auth_dir":            indexStats.AuthDir,
 			"available":           indexStats.Available,
@@ -210,6 +218,32 @@ func (h *Handler) runtimeAuthIndexConfig() config.AuthIndexCacheConfig {
 	normalizer := &config.Config{AuthIndexCache: cfg}
 	normalizer.NormalizeAuthIndexCacheConfig()
 	return normalizer.AuthIndexCache
+}
+
+func authIndexNotReadyReason(cfg config.AuthIndexCacheConfig, stats authindex.RuntimeStats) string {
+	switch {
+	case !cfg.Enabled:
+		return "disabled"
+	case !stats.Available:
+		return "unavailable"
+	case stats.Rows <= 0:
+		return "empty_index"
+	case stats.LastFullScanUnix <= 0:
+		return "not_scanned"
+	default:
+		return "unknown"
+	}
+}
+
+func (h *Handler) runtimeAuthStoreType() string {
+	if h == nil || h.authManager == nil {
+		return ""
+	}
+	store := h.authManager.Store()
+	if store == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T", store)
 }
 
 func (h *Handler) runtimeAuthIndexStats(parent context.Context) authindex.RuntimeStats {

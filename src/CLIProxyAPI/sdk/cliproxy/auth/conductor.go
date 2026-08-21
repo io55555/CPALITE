@@ -2553,14 +2553,15 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 		appendCooldownAudit("RESTORE after openai_compat wipe on Register auth=%s provider=%s before_until=%s", authClone.ID, authClone.Provider, beforeCompat.NextRetryAfter.UTC().Format(time.RFC3339))
 	}
 	m.mu.Lock()
+	runtimeAuth := compactRuntimeAuthForStore(m.store, authClone)
 	delete(m.removedAuthIDs, auth.ID)
-	m.auths[auth.ID] = authClone
+	m.auths[auth.ID] = runtimeAuth
 	m.mu.Unlock()
 	if !shouldDeferAPIKeyModelAliasRebuild(ctx) {
 		m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	}
 	if m.scheduler != nil {
-		m.scheduler.upsertAuth(authClone)
+		m.scheduler.upsertAuth(runtimeAuth)
 	}
 	m.invalidateHydrateCache(auth.ID)
 	m.queueRefreshReschedule(auth.ID)
@@ -2649,20 +2650,34 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	if restoreCooldownAfterExternalStateWipe(authClone, beforeCompat, now) {
 		appendCooldownAudit("RESTORE after openai_compat wipe on Update auth=%s provider=%s before_until=%s", authClone.ID, authClone.Provider, beforeCompat.NextRetryAfter.UTC().Format(time.RFC3339))
 	}
-	m.auths[auth.ID] = authClone
+	runtimeAuth := compactRuntimeAuthForStore(m.store, authClone)
+	m.auths[auth.ID] = runtimeAuth
 	m.mu.Unlock()
 	if !shouldDeferAPIKeyModelAliasRebuild(ctx) {
 		m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	}
 	if m.scheduler != nil {
-		m.scheduler.upsertAuth(authClone)
+		m.scheduler.upsertAuth(runtimeAuth)
 	}
 	m.invalidateHydrateCache(auth.ID)
 	m.queueRefreshReschedule(auth.ID)
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
-	logAuthStateTransition(ctx, beforeSnapshot, authClone)
+	logAuthStateTransition(ctx, beforeSnapshot, runtimeAuth)
 	return auth.Clone(), nil
+}
+
+func compactRuntimeAuthForStore(store Store, auth *Auth) *Auth {
+	if auth == nil {
+		return nil
+	}
+	if IsSQLiteAuthStub(auth) || auth.AuthSourceKind() != AuthSourceFile {
+		return auth.Clone()
+	}
+	if hydrator, ok := store.(AuthHydrator); ok && hydrator != nil {
+		return CompactSQLiteAuthStub(auth)
+	}
+	return auth.Clone()
 }
 
 // Remove deletes an auth entry from runtime selection and background refresh state.

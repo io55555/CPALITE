@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -114,6 +115,113 @@ func IsSQLiteAuthStub(auth *Auth) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(auth.Attributes[AttributeSQLiteStub]), "true")
+}
+
+// CompactSQLiteAuthStub 返回仅用于运行态常驻的轻量认证对象，完整 payload 由持久化层按需 hydrate。
+func CompactSQLiteAuthStub(auth *Auth) *Auth {
+	if auth == nil {
+		return nil
+	}
+	stub := &Auth{
+		ID:               auth.ID,
+		Index:            auth.Index,
+		Provider:         auth.Provider,
+		Prefix:           auth.Prefix,
+		FileName:         auth.FileName,
+		Label:            auth.Label,
+		Status:           auth.Status,
+		StatusMessage:    auth.StatusMessage,
+		Disabled:         auth.Disabled,
+		Unavailable:      auth.Unavailable,
+		Quota:            auth.Quota,
+		CreatedAt:        auth.CreatedAt,
+		UpdatedAt:        auth.UpdatedAt,
+		LastRefreshedAt:  auth.LastRefreshedAt,
+		NextRefreshAfter: auth.NextRefreshAfter,
+		NextRetryAfter:   auth.NextRetryAfter,
+		Success:          auth.Success,
+		Failed:           auth.Failed,
+		recentRequests:   auth.recentRequests,
+		indexAssigned:    auth.indexAssigned,
+	}
+	if len(auth.ModelStates) > 0 {
+		stub.ModelStates = make(map[string]*ModelState, len(auth.ModelStates))
+		for key, state := range auth.ModelStates {
+			stub.ModelStates[key] = state.Clone()
+		}
+	}
+	stub.Attributes = compactSQLiteStubAttributes(auth)
+	stub.EnsureIndex()
+	return stub
+}
+
+func compactSQLiteStubAttributes(auth *Auth) map[string]string {
+	attrs := make(map[string]string)
+	copyAttr := func(key string) {
+		if auth == nil || auth.Attributes == nil {
+			return
+		}
+		if value := strings.TrimSpace(auth.Attributes[key]); value != "" {
+			attrs[key] = value
+		}
+	}
+	for _, key := range []string{
+		AttributePath,
+		AttributeSource,
+		AttributeSourceBackend,
+		AttributeAuthKind,
+		AttributeAuthIndexSeed,
+		AttributeWeight,
+		"email",
+		"project_id",
+		"account",
+		"account_type",
+		"priority",
+	} {
+		copyAttr(key)
+	}
+	if attrs[AttributePath] == "" {
+		if path := strings.TrimSpace(auth.FileName); path != "" {
+			attrs[AttributePath] = path
+		}
+	}
+	if attrs[AttributeSource] == "" && attrs[AttributePath] != "" {
+		attrs[AttributeSource] = attrs[AttributePath]
+	}
+	attrs[AttributeSourceBackend] = AuthSourceFile
+	attrs[AttributeSQLiteStub] = "true"
+	if attrs[AttributeAuthKind] == "" {
+		if kind := auth.AuthKind(); kind != "" {
+			attrs[AttributeAuthKind] = kind
+		}
+	}
+	if attrs["email"] == "" {
+		if email := compactMetadataString(auth, "email"); email != "" {
+			attrs["email"] = email
+		}
+	}
+	if attrs["project_id"] == "" {
+		if projectID := compactMetadataString(auth, "project_id"); projectID != "" {
+			attrs["project_id"] = projectID
+		}
+	}
+	if attrs["account"] == "" {
+		if account := compactMetadataString(auth, "account"); account != "" {
+			attrs["account"] = account
+		}
+	}
+	return attrs
+}
+
+func compactMetadataString(auth *Auth, key string) string {
+	if auth == nil || auth.Metadata == nil {
+		return ""
+	}
+	value, ok := auth.Metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 // MarkPluginVirtualAuth marks an auth that was expanded from a plugin-owned source file.

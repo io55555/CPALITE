@@ -426,8 +426,8 @@ export function SystemPage() {
       `完整 Auth/LRU: ${formatNumber(metrics?.auth?.full_auth_count)} / ${formatNumber(
         metrics?.auth?.hydrated_cache_count
       )}`,
-      `索引启用/可用: ${formatBoolean(metrics?.auth_index?.enabled)} / ${formatBoolean(
-        metrics?.auth_index?.available
+      `索引启用/就绪: ${formatBoolean(metrics?.auth_index?.enabled)} / ${formatBoolean(
+        metrics?.auth_index?.ready
       )}`,
       `索引/payload 行: ${formatNumber(metrics?.auth_index?.rows)} / ${formatNumber(
         metrics?.auth_index?.payload_rows
@@ -435,6 +435,9 @@ export function SystemPage() {
       `连接等待/耗时: ${formatNumber(metrics?.auth_index?.wait_count)} / ${formatNumber(
         metrics?.auth_index?.wait_duration_ms
       )} ms`,
+      `索引状态原因: ${String(metrics?.auth_index?.ready_reason ?? '-')}`,
+      `索引 Store: ${String(metrics?.auth_index?.store_type ?? '-')}`,
+      `索引路径: ${String(metrics?.auth_index?.db_path ?? '-')}`,
       '',
       '缓存与磁盘',
       `LRU/page-cache: ${formatNumber(metrics?.auth_index?.lru_size)} / ${formatNumber(
@@ -727,10 +730,10 @@ export function SystemPage() {
                 </strong>
               </div>
               <div className={styles.runtimeMetric}>
-                <span>索引启用/可用</span>
+                <span>索引启用/就绪</span>
                 <strong>
                   {formatBoolean(runtimeMetrics?.auth_index?.enabled)} /{' '}
-                  {formatBoolean(runtimeMetrics?.auth_index?.available)}
+                  {formatBoolean(runtimeMetrics?.auth_index?.ready)}
                 </strong>
               </div>
               <div className={styles.runtimeMetric}>
