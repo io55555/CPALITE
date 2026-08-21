@@ -57,6 +57,8 @@ type QueryOptions struct {
 	Disabled     *bool
 	Keyword      string
 	CooldownOnly bool
+	Status       string
+	Sort         string
 }
 
 // QueryResult 是分页查询结果。
@@ -73,6 +75,27 @@ type QuerySummary struct {
 	Disabled    int
 	Unavailable int
 	ByProvider  map[string]int
+}
+
+// RuntimeStats 暴露索引库的轻量运行诊断信息。
+type RuntimeStats struct {
+	Available          bool
+	AuthDir            string
+	DBPath             string
+	JournalMode        string
+	CacheSizeKB        int
+	PageSizeBytes      int
+	MainDBBytes        int64
+	WALBytes           int64
+	SHMBytes           int64
+	LastFullScanUnix   int64
+	Rows               int
+	PayloadRows        int
+	OpenConnections    int
+	InUseConnections   int
+	IdleConnections    int
+	WaitCount          int64
+	WaitDurationMillis int64
 }
 
 // Open 打开或创建认证索引库。
@@ -139,6 +162,35 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// RuntimeStats 返回 SQLite 索引和连接池状态，不触发目录扫描。
+func (s *Store) RuntimeStats(ctx context.Context) RuntimeStats {
+	stats := RuntimeStats{}
+	if s == nil || s.db == nil {
+		return stats
+	}
+	stats.Available = true
+	stats.AuthDir = s.authDir
+	stats.DBPath = s.databasePath(ctx)
+	stats.JournalMode = s.pragmaString(ctx, "journal_mode")
+	stats.CacheSizeKB = s.cacheSizeKB(ctx)
+	stats.PageSizeBytes = s.pragmaInt(ctx, "page_size")
+	stats.LastFullScanUnix = s.metaInt64(ctx, "last_full_scan_unix")
+	stats.Rows = s.tableCount(ctx, "auth_index")
+	stats.PayloadRows = s.tableCount(ctx, "auth_payload")
+	if stats.DBPath != "" {
+		stats.MainDBBytes = fileSize(stats.DBPath)
+		stats.WALBytes = fileSize(stats.DBPath + "-wal")
+		stats.SHMBytes = fileSize(stats.DBPath + "-shm")
+	}
+	dbStats := s.db.Stats()
+	stats.OpenConnections = dbStats.OpenConnections
+	stats.InUseConnections = dbStats.InUse
+	stats.IdleConnections = dbStats.Idle
+	stats.WaitCount = dbStats.WaitCount
+	stats.WaitDurationMillis = dbStats.WaitDuration.Milliseconds()
+	return stats
 }
 
 // SetBaseDir 同步文件 store 的认证目录，并更新索引目录。
@@ -651,6 +703,7 @@ func (s *Store) HydrateAuth(ctx context.Context, id string) (*coreauth.Auth, err
 func buildWhere(opts QueryOptions) (string, []any) {
 	clauses := make([]string, 0, 4)
 	args := make([]any, 0, 4)
+	nowUnix := time.Now().Unix()
 	if provider := strings.ToLower(strings.TrimSpace(opts.Provider)); provider != "" {
 		clauses = append(clauses, "lower(provider)=?")
 		args = append(args, provider)
@@ -666,7 +719,19 @@ func buildWhere(opts QueryOptions) (string, []any) {
 	}
 	if opts.CooldownOnly {
 		clauses = append(clauses, "cooldown_until>?")
-		args = append(args, time.Now().Unix())
+		args = append(args, nowUnix)
+	}
+	switch strings.ToLower(strings.TrimSpace(opts.Status)) {
+	case "enabled":
+		clauses = append(clauses, "disabled=0")
+	case "enabled_ok":
+		clauses = append(clauses, "disabled=0", "unavailable=0", "(cooldown_until=0 OR cooldown_until<=?)", "(status='' OR lower(status)='active')")
+		args = append(args, nowUnix)
+	case "disabled":
+		clauses = append(clauses, "disabled!=0")
+	case "problem":
+		clauses = append(clauses, "disabled=0", "(unavailable!=0 OR cooldown_until>? OR (status!='' AND lower(status)!='active'))")
+		args = append(args, nowUnix)
 	}
 	if len(clauses) == 0 {
 		return "", nil

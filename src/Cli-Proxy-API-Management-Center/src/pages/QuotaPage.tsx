@@ -13,10 +13,25 @@ import {
   CLAUDE_CONFIG,
   CODEX_CONFIG,
   GEMINI_CLI_CONFIG,
-  KIMI_CONFIG
+  KIMI_CONFIG,
+  XAI_CONFIG
 } from '@/components/quota';
 import type { AuthFileItem } from '@/types';
 import styles from './QuotaPage.module.scss';
+
+const QUOTA_PROVIDERS = ['claude', 'antigravity', 'codex', 'gemini-cli', 'kimi', 'xai'];
+
+const summaryProviderCounts = (summary: unknown): Record<string, number> => {
+  if (!summary || typeof summary !== 'object') return {};
+  const record = summary as { by_provider?: unknown; byProvider?: unknown };
+  const raw = record.by_provider ?? record.byProvider;
+  if (!raw || typeof raw !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .map(([key, value]) => [key.trim().toLowerCase(), Number(value)])
+      .filter(([key, value]) => key && Number.isFinite(value) && value > 0)
+  );
+};
 
 export function QuotaPage() {
   const { t } = useTranslation();
@@ -41,8 +56,13 @@ export function QuotaPage() {
     setLoading(true);
     setError('');
     try {
-      const data = await authFilesApi.listAll();
-      setFiles(data?.files || []);
+      const summaryPage = await authFilesApi.list({ page: 1, pageSize: 1 });
+      const counts = summaryProviderCounts(summaryPage.summary);
+      const providers = QUOTA_PROVIDERS.filter((provider) => counts[provider] > 0);
+      const pages = await Promise.all(
+        providers.map((provider) => authFilesApi.listAll({ provider, pageSize: 100 }))
+      );
+      setFiles(pages.flatMap((page) => page?.files || []));
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : t('notification.refresh_failed');
       setError(errorMessage);
@@ -97,6 +117,12 @@ export function QuotaPage() {
       />
       <QuotaSection
         config={KIMI_CONFIG}
+        files={files}
+        loading={loading}
+        disabled={disableControls}
+      />
+      <QuotaSection
+        config={XAI_CONFIG}
         files={files}
         loading={loading}
         disabled={disableControls}

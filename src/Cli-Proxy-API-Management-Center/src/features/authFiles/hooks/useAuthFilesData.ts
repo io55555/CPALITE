@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { authFilesApi } from '@/services/api';
+import { authFilesApi, type AuthFilesListOptions } from '@/services/api';
 import { apiClient } from '@/services/api/client';
 import { notifyAuthFilesChanged } from '@/features/authFiles/authFilesEvents';
 import { useNotificationStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
+import type { AuthFilesSummary } from '@/types/authFile';
 import { formatFileSize } from '@/utils/format';
 import { MAX_AUTH_FILE_SIZE } from '@/utils/constants';
 import { downloadBlob } from '@/utils/download';
@@ -27,8 +28,22 @@ type DeleteAllOptions = {
   onResetEnabledOnly: () => void;
 };
 
+type LoadFilesOptions = AuthFilesListOptions;
+
+const buildSummaryOptions = (options: LoadFilesOptions): LoadFilesOptions => ({
+  page: 1,
+  pageSize: 1,
+  cooldownOnly: options.cooldownOnly,
+  disabled: options.disabled,
+  status: options.status,
+});
+
 export type UseAuthFilesDataResult = {
   files: AuthFileItem[];
+  total: number;
+  summary?: AuthFilesSummary;
+  serverPage: number;
+  serverPageSize: number;
   selectedFiles: Set<string>;
   selectionCount: number;
   loading: boolean;
@@ -40,7 +55,7 @@ export type UseAuthFilesDataResult = {
   manualRefreshing: Record<string, boolean>;
   batchStatusUpdating: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
-  loadFiles: () => Promise<void>;
+  loadFiles: (options?: LoadFilesOptions) => Promise<void>;
   handleUploadClick: () => void;
   handleFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
   handleDelete: (name: string) => void;
@@ -62,6 +77,10 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
   const { showNotification, showConfirmation } = useNotificationStore();
 
   const [files, setFiles] = useState<AuthFileItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<AuthFilesSummary | undefined>();
+  const [serverPage, setServerPage] = useState(1);
+  const [serverPageSize, setServerPageSize] = useState(100);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -161,12 +180,22 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     });
   }, [files, selectedFiles.size]);
 
-  const loadFiles = useCallback(async () => {
+  const loadFiles = useCallback(async (options: LoadFilesOptions = {}) => {
     setLoading(true);
     setError('');
     try {
-      const data = await authFilesApi.listAll();
-      setFiles(data?.files || []);
+      const summaryData = await authFilesApi.list(buildSummaryOptions(options));
+      const data = await authFilesApi.list(options);
+      const nextFiles = data?.files || [];
+      setFiles(nextFiles);
+      setTotal(typeof data.total === 'number' ? data.total : nextFiles.length);
+      setSummary(summaryData.summary ?? data.summary);
+      setServerPage(typeof data.page === 'number' && data.page > 0 ? data.page : options.page ?? 1);
+      setServerPageSize(
+        typeof data.page_size === 'number' && data.page_size > 0
+          ? data.page_size
+          : options.pageSize ?? 100
+      );
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : t('notification.refresh_failed');
       setError(errorMessage);
@@ -686,6 +715,10 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
 
   return {
     files,
+    total,
+    summary,
+    serverPage,
+    serverPageSize,
     selectedFiles,
     selectionCount,
     loading,

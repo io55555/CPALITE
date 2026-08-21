@@ -1360,7 +1360,7 @@ func DefaultAuthIndexCacheConfig() AuthIndexCacheConfig {
 		PageCacheKB:    8192,
 		SyncMode:       "queued",
 		RebuildOnStart: false,
-		ListMaxDefault: 200,
+		ListMaxDefault: 100,
 		ListMaxHard:    2000,
 	}
 }

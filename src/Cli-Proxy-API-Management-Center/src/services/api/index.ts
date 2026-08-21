@@ -19,3 +19,4 @@ export * from './authRefreshQueue';
 export * from './accountInspection';
 export * from './transformers';
 export * from './vertex';
+export * from './runtimeMetrics';

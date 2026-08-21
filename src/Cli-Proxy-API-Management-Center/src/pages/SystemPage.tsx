@@ -12,7 +12,7 @@ import {
   useModelsStore,
   useThemeStore,
 } from '@/stores';
-import { configApi, versionApi } from '@/services/api';
+import { configApi, runtimeMetricsApi, type RuntimeMetrics, versionApi } from '@/services/api';
 import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
 import { formatDateTimeValue } from '@/utils/format';
 import { classifyModels } from '@/utils/models';
@@ -70,6 +70,60 @@ const compareVersions = (latest?: string | null, current?: string | null) => {
   return 0;
 };
 
+const RUNTIME_REFRESH_OPTIONS = [
+  { value: '60000', label: '1分钟' },
+  { value: '300000', label: '5分钟' },
+  { value: '900000', label: '15分钟' },
+  { value: '0', label: '手动' },
+];
+
+const formatBytes = (value: unknown) => {
+  const bytes = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  if (bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let next = bytes;
+  let index = 0;
+  while (next >= 1024 && index < units.length - 1) {
+    next /= 1024;
+    index += 1;
+  }
+  return `${next >= 10 ? next.toFixed(1) : next.toFixed(2)} ${units[index]}`;
+};
+
+const formatPercent = (value: unknown) => {
+  const num = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return `${num.toFixed(2)}%`;
+};
+
+const formatNumber = (value: unknown) => {
+  const num = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat().format(num);
+};
+
+const formatSeconds = (value: unknown) => {
+  const seconds = typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  if (days > 0) return `${days}天 ${hours}小时`;
+  if (hours > 0) return `${hours}小时 ${minutes}分钟`;
+  return `${minutes}分钟`;
+};
+
+const formatNanoseconds = (value: unknown) => {
+  const ns = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  if (ns <= 0) return '0 ms';
+  return `${(ns / 1_000_000).toFixed(2)} ms`;
+};
+
+const formatBoolean = (value: unknown) => (value === true ? '是' : '否');
+
+const formatUnixSeconds = (value: unknown, language: string) => {
+  const seconds = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  if (seconds <= 0) return '-';
+  return formatDateTimeValue(new Date(seconds * 1000).toISOString(), language);
+};
+
 export function SystemPage() {
   const { t, i18n } = useTranslation();
   const { showNotification, showConfirmation } = useNotificationStore();
@@ -94,6 +148,10 @@ export function SystemPage() {
   const [requestLogTouched, setRequestLogTouched] = useState(false);
   const [requestLogSaving, setRequestLogSaving] = useState(false);
   const [checkingVersion, setCheckingVersion] = useState(false);
+  const [runtimeMetrics, setRuntimeMetrics] = useState<RuntimeMetrics | null>(null);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runtimeError, setRuntimeError] = useState('');
+  const [runtimeRefreshMs, setRuntimeRefreshMs] = useState(300_000);
 
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -263,6 +321,21 @@ export function SystemPage() {
     }
   }, [auth.serverVersion, showNotification, t]);
 
+  const fetchRuntimeMetrics = useCallback(async () => {
+    if (auth.connectionStatus !== 'connected') return;
+    setRuntimeLoading(true);
+    setRuntimeError('');
+    try {
+      setRuntimeMetrics(await runtimeMetricsApi.get());
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+      setRuntimeError(message || '运行数据加载失败');
+    } finally {
+      setRuntimeLoading(false);
+    }
+  }, [auth.connectionStatus]);
+
   useEffect(() => {
     fetchConfig().catch(() => {
       // ignore
@@ -287,6 +360,18 @@ export function SystemPage() {
     fetchModels({ forceRefresh: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.connectionStatus, auth.apiBase]);
+
+  useEffect(() => {
+    void fetchRuntimeMetrics();
+  }, [fetchRuntimeMetrics]);
+
+  useEffect(() => {
+    if (runtimeRefreshMs <= 0 || auth.connectionStatus !== 'connected') return undefined;
+    const timer = window.setInterval(() => {
+      void fetchRuntimeMetrics();
+    }, runtimeRefreshMs);
+    return () => window.clearInterval(timer);
+  }, [auth.connectionStatus, fetchRuntimeMetrics, runtimeRefreshMs]);
 
   return (
     <div className={styles.container}>
@@ -339,6 +424,236 @@ export function SystemPage() {
               <div className={styles.tileValue}>{t(`common.${auth.connectionStatus}_status`)}</div>
               <div className={styles.tileSub}>{auth.apiBase || '-'}</div>
             </div>
+          </div>
+        </Card>
+
+        <Card
+          title="运行数据"
+          extra={
+            <div className={styles.runtimeToolbar}>
+              <select
+                className={styles.runtimeSelect}
+                value={String(runtimeRefreshMs)}
+                onChange={(event) => setRuntimeRefreshMs(Number(event.currentTarget.value))}
+                aria-label="运行数据刷新周期"
+              >
+                {RUNTIME_REFRESH_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void fetchRuntimeMetrics()}
+                loading={runtimeLoading}
+              >
+                立即刷新
+              </Button>
+            </div>
+          }
+        >
+          {runtimeError && <div className="error-box">{runtimeError}</div>}
+          <div className={styles.runtimeGrid}>
+            <div className={styles.runtimeBlock}>
+              <div className={styles.runtimeBlockTitle}>进程资源</div>
+              <div className={styles.runtimeMetric}>
+                <span>CPU</span>
+                <strong>{formatPercent(runtimeMetrics?.process?.cpu_percent)}</strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>RSS/VMS</span>
+                <strong>
+                  {formatBytes(runtimeMetrics?.process?.rss_bytes)} /{' '}
+                  {formatBytes(runtimeMetrics?.process?.vms_bytes)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>线程/FD</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.process?.threads)} /{' '}
+                  {formatNumber(runtimeMetrics?.process?.fd_count)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>Goroutine</span>
+                <strong>{formatNumber(runtimeMetrics?.process?.goroutines)}</strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>运行时长</span>
+                <strong>{formatSeconds(runtimeMetrics?.process?.uptime_seconds)}</strong>
+              </div>
+            </div>
+
+            <div className={styles.runtimeBlock}>
+              <div className={styles.runtimeBlockTitle}>Go 内存与 GC</div>
+              <div className={styles.runtimeMetric}>
+                <span>HeapAlloc/Inuse</span>
+                <strong>
+                  {formatBytes(runtimeMetrics?.process?.heap_alloc)} /{' '}
+                  {formatBytes(runtimeMetrics?.process?.heap_inuse)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>HeapSys/Released</span>
+                <strong>
+                  {formatBytes(runtimeMetrics?.process?.heap_sys)} /{' '}
+                  {formatBytes(runtimeMetrics?.process?.heap_released)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>对象数/GC</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.process?.heap_objects)} /{' '}
+                  {formatNumber(runtimeMetrics?.process?.gc_count)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>分配/释放</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.process?.mallocs)} /{' '}
+                  {formatNumber(runtimeMetrics?.process?.frees)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>GC CPU/暂停</span>
+                <strong>
+                  {formatPercent(
+                    typeof runtimeMetrics?.process?.gc_cpu_fraction === 'number'
+                      ? runtimeMetrics.process.gc_cpu_fraction * 100
+                      : 0
+                  )}{' '}
+                  / {formatNanoseconds(runtimeMetrics?.process?.gc_pause_total_ns)}
+                </strong>
+              </div>
+            </div>
+
+            <div className={styles.runtimeBlock}>
+              <div className={styles.runtimeBlockTitle}>系统负载</div>
+              <div className={styles.runtimeMetric}>
+                <span>Load 1/5/15</span>
+                <strong>
+                  {[
+                    runtimeMetrics?.system?.load1,
+                    runtimeMetrics?.system?.load5,
+                    runtimeMetrics?.system?.load15,
+                  ]
+                    .map((value) =>
+                      typeof value === 'number' && Number.isFinite(value)
+                        ? value.toFixed(2)
+                        : '0.00'
+                    )
+                    .join(' / ')}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>Load/CPU</span>
+                <strong>
+                  {typeof runtimeMetrics?.system?.load1_per_cpu === 'number'
+                    ? runtimeMetrics.system.load1_per_cpu.toFixed(2)
+                    : '0.00'}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>系统内存</span>
+                <strong>{formatPercent(runtimeMetrics?.system?.memory_used_percent)}</strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>可用内存</span>
+                <strong>{formatBytes(runtimeMetrics?.system?.memory_available_bytes)}</strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>上下文切换</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.process?.voluntary_context_switches)} /{' '}
+                  {formatNumber(runtimeMetrics?.process?.nonvoluntary_context_switches)}
+                </strong>
+              </div>
+            </div>
+
+            <div className={styles.runtimeBlock}>
+              <div className={styles.runtimeBlockTitle}>认证与索引</div>
+              <div className={styles.runtimeMetric}>
+                <span>认证总数/Stub</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.auth?.auth_count)} /{' '}
+                  {formatNumber(runtimeMetrics?.auth?.sqlite_stub_count)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>完整 Auth/LRU</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.auth?.full_auth_count)} /{' '}
+                  {formatNumber(runtimeMetrics?.auth?.hydrated_cache_count)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>索引启用/可用</span>
+                <strong>
+                  {formatBoolean(runtimeMetrics?.auth_index?.enabled)} /{' '}
+                  {formatBoolean(runtimeMetrics?.auth_index?.available)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>索引/payload 行</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.auth_index?.rows)} /{' '}
+                  {formatNumber(runtimeMetrics?.auth_index?.payload_rows)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>连接等待/耗时</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.auth_index?.wait_count)} /{' '}
+                  {formatNumber(runtimeMetrics?.auth_index?.wait_duration_ms)} ms
+                </strong>
+              </div>
+            </div>
+
+            <div className={styles.runtimeBlock}>
+              <div className={styles.runtimeBlockTitle}>缓存与磁盘</div>
+              <div className={styles.runtimeMetric}>
+                <span>LRU/page-cache</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.auth_index?.lru_size)} /{' '}
+                  {formatNumber(runtimeMetrics?.auth_index?.page_cache_kb)} KB
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>DB/WAL</span>
+                <strong>
+                  {formatBytes(runtimeMetrics?.auth_index?.db_bytes)} /{' '}
+                  {formatBytes(runtimeMetrics?.auth_index?.wal_bytes)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>进程 IO</span>
+                <strong>
+                  {formatBytes(runtimeMetrics?.process?.io_read_bytes)} /{' '}
+                  {formatBytes(runtimeMetrics?.process?.io_write_bytes)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>列表默认/上限</span>
+                <strong>
+                  {formatNumber(runtimeMetrics?.auth_index?.list_max_default)} /{' '}
+                  {formatNumber(runtimeMetrics?.auth_index?.list_max_hard)}
+                </strong>
+              </div>
+              <div className={styles.runtimeMetric}>
+                <span>最后全量扫描</span>
+                <strong>
+                  {formatUnixSeconds(runtimeMetrics?.auth_index?.last_full_scan_unix, i18n.language)}
+                </strong>
+              </div>
+            </div>
+          </div>
+          <div className={styles.runtimeFootnote}>
+            更新时间：
+            {runtimeMetrics?.timestamp
+              ? formatDateTimeValue(runtimeMetrics.timestamp, i18n.language)
+              : '-'}
           </div>
         </Card>
 

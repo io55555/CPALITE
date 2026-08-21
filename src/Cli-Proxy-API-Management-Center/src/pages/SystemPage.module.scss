@@ -147,6 +147,76 @@
   margin: 0 0 $spacing-md 0;
 }
 
+.runtimeToolbar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.runtimeSelect {
+  height: 32px;
+  min-width: 108px;
+  padding: 0 $spacing-sm;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.runtimeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-md;
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.runtimeBlock {
+  min-width: 0;
+  padding: $spacing-md;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+}
+
+.runtimeBlockTitle {
+  margin-bottom: $spacing-sm;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.runtimeMetric {
+  display: flex;
+  justify-content: space-between;
+  gap: $spacing-md;
+  padding: 6px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+  font-size: 13px;
+
+  span {
+    color: var(--text-secondary);
+  }
+
+  strong {
+    min-width: 0;
+    color: var(--text-primary);
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+}
+
+.runtimeFootnote {
+  margin-top: $spacing-sm;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-align: right;
+}
+
 .clearLoginActions {
   display: flex;
   justify-content: flex-end;

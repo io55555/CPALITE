@@ -304,6 +304,14 @@ type hydratedAuthCacheEntry struct {
 	auth *Auth
 }
 
+type RuntimeStats struct {
+	AuthCount          int `json:"auth_count"`
+	SQLiteStubCount    int `json:"sqlite_stub_count"`
+	HydratedCacheCount int `json:"hydrated_cache_count"`
+	HydratedCacheLimit int `json:"hydrated_cache_limit"`
+	RuntimeAuthCount   int `json:"runtime_auth_count"`
+}
+
 // NewManager constructs a manager with optional custom selector and hook.
 func NewManager(store Store, selector Selector, hook Hook) *Manager {
 	if selector == nil {
@@ -627,6 +635,29 @@ func (m *Manager) Store() Store {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.store
+}
+
+func (m *Manager) RuntimeStats() RuntimeStats {
+	if m == nil {
+		return RuntimeStats{}
+	}
+	stats := RuntimeStats{}
+	m.mu.RLock()
+	stats.AuthCount = len(m.auths)
+	stats.RuntimeAuthCount = len(m.runtimeAuths)
+	for _, auth := range m.auths {
+		if IsSQLiteAuthStub(auth) {
+			stats.SQLiteStubCount++
+		}
+	}
+	m.mu.RUnlock()
+	m.hydrateMu.Lock()
+	if m.hydrateLRU != nil {
+		stats.HydratedCacheCount = m.hydrateLRU.Len()
+	}
+	stats.HydratedCacheLimit = m.hydrateLimit
+	m.hydrateMu.Unlock()
+	return stats
 }
 
 // SetCooldownStateStore swaps the independent runtime cooldown state store.

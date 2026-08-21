@@ -13,13 +13,15 @@ type AuthFileStatusResponse = { status: string; disabled: boolean };
 type AuthFilePatchPayload = { name: string; disabled?: boolean; [key: string]: unknown };
 type AuthFileCooldownResponse = { status: string; file?: AuthFileEntry };
 type AuthFileEntry = AuthFilesResponse['files'][number];
-type AuthFilesListOptions = {
+export type AuthFilesListOptions = {
   page?: number;
   pageSize?: number;
   provider?: string;
   cooldownOnly?: boolean;
   disabled?: boolean;
   keyword?: string;
+  status?: string;
+  sort?: string;
 };
 export type AuthFileFieldsPatch = {
   prefix?: string;
@@ -258,6 +260,8 @@ const buildAuthFilesListParams = (options: AuthFilesListOptions = {}): Record<st
   if (options.cooldownOnly !== undefined) params.cooldown_only = options.cooldownOnly;
   if (options.disabled !== undefined) params.disabled = options.disabled;
   if (options.keyword) params.keyword = options.keyword;
+  if (options.status) params.status = options.status;
+  if (options.sort) params.sort = options.sort;
   return params;
 };
 
@@ -378,7 +382,7 @@ export const authFilesApi = {
     ),
 
   listAll: async (options?: Omit<AuthFilesListOptions, 'page'>) => {
-    const pageSize = options?.pageSize ?? 2000;
+    const pageSize = options?.pageSize ?? 100;
     let page = 1;
     let merged: AuthFilesResponse = { files: [] };
 

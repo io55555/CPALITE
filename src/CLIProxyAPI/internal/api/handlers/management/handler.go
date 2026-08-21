@@ -41,30 +41,33 @@ const attemptMaxIdleTime = 2 * time.Hour
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
-	cfg                 *config.Config
-	configFilePath      string
-	mu                  sync.Mutex
-	reloadMu            sync.Mutex
-	reloadGeneration    uint64
+	cfg                     *config.Config
+	configFilePath          string
+	mu                      sync.Mutex
+	reloadMu                sync.Mutex
+	reloadGeneration        uint64
 	appliedReloadGeneration uint64
-	attemptsMu          sync.Mutex
-	failedAttempts      map[string]*attemptInfo // keyed by client IP
-	authManager         *coreauth.Manager
-	usageStore          usage.Store
-	openAIKeyState      *openai_compat_state.Service
-	tokenStore          coreauth.Store
-	localPassword       string
-	allowRemoteOverride bool
-	envSecret           string
-	logDir              string
-	postAuthHook        coreauth.PostAuthHook
-	postAuthPersistHook coreauth.PostAuthHook
-	pluginHost         *pluginhost.Host
-	configReloadHook   func(context.Context, *config.Config)
-	pluginStoreRegistryURL string
-	pluginStoreHTTPClient  pluginstore.HTTPDoer
-	pluginReleaseCacheMu   sync.Mutex
-	pluginReleaseCache     map[string]pluginReleaseCacheEntry
+	attemptsMu              sync.Mutex
+	failedAttempts          map[string]*attemptInfo // keyed by client IP
+	authManager             *coreauth.Manager
+	usageStore              usage.Store
+	openAIKeyState          *openai_compat_state.Service
+	tokenStore              coreauth.Store
+	localPassword           string
+	allowRemoteOverride     bool
+	envSecret               string
+	logDir                  string
+	postAuthHook            coreauth.PostAuthHook
+	postAuthPersistHook     coreauth.PostAuthHook
+	pluginHost              *pluginhost.Host
+	configReloadHook        func(context.Context, *config.Config)
+	pluginStoreRegistryURL  string
+	pluginStoreHTTPClient   pluginstore.HTTPDoer
+	pluginReleaseCacheMu    sync.Mutex
+	pluginReleaseCache      map[string]pluginReleaseCacheEntry
+	runtimeMetricsMu        sync.Mutex
+	lastProcCPUSeconds      float64
+	lastProcCPUWall         time.Time
 }
 
 type configReloadSnapshot struct {

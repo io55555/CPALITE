@@ -1151,6 +1151,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/model-prices", s.mgmt.PutUsageModelPrices)
 		mgmt.GET("/usage/statistics", s.mgmt.GetUsageStatistics)
 		mgmt.DELETE("/usage/records", s.mgmt.DeleteUsageRecords)
+		mgmt.GET("/system/runtime", s.mgmt.GetRuntimeMetrics)
 		s.mgmt.RegisterAccountInspectionRoutes(mgmt)
 		mgmt.GET("/packet-capture/state", s.mgmt.GetPacketCaptureState)
 		mgmt.PUT("/packet-capture/state", s.mgmt.PutPacketCaptureState)

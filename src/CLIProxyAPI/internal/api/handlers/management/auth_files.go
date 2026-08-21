@@ -315,6 +315,8 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 		Disabled:     opts.Disabled,
 		Keyword:      opts.Keyword,
 		CooldownOnly: opts.CooldownOnly,
+		Status:       opts.Status,
+		Sort:         opts.Sort,
 	})
 	if err != nil {
 		log.WithError(err).Warn("auth index query failed; falling back to legacy auth list")
@@ -340,9 +342,6 @@ func (h *Handler) listAuthFilesFromIndex(c *gin.Context) bool {
 		files = append(files, authIndexEntryToGinH(indexed))
 	}
 	summary := authIndexSummaryToGinH(result.Summary)
-	if runtimeSummary := h.authRuntimeSummary(opts); runtimeSummary != nil {
-		summary = runtimeSummary
-	}
 	h.respondAuthFileList(c, files, opts, result.Total, true, summary)
 	return true
 }
@@ -620,6 +619,8 @@ type authFileListOptions struct {
 	Disabled     *bool
 	Keyword      string
 	CooldownOnly bool
+	Status       string
+	Sort         string
 }
 
 func (h *Handler) authFileListOptions(c *gin.Context, indexed bool) authFileListOptions {
@@ -651,6 +652,8 @@ func (h *Handler) authFileListOptions(c *gin.Context, indexed bool) authFileList
 		Provider:     strings.ToLower(strings.TrimSpace(c.Query("provider"))),
 		Keyword:      strings.TrimSpace(c.Query("keyword")),
 		CooldownOnly: parseBoolQuery(c.Query("cooldown_only")) || parseBoolQuery(c.Query("cooldownOnly")),
+		Status:       strings.ToLower(strings.TrimSpace(c.Query("status"))),
+		Sort:         strings.ToLower(strings.TrimSpace(c.Query("sort"))),
 	}
 	if rawDisabled := strings.TrimSpace(c.Query("disabled")); rawDisabled != "" {
 		if parsed, err := strconv.ParseBool(rawDisabled); err == nil {
@@ -710,9 +713,40 @@ func filterAuthFileEntries(files []gin.H, opts authFileListOptions) []gin.H {
 		if opts.CooldownOnly && !authFileEntryInCooldown(entry) {
 			continue
 		}
+		switch opts.Status {
+		case "enabled":
+			if authFileEntryBoolValue(entry["disabled"]) {
+				continue
+			}
+		case "enabled_ok":
+			if authFileEntryBoolValue(entry["disabled"]) || authFileEntryInCooldown(entry) || hasAuthFileStatusMessageGinH(entry) {
+				continue
+			}
+		case "disabled":
+			if !authFileEntryBoolValue(entry["disabled"]) {
+				continue
+			}
+		case "problem":
+			if !authFileEntryInCooldown(entry) && !hasAuthFileStatusMessageGinH(entry) {
+				continue
+			}
+		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+func hasAuthFileStatusMessageGinH(entry gin.H) bool {
+	if entry == nil {
+		return false
+	}
+	for _, key := range []string{"status_message", "statusMessage", "last_error"} {
+		if strings.TrimSpace(authFileEntryStringValue(entry[key])) != "" {
+			return true
+		}
+	}
+	status := strings.ToLower(strings.TrimSpace(authFileEntryStringValue(entry["status"])))
+	return status != "" && status != "active"
 }
 
 func paginateAuthFileEntries(files []gin.H, opts authFileListOptions) []gin.H {

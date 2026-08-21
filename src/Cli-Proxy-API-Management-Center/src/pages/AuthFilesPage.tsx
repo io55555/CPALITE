@@ -115,6 +115,19 @@ const authFileProviderMatchesFilter = (provider: string, filter: string): boolea
   );
 };
 
+const getSummaryProviderCounts = (summary: unknown): Record<string, number> => {
+  if (!summary || typeof summary !== 'object') return {};
+  const raw =
+    (summary as { by_provider?: unknown; byProvider?: unknown }).by_provider ??
+    (summary as { byProvider?: unknown }).byProvider;
+  if (!raw || typeof raw !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .map(([key, value]) => [normalizeProviderKey(key), Number(value)])
+      .filter(([key, value]) => key && Number.isFinite(value) && value > 0)
+  );
+};
+
 type AuthFilesPageContentProps = {
   cooldownView?: boolean;
 };
@@ -152,6 +165,9 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
 
   const {
     files,
+    total,
+    summary,
+    serverPage,
     selectedFiles,
     selectionCount,
     loading,
@@ -235,6 +251,19 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   const disabledOnly = statusFilterMode === 'disabled';
   const enabledOnly = statusFilterMode === 'enabled' || statusFilterMode === 'enabled_ok';
   const enabledOkOnly = statusFilterMode === 'enabled_ok';
+  const normalizedSearch = search.trim();
+  const requestOptions = useMemo(
+    () => ({
+      page,
+      pageSize,
+      provider: normalizedFilter === 'all' ? undefined : normalizedFilter,
+      cooldownOnly,
+      keyword: normalizedSearch || undefined,
+      status: statusFilterMode === 'all' ? undefined : statusFilterMode,
+      sort: sortMode === 'default' ? undefined : sortMode,
+    }),
+    [cooldownOnly, normalizedFilter, normalizedSearch, page, pageSize, sortMode, statusFilterMode]
+  );
 
   useInterval(
     () => {
@@ -395,8 +424,8 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   }, []);
 
   const handleHeaderRefresh = useCallback(async () => {
-    await Promise.all([loadFiles(), loadExcluded(), loadModelAlias()]);
-  }, [loadFiles, loadExcluded, loadModelAlias]);
+    await Promise.all([loadFiles(requestOptions), loadExcluded(), loadModelAlias()]);
+  }, [loadFiles, loadExcluded, loadModelAlias, requestOptions]);
 
   const handleClearCooldown = useCallback(
     async (file: AuthFileItem) => {
@@ -421,7 +450,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
           t('auth_files.clear_cooldown_success', { defaultValue: '已清除冷却状态' }),
           'success'
         );
-        await loadFiles();
+        await loadFiles(requestOptions);
       } catch (err) {
         showNotification(
           err instanceof Error && err.message
@@ -437,44 +466,49 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
         });
       }
     },
-    [loadFiles, showNotification, t]
+    [loadFiles, requestOptions, showNotification, t]
   );
 
   useHeaderRefresh(handleHeaderRefresh);
 
   useEffect(() => {
-    if (!isCurrentLayer) return;
-    loadFiles();
+    if (!isCurrentLayer || !uiStateHydrated) return;
+    loadFiles(requestOptions);
     loadExcluded();
     loadModelAlias();
-  }, [isCurrentLayer, loadFiles, loadExcluded, loadModelAlias]);
+  }, [isCurrentLayer, loadFiles, loadExcluded, loadModelAlias, requestOptions, uiStateHydrated]);
 
   useInterval(
     () => {
-      void loadFiles().catch(() => {});
+      void loadFiles(requestOptions).catch(() => {});
     },
-    isCurrentLayer ? 240_000 : null
+    isCurrentLayer && uiStateHydrated ? 240_000 : null
   );
 
   const existingTypes = useMemo(() => {
+    const providerCounts = getSummaryProviderCounts(summary);
     const types = new Set<string>(['all']);
+    Object.keys(providerCounts).forEach((type) => {
+      if (type) types.add(type);
+    });
     files.forEach((file) => {
       const type = normalizeProviderKey(String(file.type ?? file.provider ?? ''));
       if (type) types.add(type);
     });
     return Array.from(types);
-  }, [files]);
+  }, [files, summary]);
 
   const filesMatchingStatusFilters = useMemo(
     () =>
       files.filter((file) => {
         if (enabledOnly && file.disabled === true) return false;
         if (disabledOnly && file.disabled !== true) return false;
-        if (problemOnly && !hasAuthFileStatusMessage(file)) return false;
-        if (enabledOkOnly && (file.disabled === true || hasAuthFileStatusMessage(file))) return false;
+        const cooldownUntilMs = getAuthFileCooldownUntilMs(file);
+        const isCooling = cooldownUntilMs !== null && cooldownUntilMs > nowMs;
+        if (problemOnly && !isCooling && !hasAuthFileStatusMessage(file)) return false;
+        if (enabledOkOnly && (file.disabled === true || isCooling || hasAuthFileStatusMessage(file))) return false;
         if (cooldownOnly) {
-          const untilMs = getAuthFileCooldownUntilMs(file);
-          if (untilMs === null || untilMs <= nowMs) return false;
+          if (!isCooling) return false;
         }
         return true;
       }),
@@ -526,16 +560,17 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   );
 
   const typeCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: filesMatchingStatusFilters.length };
-    filesMatchingStatusFilters.forEach((file) => {
-      const type = normalizeProviderKey(String(file.type ?? file.provider ?? ''));
-      if (!type) return;
-      counts[type] = (counts[type] || 0) + 1;
-    });
+    const providerCounts = getSummaryProviderCounts(summary);
+    const counts: Record<string, number> = {
+      ...providerCounts,
+      all:
+        typeof summary?.total === 'number' && Number.isFinite(summary.total)
+          ? summary.total
+          : filesMatchingStatusFilters.length,
+    };
     return counts;
-  }, [filesMatchingStatusFilters]);
+  }, [filesMatchingStatusFilters.length, summary]);
 
-  const normalizedSearch = search.trim();
   const wildcardSearch = useMemo(() => buildWildcardSearch(normalizedSearch), [normalizedSearch]);
 
   const filtered = useMemo(() => {
@@ -578,10 +613,15 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
     return copy;
   }, [filtered, sortMode]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const start = (currentPage - 1) * pageSize;
-  const pageItems = useMemo(() => sorted.slice(start, start + pageSize), [pageSize, sorted, start]);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(serverPage || page, totalPages);
+  const pageItems = sorted;
+
+  useEffect(() => {
+    if (!loading && page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [loading, page, totalPages]);
 
   const handleRefreshVisibleQuotas = useCallback(async () => {
     await refreshVisibleQuotas(pageItems, showNotification, t);
@@ -772,7 +812,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
   const titleNode = (
     <div className={styles.titleWrapper}>
       <span>{t('auth_files.title_section')}</span>
-      {files.length > 0 && <span className={styles.countBadge}>{files.length}</span>}
+      {total > 0 && <span className={styles.countBadge}>{total}</span>}
     </div>
   );
 
@@ -1003,7 +1043,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
               </div>
             )}
 
-            {!loading && sorted.length > pageSize && (
+            {!loading && total > pageSize && (
               <div className={styles.pagination}>
                 <Button
                   variant="secondary"
@@ -1025,7 +1065,7 @@ function AuthFilesPageContent({ cooldownView = false }: AuthFilesPageContentProp
                   {t('auth_files.pagination_info', {
                     current: currentPage,
                     total: totalPages,
-                    count: sorted.length,
+                    count: total,
                   })}
                 </div>
                 <Button
