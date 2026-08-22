@@ -443,6 +443,10 @@ func (s *Service) registerResolvedModelsForAuth(a *coreauth.Auth, providerKey st
 		GlobalModelRegistry().UnregisterClient(a.ID)
 		return
 	}
+	if providerKey == "xai" {
+		GlobalModelRegistry().RegisterClientShared(a.ID, providerKey, normalizedModels)
+		return
+	}
 	GlobalModelRegistry().RegisterClient(a.ID, providerKey, normalizedModels)
 }
 

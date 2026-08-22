@@ -626,13 +626,17 @@ func buildScheduledAuthMeta(auth *Auth) *scheduledAuthMeta {
 	if auth.Attributes != nil {
 		virtualParent = strings.TrimSpace(auth.Attributes["gemini_virtual_parent"])
 	}
+	var supportedModelSet map[string]struct{}
+	if !IsSQLiteAuthStub(auth) {
+		supportedModelSet = supportedModelSetForAuth(auth.ID)
+	}
 	return &scheduledAuthMeta{
 		auth:              auth,
 		providerKey:       providerKey,
 		priority:          authPriority(auth),
 		virtualParent:     virtualParent,
 		websocketEnabled:  authWebsocketsEnabled(auth),
-		supportedModelSet: supportedModelSetForAuth(auth.ID),
+		supportedModelSet: supportedModelSet,
 	}
 }
 

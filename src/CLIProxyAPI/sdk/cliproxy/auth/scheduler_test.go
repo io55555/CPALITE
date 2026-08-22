@@ -77,6 +77,31 @@ func registerSchedulerModels(t *testing.T, provider string, model string, authID
 	})
 }
 
+func TestBuildScheduledAuthMetaSkipsSQLiteStubModelSnapshot(t *testing.T) {
+	const authID = "sqlite-stub-scheduler-model-snapshot"
+	registry.GetGlobalRegistry().RegisterClient(authID, "xai", []*registry.ModelInfo{{ID: "grok-4"}})
+	t.Cleanup(func() {
+		registry.GetGlobalRegistry().UnregisterClient(authID)
+	})
+
+	meta := buildScheduledAuthMeta(&Auth{
+		ID:       authID,
+		Provider: "xai",
+		Attributes: map[string]string{
+			AttributeSQLiteStub: "true",
+		},
+	})
+	if meta == nil {
+		t.Fatal("expected scheduler metadata")
+	}
+	if meta.supportedModelSet != nil {
+		t.Fatalf("expected sqlite stub to skip model snapshot, got %v", meta.supportedModelSet)
+	}
+	if !meta.supportsModel("grok-4") {
+		t.Fatal("expected sqlite stub to remain model-compatible")
+	}
+}
+
 func TestSchedulerPick_RoundRobinHighestPriority(t *testing.T) {
 	t.Parallel()
 

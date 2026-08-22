@@ -56,6 +56,71 @@ func TestGetModelsForClientReturnsClones(t *testing.T) {
 	}
 }
 
+func TestRegisterClientSharedDeduplicatesClientModelCatalog(t *testing.T) {
+	r := newTestModelRegistry()
+	models := []*ModelInfo{
+		{ID: "grok-4", DisplayName: "Grok 4", Type: "xai"},
+		{ID: "grok-4-fast", DisplayName: "Grok 4 Fast", Type: "xai"},
+	}
+
+	const clients = 20000
+	for i := 0; i < clients; i++ {
+		r.RegisterClientShared("xai-client-"+stringID(i), "xai", models)
+	}
+
+	if got := len(r.clientModels); got != 0 {
+		t.Fatalf("expected no per-client model slices for shared clients, got %d", got)
+	}
+	if got := len(r.clientModelInfos); got != 0 {
+		t.Fatalf("expected no per-client model info maps for shared clients, got %d", got)
+	}
+	if got := len(r.clientModelProfiles); got != clients {
+		t.Fatalf("expected one lightweight profile reference per client, got %d", got)
+	}
+	if got := len(r.modelProfiles); got != 1 {
+		t.Fatalf("expected one shared model profile, got %d", got)
+	}
+	if count := r.GetModelCount("grok-4"); count != clients {
+		t.Fatalf("expected model count %d, got %d", clients, count)
+	}
+	if !r.ClientSupportsModel("xai-client-19999", "grok-4-fast") {
+		t.Fatal("expected shared-profile client to support grok-4-fast")
+	}
+	gotModels := r.GetModelsForClient("xai-client-19999")
+	if len(gotModels) != 2 || gotModels[0] == nil || gotModels[0].ID != "grok-4" {
+		t.Fatalf("unexpected shared client models: %+v", gotModels)
+	}
+}
+
+func TestRegisterClientSharedUnregisterAndNormalReregister(t *testing.T) {
+	r := newTestModelRegistry()
+	r.RegisterClientShared("client-1", "xai", []*ModelInfo{{ID: "grok-4"}, {ID: "grok-4-fast"}})
+	r.UnregisterClient("client-1")
+
+	if got := len(r.clientModelProfiles); got != 0 {
+		t.Fatalf("expected shared profile reference removed, got %d", got)
+	}
+	if got := len(r.modelProfiles); got != 0 {
+		t.Fatalf("expected unused shared profile removed, got %d", got)
+	}
+	if count := r.GetModelCount("grok-4"); count != 0 {
+		t.Fatalf("expected grok-4 count 0 after unregister, got %d", count)
+	}
+
+	r.RegisterClientShared("client-1", "xai", []*ModelInfo{{ID: "grok-4"}})
+	r.RegisterClient("client-1", "xai", []*ModelInfo{{ID: "grok-4-fast"}})
+
+	if got := len(r.clientModelProfiles); got != 0 {
+		t.Fatalf("expected normal reregister to release shared profile, got %d", got)
+	}
+	if count := r.GetModelCount("grok-4"); count != 0 {
+		t.Fatalf("expected old shared model count 0 after normal reregister, got %d", count)
+	}
+	if count := r.GetModelCount("grok-4-fast"); count != 1 {
+		t.Fatalf("expected new normal model count 1, got %d", count)
+	}
+}
+
 func TestGetAvailableModelsByProviderReturnsClones(t *testing.T) {
 	r := newTestModelRegistry()
 	r.RegisterClient("client-1", "gemini", []*ModelInfo{{
@@ -81,6 +146,20 @@ func TestGetAvailableModelsByProviderReturnsClones(t *testing.T) {
 	if second[0].Thinking == nil || len(second[0].Thinking.Levels) == 0 || second[0].Thinking.Levels[0] != "low" {
 		t.Fatalf("expected cloned thinking levels, got %+v", second[0].Thinking)
 	}
+}
+
+func stringID(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }
 
 func TestCleanupExpiredQuotasInvalidatesAvailableModelsCache(t *testing.T) {

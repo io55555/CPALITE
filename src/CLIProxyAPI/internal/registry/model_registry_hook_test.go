@@ -9,11 +9,13 @@ import (
 
 func newTestModelRegistry() *ModelRegistry {
 	return &ModelRegistry{
-		models:           make(map[string]*ModelRegistration),
-		clientModels:     make(map[string][]string),
-		clientModelInfos: make(map[string]map[string]*ModelInfo),
-		clientProviders:  make(map[string]string),
-		mutex:            &sync.RWMutex{},
+		models:              make(map[string]*ModelRegistration),
+		clientModels:        make(map[string][]string),
+		clientModelInfos:    make(map[string]map[string]*ModelInfo),
+		clientModelProfiles: make(map[string]string),
+		modelProfiles:       make(map[string]*sharedModelProfile),
+		clientProviders:     make(map[string]string),
+		mutex:               &sync.RWMutex{},
 	}
 }
 

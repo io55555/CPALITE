@@ -5,6 +5,8 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -129,6 +131,13 @@ type ModelRegistration struct {
 	SuspendedClients map[string]string
 }
 
+type sharedModelProfile struct {
+	provider   string
+	modelIDs   []string
+	modelInfos map[string]*ModelInfo
+	refs       int
+}
+
 // ModelRegistryHook provides optional callbacks for external integrations to track model list changes.
 // Hook implementations must be non-blocking and resilient; calls are executed asynchronously and panics are recovered.
 type ModelRegistryHook interface {
@@ -145,6 +154,10 @@ type ModelRegistry struct {
 	// clientModelInfos maps client ID to a map of model ID -> ModelInfo
 	// This preserves the original model info provided by each client
 	clientModelInfos map[string]map[string]*ModelInfo
+	// clientModelProfiles 将高规模客户端映射到共享不可变模型画像。
+	clientModelProfiles map[string]string
+	// modelProfiles 保存可被等价客户端复用的去重模型列表。
+	modelProfiles map[string]*sharedModelProfile
 	// clientProviders maps client ID to its provider identifier
 	clientProviders map[string]string
 	// mutex ensures thread-safe access to the registry
@@ -168,6 +181,8 @@ func GetGlobalRegistry() *ModelRegistry {
 			models:               make(map[string]*ModelRegistration),
 			clientModels:         make(map[string][]string),
 			clientModelInfos:     make(map[string]map[string]*ModelInfo),
+			clientModelProfiles:  make(map[string]string),
+			modelProfiles:        make(map[string]*sharedModelProfile),
 			clientProviders:      make(map[string]string),
 			availableModelsCache: make(map[string]availableModelsCacheEntry),
 			mutex:                &sync.RWMutex{},
@@ -324,6 +339,9 @@ func (r *ModelRegistry) RegisterClient(clientID, clientProvider string, models [
 
 	now := time.Now()
 
+	if _, hadSharedProfile := r.clientModelProfiles[clientID]; hadSharedProfile {
+		r.unregisterClientInternal(clientID)
+	}
 	oldModels, hadExisting := r.clientModels[clientID]
 	oldProvider := r.clientProviders[clientID]
 	providerChanged := oldProvider != provider
@@ -503,6 +521,84 @@ func (r *ModelRegistry) RegisterClient(clientID, clientProvider string, models [
 	misc.LogCredentialSeparator()
 }
 
+// RegisterClientShared 通过去重的不可变模型画像注册客户端。
+// 适用于大量账号暴露相同模型目录的池化场景。
+func (r *ModelRegistry) RegisterClientShared(clientID, clientProvider string, models []*ModelInfo) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	r.ensureAvailableModelsCacheLocked()
+
+	provider := strings.ToLower(strings.TrimSpace(clientProvider))
+	uniqueModelIDs := make([]string, 0, len(models))
+	rawModelIDs := make([]string, 0, len(models))
+	newModels := make(map[string]*ModelInfo, len(models))
+	for _, model := range models {
+		if model == nil {
+			continue
+		}
+		modelID := strings.TrimSpace(model.ID)
+		if modelID == "" {
+			continue
+		}
+		rawModelIDs = append(rawModelIDs, modelID)
+		if _, exists := newModels[modelID]; exists {
+			continue
+		}
+		clone := *model
+		clone.ID = modelID
+		newModels[modelID] = &clone
+		uniqueModelIDs = append(uniqueModelIDs, modelID)
+	}
+
+	if len(uniqueModelIDs) == 0 {
+		r.unregisterClientInternal(clientID)
+		r.invalidateAvailableModelsCacheLocked()
+		misc.LogCredentialSeparator()
+		return
+	}
+
+	r.unregisterClientInternal(clientID)
+	now := time.Now()
+	for _, modelID := range rawModelIDs {
+		r.addModelRegistration(modelID, provider, newModels[modelID], now)
+	}
+
+	profileKey := sharedModelProfileKey(provider, rawModelIDs, newModels)
+	if r.modelProfiles == nil {
+		r.modelProfiles = make(map[string]*sharedModelProfile)
+	}
+	profile := r.modelProfiles[profileKey]
+	if profile == nil {
+		infos := make(map[string]*ModelInfo, len(newModels))
+		for id, model := range newModels {
+			infos[id] = cloneModelInfo(model)
+		}
+		profile = &sharedModelProfile{
+			provider:   provider,
+			modelIDs:   append([]string(nil), rawModelIDs...),
+			modelInfos: infos,
+		}
+		r.modelProfiles[profileKey] = profile
+	}
+	profile.refs++
+	if r.clientModelProfiles == nil {
+		r.clientModelProfiles = make(map[string]string)
+	}
+	r.clientModelProfiles[clientID] = profileKey
+	delete(r.clientModels, clientID)
+	delete(r.clientModelInfos, clientID)
+	if provider != "" {
+		r.clientProviders[clientID] = provider
+	} else {
+		delete(r.clientProviders, clientID)
+	}
+
+	r.invalidateAvailableModelsCacheLocked()
+	r.triggerModelsRegistered(provider, clientID, models)
+	log.Debugf("Registered shared-profile client %s from provider %s with %d models", clientID, clientProvider, len(rawModelIDs))
+	misc.LogCredentialSeparator()
+}
+
 func (r *ModelRegistry) addModelRegistration(modelID, provider string, model *ModelInfo, now time.Time) {
 	if model == nil || modelID == "" {
 		return
@@ -616,6 +712,108 @@ func cloneModelInfo(model *ModelInfo) *ModelInfo {
 	return &copyModel
 }
 
+func sharedModelProfileKey(provider string, modelIDs []string, models map[string]*ModelInfo) string {
+	hash := sha256.New()
+	hash.Write([]byte(strings.ToLower(strings.TrimSpace(provider))))
+	hash.Write([]byte{0})
+	for _, id := range modelIDs {
+		modelID := strings.TrimSpace(id)
+		if modelID == "" {
+			continue
+		}
+		model := models[modelID]
+		writeModelProfilePart(hash, modelID)
+		if model == nil {
+			continue
+		}
+		writeModelProfilePart(hash, model.Object)
+		writeModelProfilePart(hash, model.OwnedBy)
+		writeModelProfilePart(hash, model.Type)
+		writeModelProfilePart(hash, model.DisplayName)
+		writeModelProfilePart(hash, model.Name)
+		writeModelProfilePart(hash, model.Version)
+		writeModelProfilePart(hash, model.Description)
+		writeModelProfilePart(hash, fmt.Sprint(model.Created))
+		writeModelProfilePart(hash, fmt.Sprint(model.InputTokenLimit))
+		writeModelProfilePart(hash, fmt.Sprint(model.OutputTokenLimit))
+		writeModelProfilePart(hash, fmt.Sprint(model.ContextLength))
+		writeModelProfilePart(hash, fmt.Sprint(model.MaxContextLength))
+		writeModelProfilePart(hash, fmt.Sprint(model.MaxCompletionTokens))
+		writeModelProfilePart(hash, fmt.Sprint(model.SupportsWebSearch))
+		writeModelProfilePart(hash, fmt.Sprint(model.UserDefined))
+		writeModelProfilePart(hash, fmt.Sprint(model.IsCompat))
+		writeModelProfilePart(hash, strings.Join(model.SupportedGenerationMethods, "\x1f"))
+		writeModelProfilePart(hash, strings.Join(model.SupportedParameters, "\x1f"))
+		writeModelProfilePart(hash, strings.Join(model.SupportedInputModalities, "\x1f"))
+		writeModelProfilePart(hash, strings.Join(model.SupportedOutputModalities, "\x1f"))
+		if model.Thinking != nil {
+			writeModelProfilePart(hash, fmt.Sprint(model.Thinking.Min))
+			writeModelProfilePart(hash, fmt.Sprint(model.Thinking.Max))
+			writeModelProfilePart(hash, fmt.Sprint(model.Thinking.ZeroAllowed))
+			writeModelProfilePart(hash, fmt.Sprint(model.Thinking.DynamicAllowed))
+			writeModelProfilePart(hash, strings.Join(model.Thinking.Levels, "\x1f"))
+		}
+		if model.Config != nil && len(model.Config.OverrideHeader) > 0 {
+			keys := make([]string, 0, len(model.Config.OverrideHeader))
+			for key := range model.Config.OverrideHeader {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				writeModelProfilePart(hash, key)
+				writeModelProfilePart(hash, model.Config.OverrideHeader[key])
+			}
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func writeModelProfilePart(hash interface{ Write([]byte) (int, error) }, value string) {
+	hash.Write([]byte(value))
+	hash.Write([]byte{0})
+}
+
+func (r *ModelRegistry) modelIDsForClientLocked(clientID string) ([]string, bool) {
+	if models, exists := r.clientModels[clientID]; exists {
+		return models, len(models) > 0
+	}
+	if profileKey := r.clientModelProfiles[clientID]; profileKey != "" {
+		if profile := r.modelProfiles[profileKey]; profile != nil && len(profile.modelIDs) > 0 {
+			return profile.modelIDs, true
+		}
+	}
+	return nil, false
+}
+
+func (r *ModelRegistry) modelInfosForClientLocked(clientID string) map[string]*ModelInfo {
+	if infos := r.clientModelInfos[clientID]; len(infos) > 0 {
+		return infos
+	}
+	if profileKey := r.clientModelProfiles[clientID]; profileKey != "" {
+		if profile := r.modelProfiles[profileKey]; profile != nil {
+			return profile.modelInfos
+		}
+	}
+	return nil
+}
+
+func (r *ModelRegistry) releaseClientProfileLocked(clientID string) {
+	if r.clientModelProfiles == nil {
+		return
+	}
+	profileKey := r.clientModelProfiles[clientID]
+	if profileKey == "" {
+		return
+	}
+	delete(r.clientModelProfiles, clientID)
+	if profile := r.modelProfiles[profileKey]; profile != nil {
+		profile.refs--
+		if profile.refs <= 0 {
+			delete(r.modelProfiles, profileKey)
+		}
+	}
+}
+
 func cloneModelInfosUnique(models []*ModelInfo) []*ModelInfo {
 	if len(models) == 0 {
 		return nil
@@ -647,9 +845,10 @@ func (r *ModelRegistry) UnregisterClient(clientID string) {
 
 // unregisterClientInternal performs the actual client unregistration (internal, no locking)
 func (r *ModelRegistry) unregisterClientInternal(clientID string) {
-	models, exists := r.clientModels[clientID]
+	models, exists := r.modelIDsForClientLocked(clientID)
 	provider, hasProvider := r.clientProviders[clientID]
 	if !exists {
+		r.releaseClientProfileLocked(clientID)
 		if hasProvider {
 			delete(r.clientProviders, clientID)
 		}
@@ -693,6 +892,7 @@ func (r *ModelRegistry) unregisterClientInternal(clientID string) {
 
 	delete(r.clientModels, clientID)
 	delete(r.clientModelInfos, clientID)
+	r.releaseClientProfileLocked(clientID)
 	if hasProvider {
 		delete(r.clientProviders, clientID)
 	}
@@ -804,7 +1004,7 @@ func (r *ModelRegistry) ClientSupportsModel(clientID, modelID string) bool {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	models, exists := r.clientModels[clientID]
+	models, exists := r.modelIDsForClientLocked(clientID)
 	if !exists || len(models) == 0 {
 		return false
 	}
@@ -999,11 +1199,11 @@ func (r *ModelRegistry) GetAvailableModelsByProvider(provider string) []*ModelIn
 		if clientProvider != provider {
 			continue
 		}
-		modelIDs := r.clientModels[clientID]
-		if len(modelIDs) == 0 {
+		modelIDs, hasModels := r.modelIDsForClientLocked(clientID)
+		if !hasModels || len(modelIDs) == 0 {
 			continue
 		}
-		clientInfos := r.clientModelInfos[clientID]
+		clientInfos := r.modelInfosForClientLocked(clientID)
 		for _, modelID := range modelIDs {
 			modelID = strings.TrimSpace(modelID)
 			if modelID == "" {
@@ -1402,13 +1602,13 @@ func (r *ModelRegistry) GetModelsForClient(clientID string) []*ModelInfo {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	modelIDs, exists := r.clientModels[clientID]
+	modelIDs, exists := r.modelIDsForClientLocked(clientID)
 	if !exists || len(modelIDs) == 0 {
 		return nil
 	}
 
 	// Try to use client-specific model infos first
-	clientInfos := r.clientModelInfos[clientID]
+	clientInfos := r.modelInfosForClientLocked(clientID)
 
 	seen := make(map[string]struct{})
 	result := make([]*ModelInfo, 0, len(modelIDs))
