@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -819,6 +820,9 @@ func (s *Store) HydrateAuth(ctx context.Context, id string) (*coreauth.Auth, err
 		}
 		payload = string(data)
 	}
+	if auth, ok := s.fastHydrateXAIAuth(id, filePath, []byte(payload)); ok {
+		return auth, nil
+	}
 	sctx := &synthesizer.SynthesisContext{
 		Config:           s.cfg,
 		AuthDir:          s.authDir,
@@ -839,6 +843,164 @@ func (s *Store) HydrateAuth(ctx context.Context, id string) (*coreauth.Auth, err
 		return auths[0], nil
 	}
 	return nil, fmt.Errorf("auth index: hydrate %s produced no auth", id)
+}
+
+func (s *Store) fastHydrateXAIAuth(id, filePath string, payload []byte) (*coreauth.Auth, bool) {
+	if strings.TrimSpace(id) == "" || len(payload) == 0 {
+		return nil, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(gjson.GetBytes(payload, "type").String()), "xai") {
+		return nil, false
+	}
+	if gjson.GetBytes(payload, "auths").Exists() || gjson.GetBytes(payload, "accounts").Exists() {
+		return nil, false
+	}
+	expectedID := authIDForPath(filePath, s.authDir)
+	if expectedID != "" && !strings.EqualFold(id, expectedID) && !strings.EqualFold(id, filepath.Base(filePath)) {
+		return nil, false
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(payload, &metadata); err != nil || len(metadata) == 0 {
+		return nil, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(metadata["type"])), "xai") {
+		return nil, false
+	}
+	status := coreauth.Status(strings.TrimSpace(gjson.GetBytes(payload, "status").String()))
+	disabled := gjson.GetBytes(payload, "disabled").Bool()
+	if status == "" {
+		if disabled {
+			status = coreauth.StatusDisabled
+		} else {
+			status = coreauth.StatusActive
+		}
+	}
+	fileName := filepath.Base(filePath)
+	if fileName == "." || fileName == string(filepath.Separator) {
+		fileName = id
+	}
+	attrs := map[string]string{
+		coreauth.AttributePath:          filePath,
+		coreauth.AttributeSource:        filePath,
+		coreauth.AttributeSourceBackend: coreauth.AuthSourceFile,
+		coreauth.AttributeAuthKind:      firstNonEmpty(stringValue(metadata["auth_kind"]), coreauth.AuthKindOAuth),
+	}
+	copyXAIStringAttr(attrs, metadata, "base_url")
+	copyXAIStringAttr(attrs, metadata, "using_api")
+	copyXAIStringAttr(attrs, metadata, "api_key")
+	copyXAIStringAttr(attrs, metadata, "email")
+	copyXAIStringAttr(attrs, metadata, "sub")
+	copyXAIStringAttr(attrs, metadata, "subject")
+	copyXAIStringAttr(attrs, metadata, "user_id")
+	copyXAIStringAttr(attrs, metadata, "userId")
+	copyXAIStringAttr(attrs, metadata, "account")
+	copyXAIStringAttr(attrs, metadata, "account_type")
+	copyXAIStringAttr(attrs, metadata, "priority")
+	copyXAIAttributeObject(attrs, metadata)
+	copyXAIHeaderAttrs(attrs, metadata)
+	auth := &coreauth.Auth{
+		ID:          id,
+		Provider:    "xai",
+		FileName:    fileName,
+		Label:       firstNonEmpty(stringValue(metadata["email"]), stringValue(metadata["account"]), fileName),
+		Status:      status,
+		Disabled:    disabled || status == coreauth.StatusDisabled,
+		Unavailable: gjson.GetBytes(payload, "unavailable").Bool(),
+		ProxyURL:    firstNonEmpty(stringValue(metadata["proxy_url"]), stringValue(metadata["proxyURL"]), stringValue(metadata["proxy"])),
+		Attributes:  attrs,
+		Metadata:    metadata,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if cooldownUnix := parseHydrateCooldownUnix(payload); cooldownUnix > 0 {
+		auth.NextRetryAfter = time.Unix(cooldownUnix, 0).UTC()
+		if auth.NextRetryAfter.After(time.Now()) {
+			auth.Unavailable = true
+		}
+	}
+	auth.EnsureIndex()
+	return auth, true
+}
+
+func copyXAIStringAttr(attrs map[string]string, metadata map[string]any, key string) {
+	if attrs == nil || metadata == nil || key == "" {
+		return
+	}
+	if value := stringValue(metadata[key]); value != "" {
+		attrs[key] = value
+	}
+}
+
+func copyXAIAttributeObject(attrs map[string]string, metadata map[string]any) {
+	raw, ok := metadata["attributes"]
+	if !ok || attrs == nil {
+		return
+	}
+	values, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if text := stringValue(value); text != "" {
+			attrs[key] = text
+		}
+	}
+}
+
+func copyXAIHeaderAttrs(attrs map[string]string, metadata map[string]any) {
+	raw, ok := metadata["headers"]
+	if !ok || attrs == nil {
+		return
+	}
+	values, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if text := stringValue(value); text != "" {
+			attrs["header:"+key] = text
+		}
+	}
+}
+
+func stringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	case bool:
+		return strconv.FormatBool(typed)
+	case float64:
+		if typed == float64(int64(typed)) {
+			return strconv.FormatInt(int64(typed), 10)
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func parseHydrateCooldownUnix(payload []byte) int64 {
+	var cooldown int64
+	for _, key := range []string{"cooldown_until", "next_retry_after", "next_retry_unix"} {
+		if unix := parseTimeishUnix(gjson.GetBytes(payload, key)); unix > cooldown {
+			cooldown = unix
+		}
+	}
+	return cooldown
 }
 
 func buildWhere(opts QueryOptions) (string, []any) {

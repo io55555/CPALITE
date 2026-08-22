@@ -111,7 +111,7 @@ func TestStoreListLightweightReturnsSQLiteStubsWithoutPayload(t *testing.T) {
 func TestStoreHydrateAuthRestoresFullPayload(t *testing.T) {
 	authDir := t.TempDir()
 	path := filepath.Join(authDir, "xai-user.json")
-	if err := os.WriteFile(path, []byte(`{"type":"xai","email":"xai@example.com","access_token":"secret-token"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"type":"xai","email":"xai@example.com","sub":"user-1","access_token":"secret-token","refresh_token":"refresh-token","token_endpoint":"https://auth.x.ai/token","base_url":"https://api.x.ai/v1","using_api":true,"proxy_url":"http://127.0.0.1:8080","headers":{"X-Test":"ok"},"attributes":{"priority":"9"}}`), 0o600); err != nil {
 		t.Fatalf("write auth file: %v", err)
 	}
 
@@ -133,6 +133,24 @@ func TestStoreHydrateAuthRestoresFullPayload(t *testing.T) {
 	}
 	if auth.Provider != "xai" || auth.FileName != "xai-user.json" {
 		t.Fatalf("unexpected hydrated auth: %#v", auth)
+	}
+	if got := auth.ProxyURL; got != "http://127.0.0.1:8080" {
+		t.Fatalf("proxy url = %q", got)
+	}
+	if got := auth.Attributes["base_url"]; got != "https://api.x.ai/v1" {
+		t.Fatalf("base_url attr = %q", got)
+	}
+	if got := auth.Attributes["using_api"]; got != "true" {
+		t.Fatalf("using_api attr = %q", got)
+	}
+	if got := auth.Attributes["sub"]; got != "user-1" {
+		t.Fatalf("sub attr = %q", got)
+	}
+	if got := auth.Attributes["header:X-Test"]; got != "ok" {
+		t.Fatalf("custom header attr = %q", got)
+	}
+	if got := auth.Attributes["priority"]; got != "9" {
+		t.Fatalf("priority attr = %q", got)
 	}
 }
 
